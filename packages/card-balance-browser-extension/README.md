@@ -30,7 +30,7 @@ Mapping lives in `src/index.js`. To add a domain: add a `host_permissions` entry
 
 ## Backend
 
-The overlay fetches `http://127.0.0.1:5000/mars-universe-bank/extension/LedgerDataApi/get_balance?account=<key>` — served by [`ledger-data-api`](../ledger-data-api/) running inside Fava (`just fava`). The `127.0.0.1:5000/*` host permission is required for the cross-origin fetch.
+The overlay fetches `http://127.0.0.1:5000/<FAVA_LEDGER_SLUG>/extension/LedgerDataApi/get_balance?account=<key>` — served by [`ledger-data-api`](../ledger-data-api/) running inside Fava (`just fava`). The slug is set in `src/balanceDialog.js` (default `acme-demo`); change it to match your journal's `option "title"`. The `127.0.0.1:5000/*` host permission is required for the cross-origin fetch.
 
 ## Extractors
 

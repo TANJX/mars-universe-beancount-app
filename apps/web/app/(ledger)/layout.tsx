@@ -1,3 +1,4 @@
+import { DemoWelcome } from "@/components/layout/demo-welcome"
 import { LedgerShell } from "@/components/layout/ledger-shell"
 import { ShortcutsDialog } from "@/components/layout/shortcuts-dialog"
 import { UIStateProvider } from "@/components/layout/ui-state"
@@ -17,6 +18,7 @@ export default function LedgerLayout({
     <UIStateProvider>
       <ShortcutsDialog>
         <LedgerShell>{children}</LedgerShell>
+        <DemoWelcome />
       </ShortcutsDialog>
     </UIStateProvider>
   )

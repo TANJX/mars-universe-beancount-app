@@ -1,0 +1,116 @@
+"use client"
+
+import * as React from "react"
+
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { logoDevUrl } from "@/lib/merchants/logodev"
+
+const STORAGE_KEY = "demo-welcome-dismissed-v1"
+
+const REPOS = [
+  {
+    label: "App code",
+    sublabel: "TANJX/mars-universe-beancount-app",
+    href: "https://github.com/TANJX/mars-universe-beancount-app",
+  },
+  {
+    label: "Demo ledger",
+    sublabel: "TANJX/mars-universe-beancount-demo",
+    href: "https://github.com/TANJX/mars-universe-beancount-demo",
+  },
+]
+
+// 20px logo (size=20 → 40px @2x), matches the size-5 box.
+const GH_LOGO = logoDevUrl("github.com", 20)
+
+function isDemo(): boolean {
+  const v = process.env.NEXT_PUBLIC_DEMO_MODE
+  return !!v && v !== "0" && v.toLowerCase() !== "false"
+}
+
+export function DemoWelcome() {
+  const [open, setOpen] = React.useState(false)
+
+  React.useEffect(() => {
+    if (!isDemo()) return
+    try {
+      if (window.localStorage.getItem(STORAGE_KEY)) return
+    } catch {
+      // localStorage blocked (private mode, etc.) — fall through and show.
+    }
+    setOpen(true)
+  }, [])
+
+  function dismiss() {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, "1")
+    } catch {
+      // ignore — non-fatal
+    }
+    setOpen(false)
+  }
+
+  if (!isDemo()) return null
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => (o ? setOpen(true) : dismiss())}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Welcome to the demo</DialogTitle>
+          <DialogDescription>
+            A public sandbox of a personal-finance dashboard built on{" "}
+            <a
+              href="https://beancount.github.io"
+              target="_blank"
+              rel="noreferrer"
+              className="underline underline-offset-2 hover:text-foreground"
+            >
+              Beancount
+            </a>
+            . All numbers, accounts, and merchants are synthetic — generated to
+            exercise the UI. Source code and the demo ledger are public.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-2">
+          {REPOS.map((r) => (
+            <a
+              key={r.href}
+              href={r.href}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-3 rounded-lg border bg-card px-3 py-2 transition-colors hover:bg-accent"
+            >
+              {GH_LOGO ? (
+                <img
+                  src={GH_LOGO}
+                  alt=""
+                  width={20}
+                  height={20}
+                  className="size-5 shrink-0 rounded"
+                />
+              ) : (
+                <span className="size-5 shrink-0 rounded bg-muted" />
+              )}
+              <div className="flex min-w-0 flex-col">
+                <span className="text-sm font-medium">{r.label}</span>
+                <span className="truncate font-mono text-xs text-muted-foreground">
+                  {r.sublabel}
+                </span>
+              </div>
+            </a>
+          ))}
+        </div>
+        <div className="flex justify-end">
+          <Button onClick={dismiss}>Got it</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}

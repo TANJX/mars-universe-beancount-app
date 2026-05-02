@@ -7,8 +7,8 @@ import { extractRobinhood } from './extractors/robinhood.js';
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
 // Fava slugifies the journal title for the URL prefix. Change to match your
-// own journal's title if forking. Default matches the personal ledger.
-const FAVA_LEDGER_SLUG = 'mars-universe-bank';
+// own journal's title if forking. Default matches the public demo ledger.
+const FAVA_LEDGER_SLUG = 'acme-demo';
 
 export function createBalanceDialog(account) {
   const dialog = document.createElement('div');

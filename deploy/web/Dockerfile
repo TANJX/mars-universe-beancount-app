@@ -19,8 +19,16 @@ COPY apps/web ./apps/web
 # to bake in correctly.
 ARG FAVA_INTERNAL_URL=http://fava:5000
 ARG FAVA_LEDGER_SLUG=ledger
+# Truthy ("1"/"true") shows the welcome dialog. Inlined into the client
+# bundle by Next.js because of the NEXT_PUBLIC_ prefix.
+ARG NEXT_PUBLIC_DEMO_MODE=
+# logo.dev publishable key (`pk_…`). Without it, merchant + repo-link logos
+# render as letter / placeholder marks. Inlined into the client bundle.
+ARG NEXT_PUBLIC_LOGO_DEV_TOKEN=
 ENV FAVA_INTERNAL_URL=${FAVA_INTERNAL_URL}
 ENV FAVA_LEDGER_SLUG=${FAVA_LEDGER_SLUG}
+ENV NEXT_PUBLIC_DEMO_MODE=${NEXT_PUBLIC_DEMO_MODE}
+ENV NEXT_PUBLIC_LOGO_DEV_TOKEN=${NEXT_PUBLIC_LOGO_DEV_TOKEN}
 RUN pnpm --filter web build
 
 FROM node:22-alpine AS runner

@@ -33,7 +33,7 @@ Once `gitsync` reports `cloning ...` then `fava` starts, hit:
 
 - `http://<host>:3000/` — viewer
 
-To peek at Fava directly for debugging, either temporarily add `ports: ["5000:5000"]` under the `fava:` service, or `docker compose exec fava curl http://localhost:5000/mars-universe-bank/`.
+To peek at Fava directly for debugging, either temporarily add `ports: ["5000:5000"]` under the `fava:` service, or `docker compose exec fava curl http://localhost:5000/<FAVA_LEDGER_SLUG>/` (e.g. `acme-demo` for the demo data repo).
 
 ## Updating
 
@@ -67,13 +67,13 @@ Specific instructions for the production target — Synology DSM 7.2, Intel J402
    sudo mkdir -p /volume1/docker
    sudo chown $(whoami) /volume1/docker
    cd /volume1/docker
-   git clone https://github.com/TANJX/mars-universe-beancount.git
-   cd mars-universe-beancount/deploy
+   git clone https://github.com/TANJX/mars-universe-beancount-app.git
+   cd mars-universe-beancount-app/deploy
    cp .env.example .env
    ```
 5. **Edit `.env`**:
    ```ini
-   GIT_REPO_URL=https://github.com/TANJX/mars-universe-beancount.git
+   GIT_REPO_URL=https://github.com/TANJX/mars-universe-beancount-demo.git
    GIT_BRANCH=main
    GIT_PAT=<fine-grained PAT, contents:read>
    GIT_PULL_INTERVAL=300
@@ -96,7 +96,7 @@ That script:
 ### Bringing it up on the NAS
 
 ```sh
-cd /volume1/docker/mars-universe-beancount/deploy
+cd /volume1/docker/mars-universe-beancount-app/deploy
 sudo docker-compose up -d
 sudo docker-compose logs -f
 ```
