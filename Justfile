@@ -27,6 +27,11 @@ prices:
 forecast *args:
     uv run generate-forecast {{args}}
 
+# Regenerate the demo ledger's transactions/ tree (deterministic).
+# Default points at a sibling checkout of mars-universe-beancount-demo.
+regen-demo *args:
+    uv run python scripts/generate-demo-ledger.py --out ../mars-universe-beancount-demo {{args}}
+
 # Build the Chrome browser extension (output: packages/card-balance-browser-extension/build/)
 build-extension:
     pnpm --filter card-balance-browser-extension build

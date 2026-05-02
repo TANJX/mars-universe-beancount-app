@@ -22,8 +22,6 @@ docs/
   notes/   # living reference (accounts, reports, reconciliation, known bugs)
 ```
 
-See [`docs/plans/2026-04-19-monorepo-reorg.md`](docs/plans/2026-04-19-monorepo-reorg.md) for the reorg history and tooling rationale.
-
 ## Quickstart
 
 ```bash
