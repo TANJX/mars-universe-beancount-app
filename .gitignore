@@ -21,3 +21,4 @@ build/
 
 # Deploy
 deploy/.env
+.env
