@@ -1,0 +1,54 @@
+name: mars-universe-beancount
+
+services:
+  gitsync:
+    build:
+      context: gitsync
+    environment:
+      GIT_REPO_URL: ${GIT_REPO_URL:?set in deploy/.env}
+      GIT_BRANCH: ${GIT_BRANCH:-main}
+      GIT_PAT: ${GIT_PAT:-}
+      GIT_PULL_INTERVAL: ${GIT_PULL_INTERVAL:-300}
+      LEDGER_FILE_REL: ${LEDGER_FILE_REL:-journal/journal.beancount}
+    volumes:
+      - repo:/repo
+    healthcheck:
+      test: ["CMD-SHELL", "test -f \"/repo/$$LEDGER_FILE_REL\""]
+      interval: 10s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    restart: unless-stopped
+
+  fava:
+    build:
+      context: ..
+      dockerfile: deploy/fava/Dockerfile
+    environment:
+      FAVA_LEDGER: /repo/${LEDGER_FILE_REL:-journal/journal.beancount}
+      FAVA_LEDGER_SLUG: ${FAVA_LEDGER_SLUG:-ledger}
+    volumes:
+      - repo:/repo:ro
+    # No host port — web reaches it via the compose network at `http://fava:5000`.
+    # If you want direct access for debugging, add: ports: ["5000:5000"]
+    depends_on:
+      gitsync:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/web/Dockerfile
+      # Build-time, not runtime — Next.js bakes rewrites at build.
+      args:
+        FAVA_INTERNAL_URL: http://fava:5000
+        FAVA_LEDGER_SLUG: ${FAVA_LEDGER_SLUG:-ledger}
+    ports:
+      - "${WEB_BIND:-3000}:3000"
+    depends_on:
+      - fava
+    restart: unless-stopped
+
+volumes:
+  repo:

@@ -1,0 +1,126 @@
+// Five-stage merchant resolver. Returns one of three render shapes:
+//   - logo:    a logo.dev URL with a fallback letter mark baked in
+//   - glyph:   a class-based lucide icon for non-merchant rows
+//   - initial: a derived letter mark (registry hit or generic fallback)
+//
+// Stage order — first match wins:
+//   1. Class override (transfer/rebalance/investment/pending/forecast)
+//   2. Account override (Income:Salary:Acme → Acme via accounts.logos)
+//   3. Payee patterns → registry (Tm *, ACH Des:…)
+//   4. Cleaned payee → registry (exact then longest-substring on name|aliases)
+//   5. Auto-derived letter mark (initial + hash color from payee/narration)
+
+import type { Posting } from "@/lib/types/beancount"
+import type { JournalRow } from "@/lib/types/views"
+import type { AccountsConfig, MerchantEntry, MerchantRegistry } from "@/lib/config/types"
+import { lookupAccountLogo } from "@/lib/config/accounts"
+
+import { GLYPHS, type GlyphSpec } from "./glyphs"
+import { logoDevUrl } from "./logodev"
+import { matchMerchant } from "./match"
+import { deriveFallback, type AvatarFallback } from "./avatar-fallback"
+
+export type Resolved =
+  | { kind: "logo"; src: string; alt: string; fallback: AvatarFallback }
+  | { kind: "glyph"; glyph: GlyphSpec; alt: string }
+  | { kind: "initial"; entry: AvatarFallback; alt: string }
+
+export interface ResolveContext {
+  /** Logical row context. Provides class + posting accounts for stages 1-2. */
+  row?: JournalRow
+  /** Raw payee string. Used by stages 3-5 when row context isn't available. */
+  payee?: string
+  /** Pixel size of the rendered avatar — passes through to logo.dev for sizing. */
+  size?: number
+  /** Merged merchant registry (defaults + user `merchants:`). */
+  registry: MerchantRegistry
+  /** Resolved accounts config (drives stage 2's account → merchant lookup). */
+  accounts: AccountsConfig
+}
+
+/** True when the *primary* posting is in a "money in flight" subtree —
+ * meaning the transaction's user-facing perspective is the holding account
+ * itself, not a brand. Split expenses also touch these subtrees on a side
+ * leg, but their primary is still the merchant payment, so they're not
+ * caught here. */
+function isPendingPrimary(primary: Posting | null): boolean {
+  if (!primary) return false
+  return (
+    primary.account.startsWith("Assets:Pending-Transfer") ||
+    primary.account.startsWith("Assets:Transit") ||
+    primary.account.startsWith("Liabilities:Payable")
+  )
+}
+
+export function resolveMerchant(ctx: ResolveContext): Resolved {
+  const size = ctx.size ?? 28
+  const payee = (ctx.payee ?? ctx.row?.txn.payee ?? "").trim()
+  const { registry, accounts } = ctx
+
+  // ── Stage 1: class glyphs ──────────────────────────────────────────────
+  if (ctx.row) {
+    const { row } = ctx
+    if (row.isForecast) {
+      return { kind: "glyph", glyph: GLYPHS.forecast, alt: "Forecast" }
+    }
+    if (row.class === "transfer") {
+      return { kind: "glyph", glyph: GLYPHS.transfer, alt: "Transfer" }
+    }
+    if (row.class === "rebalance") {
+      return { kind: "glyph", glyph: GLYPHS.rebalance, alt: "Rebalance" }
+    }
+    if (row.class === "investment") {
+      return { kind: "glyph", glyph: GLYPHS.investment, alt: "Investment" }
+    }
+    // Genuine "money in flight" rows: ATM withdrawals waiting to clear,
+    // funds in transit.
+    if (isPendingPrimary(row.primary)) {
+      return { kind: "glyph", glyph: GLYPHS.pending, alt: "Pending" }
+    }
+  }
+
+  // ── Stage 2: account override (income/category-driven) ─────────────────
+  // For income, the bank-side payee is usually generic ("Direct Deposit
+  // Inc.") so the *category* account is the brand. For non-income, only
+  // the category leg drives the brand — funding postings (a credit card
+  // account) overriding the payee produces "everything is Bilt" drift.
+  if (ctx.row) {
+    const isIncome = ctx.row.class === "income"
+    if (isIncome) {
+      for (const p of ctx.row.txn.postings) {
+        const name = lookupAccountLogo(accounts, p.account)
+        if (name && registry[name]) return renderEntry(registry[name], size)
+      }
+    } else if (ctx.row.category) {
+      const name = lookupAccountLogo(accounts, ctx.row.category.account)
+      if (name && registry[name]) {
+        // Payee wins if it produces a registry hit; otherwise account
+        // override fires.
+        const payeeHit = matchMerchant(payee || null, registry)
+        if (!payeeHit) return renderEntry(registry[name], size)
+      }
+    }
+  }
+
+  // ── Stage 3-4: payee → registry ────────────────────────────────────────
+  const entry = matchMerchant(payee || null, registry)
+  if (entry) return renderEntry(entry, size)
+
+  // ── Stage 5: auto-derived letter-mark fallback ─────────────────────────
+  return {
+    kind: "initial",
+    entry: deriveFallback(payee || ctx.row?.txn.narration || null),
+    alt: payee || "Transaction",
+  }
+}
+
+function renderEntry(entry: MerchantEntry, size: number): Resolved {
+  const fallback = deriveFallback(entry.name)
+  if (entry.domain) {
+    const src = logoDevUrl(entry.domain, size)
+    if (src) {
+      return { kind: "logo", src, alt: entry.name, fallback }
+    }
+  }
+  return { kind: "initial", entry: fallback, alt: entry.name }
+}

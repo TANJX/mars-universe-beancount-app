@@ -1,0 +1,23 @@
+*venv/
+__pycache__/
+.DS_Store
+temp
+*Zone.Identifier
+.venv
+*.picklecache
+
+*.egg-info/
+
+# JS / pnpm
+node_modules/
+.pnpm-store/
+dist/
+build/
+*.tsbuildinfo
+
+# Editor
+.vscode/
+.idea/
+
+# Deploy
+deploy/.env

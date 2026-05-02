@@ -1,0 +1,26 @@
+[project]
+name = "beancount-tooling"
+version = "0.1.0"
+requires-python = ">=3.13"
+description = "Beancount extraction, forecast, and stock price tooling for the mars-universe ledger."
+dependencies = [
+    "beancount>=3.2.0",
+    "beangulp>=0.2.0",
+    "beanquery>=0.2.0",
+    "pyyaml>=6.0.3",
+    "questionary>=2.1.1",
+    "requests>=2.32.5",
+    "titlecase>=2.4.1",
+]
+
+[project.scripts]
+extract = "beancount_tooling.__main__:run_extract"
+update-stock-price = "beancount_tooling.__main__:run_update_stock_price"
+generate-forecast = "beancount_tooling.__main__:run_generate_forecast"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/beancount_tooling"]

@@ -1,0 +1,29 @@
+[project]
+name = "mars-universe-beancount"
+version = "0.1.0"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "beancount-tooling",
+    "ledger-data-api",
+    # Used directly via `just fava` / `uv run fava`. Resolved from local ../fava
+    # per [tool.uv.sources] below so the CORS patch is active.
+    "fava",
+    # The CORS-patched fork imports `flask_cors` in src/fava/application.py but
+    # doesn't declare it in its own pyproject. Declared here so `uv sync` pulls it.
+    "flask-cors",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/beancount-tooling", "packages/ledger-data-api"]
+
+[tool.uv.sources]
+beancount-tooling = { workspace = true }
+ledger-data-api = { workspace = true }
+# CORS-patched fork of Fava, pinned by commit SHA on the `mars-dev` branch.
+# Root-level sources propagate to workspace members, so ledger-data-api's
+# `fava>=1.26.1` also resolves here instead of PyPI.
+fava = { git = "https://github.com/TANJX/fava.git", rev = "2d2d482a1c9b2d22858fa85b97082804cdaa4bc3" }

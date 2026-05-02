@@ -1,0 +1,116 @@
+# UI configuration template — copy to <LEDGER_DIR>/config/ui.yaml and edit.
+# Loaded by the web app via ledger-data-api's /ui-config endpoint.
+# All sections are optional; the app falls back to bundled defaults / hash-based
+# rendering for any section omitted here.
+#
+# Convention: every section is a namespace. Cross-cutting registries (like
+# `merchants:`) stay top-level; everything else groups under the feature
+# namespace it belongs to (`accounts:`, `sidebar:`, …).
+
+# ============================================================================
+# Branding
+# `title`    — main app name; shown in browser tab and sidebar header.
+# `subtitle` — secondary line below the title in the sidebar.
+# Note: the page title (browser tab) is baked at build time via
+# NEXT_PUBLIC_APP_TITLE; coordinate that env var with `branding.title`.
+# ============================================================================
+branding:
+  title: "My Ledger"
+  subtitle: ""
+
+# ============================================================================
+# Accounts — anything keyed by beancount account path.
+#
+# `display_names`
+#   Override the rendered label for an account. Default is the last colon
+#   segment of the path; only list entries that materially differ.
+#
+# `logos`
+#   Account-path → merchant name (Stage 2 of the logo resolver). Fires only
+#   when the account itself identifies the brand more reliably than the
+#   bank-side payee text. Income txns: matches against any posting;
+#   non-income txns: matches against the category posting only — funding
+#   postings are deliberately excluded to avoid "everything is Bilt" drift.
+#   Value must be a brand name in `merchants:` below or in bundled defaults.
+#
+# `colors`
+#   Hand-picked oklch colors keyed by full account path. Lookup walks
+#   ancestors, so an entry on a parent applies to the whole subtree unless
+#   overridden by a deeper match. Format: oklch(L C H) or oklch(L% C H).
+#
+# `category_rollup`
+#   Subtrees that collapse to a single bucket in charts. Any leaf descendant
+#   of a listed prefix is aggregated under that prefix.
+# ============================================================================
+accounts:
+  display_names:
+    # "Expenses:Transportation:Public": "Public Transit"
+    # "Assets:Investment:Brokerage:Roth-IRA": "Roth IRA"
+
+  logos:
+    # "Income:Salary:Acme": "Acme"
+    # "Expenses:Home:Utilities": "PSEG"
+
+  colors:
+    # "Income:Salary": "oklch(0.66 0.21 130)"
+    # "Expenses:Home": "oklch(0.51 0.22 17)"
+
+  category_rollup:
+    # - "Expenses:Transportation"
+    # - "Income:Interest"
+
+# ============================================================================
+# Logo resolution pipeline
+#
+#   transaction in
+#       │
+#       ▼
+#   [1] class glyph?        transfer / rebalance / investment / pending / forecast
+#       │ no
+#       ▼
+#   [2] accounts.logos?     account-path → merchant-name              ◀── this file
+#       │ no
+#       ▼
+#   [3] payee patterns?     bundled regex (Tm *, ACH Des:…) extracts a
+#       │ no                token; matched against merchant `aliases`   ◀── this file
+#       ▼
+#   [4] payee → registry    cleanPayee strips bundled prefixes/suffixes
+#       │ no                (Apple Pay -, Sq *, ZIP, state, …) then exact
+#       │                   then longest-substring match against bundled
+#       │                   defaults + `merchants:` (name + aliases)    ◀── this file
+#       ▼
+#   [5] generic fallback    auto-derived letter + hash color
+# ============================================================================
+
+# ============================================================================
+# Custom merchants (extends bundled registry, used by stages 2 + 3 + 4)
+# Brands not in the app's bundled registry. Map keys are the human-readable
+# brand name — used directly as the canonical id and the matched display name.
+#   `domain`  — drives logo.dev image fetching (optional; falls back to a
+#               letter mark if omitted or the image fails to load).
+#   `aliases` — extra payee tokens (case-insensitive) that should also
+#               resolve to this merchant.
+# ============================================================================
+merchants:
+  # Acme:
+  #   domain: "acme.com"
+  # MyLandlord:
+  #   aliases:
+  #     - "ach landlord wire token"
+
+# ============================================================================
+# Sidebar
+# `bookmarks` — shortcuts to clearing/holding accounts whose balances
+# typically net to zero over time and benefit from one-tap access.
+#   `id`          — stable identifier (kebab-case). Used for keys; not shown.
+#   `label`       — short display name in the sidebar.
+#   `root`        — top-level bucket (Assets / Liabilities / Income /
+#                   Expenses / Equity).
+#   `accountPath` — full beancount account path the bookmark links to.
+# ============================================================================
+sidebar:
+  bookmarks:
+    # - id: receivable
+    #   label: "Receivable"
+    #   root: "Assets"
+    #   accountPath: "Assets:Receivable:Others"

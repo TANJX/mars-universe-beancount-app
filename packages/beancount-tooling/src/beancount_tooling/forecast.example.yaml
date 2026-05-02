@@ -1,0 +1,58 @@
+# Example forecast config — copy to <LEDGER_DIR>/config/forecast.yaml and customize.
+# Loaded by `uv run generate-forecast`.
+
+forecast:
+  # Months to maintain forecasts for.
+  months:
+    - "2026-01"
+  # Flag for forecasted transactions: "!" = pending, "*" = cleared.
+  transaction_flag: "!"
+
+# ============================================================================
+# Account Mapping
+# Maps short names (used in templates below) to full beancount accounts and
+# file destinations. File paths support: {year} {month} {day} {month_name} {month_abbr}
+# ============================================================================
+accounts:
+  Checking:
+    beancount_account: "Assets:Checking:Example"
+    file: "transactions/{year}-{month}/checking/Example.bean"
+  Rent:
+    beancount_account: "Expenses:Rent"
+    file: "transactions/{year}-{month}/rent.bean"
+
+# ============================================================================
+# Defaults — fallback values for recurring templates.
+# Override per-month under `months:` below.
+# ============================================================================
+defaults:
+  salary:
+    payments:
+      - id: main_paycheck
+        date: "weekday:15"          # 15th, or last weekday before
+        payee: "Example Inc"
+        narration: ""
+        income_account: "Income:Salary"
+        distribution:
+          Checking: 1000.00
+
+# ============================================================================
+# Month-specific overrides — only specify keys that change from defaults.
+# ============================================================================
+months: {}
+
+# ============================================================================
+# Custom templates — one-off or recurring non-salary transactions.
+# ============================================================================
+custom_templates:
+  - id: rent
+    months: ["2026-01"]
+    account: Rent
+    date: 1
+    payee: "Example Landlord"
+    narration: "{year}-{month} Rent"
+    postings:
+      - account: "Expenses:Home:Rent"
+        amount: 1500.00
+      - account: "Liabilities:Payable:Rent"
+        amount: null  # null = residual posting

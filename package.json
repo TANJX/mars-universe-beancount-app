@@ -1,0 +1,7 @@
+{
+  "name": "mars-universe-beancount",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Monorepo root for beancount tooling, dashboard, and Next.js viewer.",
+  "packageManager": "pnpm@10.33.2"
+}

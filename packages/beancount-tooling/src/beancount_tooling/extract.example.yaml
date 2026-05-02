@@ -1,0 +1,46 @@
+# Example extract config — copy to <LEDGER_DIR>/config/extract.yaml and customize.
+# Loaded by `uv run extract`.
+
+importers:
+  # Beancount accounts whose names match these regexes are excluded from
+  # the auto-categorization candidate list.
+  excluded_accounts:
+    - "^Expenses:Family:"
+
+# ============================================================================
+# Import Accounts
+# Format: path is "<type>/<short-name>". Type is one of checking/credit/saving.
+# `importer` is the class name from beancount_tooling.importer.
+# `options` are passed through as kwargs to the importer.
+# ============================================================================
+accounts:
+  - path: checking/MyChecking
+    bank: MyBank
+    importer: BofACheckingImporter
+    options:
+      type: checking
+
+  - path: credit/MyCard
+    bank: MyBank
+    importer: ChaseImporter
+
+  - path: saving/MySavings
+    bank: MyBank
+    importer: AppleSavingImporter
+
+# ============================================================================
+# Auto-Categorization Rules
+# ============================================================================
+categorization:
+  # Default payment account for credit card payments.
+  payment_account: Assets:Pending-Transfer
+
+  # Optional: merchant -> account mapping by regex on description/payee.
+  merchant_patterns:
+    - pattern: "^Lyft"
+      account: Expenses:Transportation:Cab
+
+  # Optional: regexes that mark a transaction as a credit card payment.
+  payment_patterns:
+    - "PAYMENT - THANK YOU"
+    - "AUTOPAY PAYMENT"

@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Credit Card Balance Viewer",
+  "version": "1.1.0",
+  "description": "Shows credit card balances on banking websites",
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:5000/*",
+    "*://*.americanexpress.com/*",
+    "*://*.chase.com/*",
+    "*://*.bankofamerica.com/*",
+    "*://*.bilt.com/*",
+    "*://*.discover.com/*",
+    "*://*.robinhood.com/*",
+    "*://*.future.green/*",
+    "*://*.td.com/*",
+    "*://*.tdbank.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.americanexpress.com/*",
+        "*://*.chase.com/*",
+        "*://*.bankofamerica.com/*",
+        "*://*.bilt.com/*",
+        "*://*.discover.com/*",
+        "*://*.robinhood.com/*",
+        "*://*.future.green/*",
+        "*://*.td.com/*",
+        "*://*.tdbank.com/*"
+      ],
+      "js": ["content.js"]
+    }
+  ]
+} 

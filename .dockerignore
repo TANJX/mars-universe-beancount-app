@@ -1,0 +1,37 @@
+## Generic
+.git
+.gitignore
+.DS_Store
+*Zone.Identifier
+*.log
+*.pyc
+
+## Python
+**/__pycache__/
+**/.venv/
+**/*venv/
+**/.ruff_cache/
+**/*.egg-info/
+**/*.picklecache
+bean-venv/
+
+## JS / pnpm
+**/node_modules/
+**/.pnpm-store/
+**/.next/
+**/dist/
+**/build/
+**/*.tsbuildinfo
+
+## Editor / OS
+.vscode/
+.idea/
+
+## Repo content not needed inside any image
+data/
+docs/
+temp/
+deploy/
+Justfile
+.editorconfig
+.python-version
