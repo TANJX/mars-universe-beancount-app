@@ -5,7 +5,8 @@ import { MobileMiniStats } from "@/components/overview/mobile/mobile-mini-stats"
 import { MobileNetWorthHero } from "@/components/overview/mobile/mobile-net-worth-hero"
 import { MobileRecentActivity } from "@/components/overview/mobile/mobile-recent-activity"
 import { MobilePeriodControl } from "@/components/filters/mobile-period-control"
-import { useResolvedUIConfig } from "@/lib/config"
+import { useResolvedUIConfig, useUIConfig } from "@/lib/config"
+import { Skeleton } from "@/components/ui/skeleton"
 import type { JournalRow, OverviewStats } from "@/lib/types/views"
 import { MarsLogo } from "@/components/layout/mars-logo"
 
@@ -48,6 +49,7 @@ export function MobileOverview({ stats, visibleRecent }: MobileOverviewProps) {
 
 function BrandHeader() {
   const { branding } = useResolvedUIConfig()
+  const { isPending } = useUIConfig()
   return (
     <header
       className="flex shrink-0 items-center justify-between px-5 pb-3"
@@ -55,9 +57,13 @@ function BrandHeader() {
     >
       <div className="flex items-center gap-2">
         <MarsLogo />
-        <span className="text-sm font-semibold tracking-tight">
-          {branding.title}
-        </span>
+        {isPending ? (
+          <Skeleton className="h-3.5 w-24" />
+        ) : (
+          <span className="text-sm font-semibold tracking-tight">
+            {branding.title}
+          </span>
+        )}
       </div>
       <MobilePeriodControl />
     </header>

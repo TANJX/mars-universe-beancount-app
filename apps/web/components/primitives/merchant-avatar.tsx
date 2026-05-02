@@ -4,7 +4,10 @@ import * as React from "react"
 
 import { useResolvedUIConfig } from "@/lib/config"
 import { resolveMerchant, type Resolved } from "@/lib/merchants/resolve"
-import { deriveFallback, type AvatarFallback } from "@/lib/merchants/avatar-fallback"
+import {
+  deriveFallback,
+  type AvatarFallback,
+} from "@/lib/merchants/avatar-fallback"
 import { cn } from "@/lib/utils"
 import type { JournalRow } from "@/lib/types/views"
 

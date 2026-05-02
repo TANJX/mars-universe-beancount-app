@@ -12,7 +12,11 @@
 
 import type { Posting } from "@/lib/types/beancount"
 import type { JournalRow } from "@/lib/types/views"
-import type { AccountsConfig, MerchantEntry, MerchantRegistry } from "@/lib/config/types"
+import type {
+  AccountsConfig,
+  MerchantEntry,
+  MerchantRegistry,
+} from "@/lib/config/types"
 import { lookupAccountLogo } from "@/lib/config/accounts"
 
 import { GLYPHS, type GlyphSpec } from "./glyphs"

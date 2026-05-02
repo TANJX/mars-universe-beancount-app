@@ -44,7 +44,8 @@ import { ClientOnly } from "@/components/primitives/client-only"
 import { useCommandPalette } from "@/components/layout/command-palette"
 import { useShortcutsDialog } from "@/components/layout/shortcuts-dialog"
 import { useUIState } from "@/components/layout/ui-state"
-import { useResolvedUIConfig } from "@/lib/config"
+import { Skeleton } from "@/components/ui/skeleton"
+import { useResolvedUIConfig, useUIConfig } from "@/lib/config"
 import type { Density } from "@/lib/types/views"
 import { MarsLogo } from "./mars-logo"
 
@@ -69,6 +70,7 @@ export function AppSidebar() {
   const activeAccount = searchParams.get("account") ?? ""
   const { openCommandPalette } = useCommandPalette()
   const { branding, sidebar } = useResolvedUIConfig()
+  const { isPending } = useUIConfig()
 
   return (
     <Sidebar collapsible="none">
@@ -76,13 +78,22 @@ export function AppSidebar() {
         <div className="flex items-center gap-2.5 px-1 py-1">
           <MarsLogo />
           <div className="min-w-0 flex-1 leading-tight">
-            <div className="truncate text-sm font-semibold tracking-tight">
-              {branding.title}
-            </div>
-            {branding.subtitle && (
-              <div className="truncate text-xs text-muted-foreground">
-                {branding.subtitle}
+            {isPending ? (
+              <div className="flex flex-col gap-1 py-0.5">
+                <Skeleton className="h-3.5 w-24" />
+                <Skeleton className="h-2.5 w-20" />
               </div>
+            ) : (
+              <>
+                <div className="truncate text-sm font-semibold tracking-tight">
+                  {branding.title}
+                </div>
+                {branding.subtitle && (
+                  <div className="truncate text-xs text-muted-foreground">
+                    {branding.subtitle}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -122,33 +133,46 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        <SidebarGroup>
-          <SidebarGroupLabel>Bookmarks</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {sidebar.bookmarks.map((b) => {
-                const href = `/journal?account=${encodeURIComponent(b.accountPath)}`
-                // Highlight only the bookmark whose account is the current
-                // filter — not every bookmark when on /journal.
-                const active =
-                  pathname.startsWith("/journal") &&
-                  activeAccount === b.accountPath
-                return (
-                  <SidebarMenuItem key={b.id}>
-                    <SidebarMenuButton
-                      size="sm"
-                      render={<Link href={href} />}
-                      isActive={active}
-                    >
-                      <AccountDot root={b.root} />
-                      <span>{b.label}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                )
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {(isPending || sidebar.bookmarks.length > 0) && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Bookmarks</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {isPending
+                  ? // Render placeholders sized like real bookmark rows so the
+                    // sidebar doesn't reflow when the real data arrives.
+                    Array.from({ length: 4 }).map((_, i) => (
+                      <SidebarMenuItem key={i}>
+                        <div className="flex items-center gap-2 px-2 py-1.5">
+                          <Skeleton className="size-1.5 rounded-full" />
+                          <Skeleton className="h-3 w-16" />
+                        </div>
+                      </SidebarMenuItem>
+                    ))
+                  : sidebar.bookmarks.map((b) => {
+                      const href = `/journal?account=${encodeURIComponent(b.accountPath)}`
+                      // Highlight only the bookmark whose account is the current
+                      // filter — not every bookmark when on /journal.
+                      const active =
+                        pathname.startsWith("/journal") &&
+                        activeAccount === b.accountPath
+                      return (
+                        <SidebarMenuItem key={b.id}>
+                          <SidebarMenuButton
+                            size="sm"
+                            render={<Link href={href} />}
+                            isActive={active}
+                          >
+                            <AccountDot root={b.root} />
+                            <span>{b.label}</span>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      )
+                    })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
 
       <SidebarFooter>

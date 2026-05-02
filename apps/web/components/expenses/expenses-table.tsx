@@ -81,7 +81,9 @@ function ExpenseRow({
   const { txn, class: cls } = row
   const isSplit = cls === "split"
   const displayAccount = useDisplayAccount()
-  const categoryLabel = categoryAccount ? displayAccount(categoryAccount) : category
+  const categoryLabel = categoryAccount
+    ? displayAccount(categoryAccount)
+    : category
 
   return (
     <button
@@ -137,7 +139,9 @@ function ExpenseRow({
         )}
       </div>
 
-      <span className="truncate text-sm text-muted-foreground">{categoryLabel}</span>
+      <span className="truncate text-sm text-muted-foreground">
+        {categoryLabel}
+      </span>
 
       <span className="flex items-center gap-1.5 truncate text-sm text-muted-foreground">
         <AccountDot root={fundingRoot} size={6} />

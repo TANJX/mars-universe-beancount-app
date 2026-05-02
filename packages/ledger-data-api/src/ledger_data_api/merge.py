@@ -306,9 +306,7 @@ def find_cc_payment_offsets(entries) -> dict[tuple[str, str, str], str]:
 
     # Pattern B: bridged payment.
     # Index by (date, |amount|): bank-side has bridge +N, card-side has bridge −N.
-    bank_side: dict[tuple[str, Decimal], list[tuple[str, Decimal]]] = defaultdict(
-        list
-    )
+    bank_side: dict[tuple[str, Decimal], list[tuple[str, Decimal]]] = defaultdict(list)
     card_side: dict[tuple[str, Decimal], list[str]] = defaultdict(list)
 
     for entry in entries:
@@ -759,9 +757,7 @@ def build_grid_response(
     # plan_lookup is needed because plans_for_status mixes Plan records with
     # Transfer-leg synthetic Plans; we want only those carrying ccCardRef.
     plan_lookup = {p.id: p for p in plans_for_status}
-    cc_match_by_cleared: dict[
-        tuple[str, str, str], dict[str, Optional[str]]
-    ] = {}
+    cc_match_by_cleared: dict[tuple[str, str, str], dict[str, Optional[str]]] = {}
 
     # First, structural detection — catches CC payments that have no plan
     # behind them (deleted plans, ad-hoc payments). No `ccCycleMonth` since
@@ -927,13 +923,9 @@ def build_grid_response(
         cycle = cycles_by_card.get(path)
         paid = paid_this_cycle.get(path, Decimal("0"))
         stmt_dec = (
-            Decimal(rec.statementBalance)
-            if rec and rec.statementBalance
-            else None
+            Decimal(rec.statementBalance) if rec and rec.statementBalance else None
         )
-        remaining = (
-            max(Decimal("0"), stmt_dec - paid) if stmt_dec is not None else None
-        )
+        remaining = max(Decimal("0"), stmt_dec - paid) if stmt_dec is not None else None
 
         # Stale = the typed statement is for a close older than the active
         # cycle's start. Only meaningful when both pieces are present.

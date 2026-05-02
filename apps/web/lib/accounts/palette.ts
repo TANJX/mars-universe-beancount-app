@@ -12,10 +12,7 @@ import * as React from "react"
 
 import type { AccountPath } from "@/lib/types/beancount"
 import { useResolvedUIConfig } from "@/lib/config"
-import {
-  lookupColor,
-  rollupKey as rollupKeyImpl,
-} from "@/lib/config/accounts"
+import { lookupColor, rollupKey as rollupKeyImpl } from "@/lib/config/accounts"
 
 /** Pure no-op — undefined unless a config-aware caller is used. */
 export function lookupCategoryColor(_path: AccountPath): string | undefined {

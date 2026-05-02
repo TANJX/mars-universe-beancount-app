@@ -37,4 +37,17 @@ export function useResolvedUIConfig(): ResolvedUI {
   }, [data])
 }
 
-export type { ResolvedUI, Branding, AccountsConfig, MerchantEntry, MerchantRegistry, Bookmark, SidebarConfig } from "./types"
+// Re-export the underlying hook so consumers can read loading state without
+// duplicating import paths. React Query dedupes by queryKey, so calling both
+// `useResolvedUIConfig()` and `useUIConfig()` in the same component is cheap.
+export { useUIConfig } from "./use-ui-config"
+
+export type {
+  ResolvedUI,
+  Branding,
+  AccountsConfig,
+  MerchantEntry,
+  MerchantRegistry,
+  Bookmark,
+  SidebarConfig,
+} from "./types"

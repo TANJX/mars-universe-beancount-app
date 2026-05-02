@@ -270,6 +270,10 @@ def read_ui_config(ledger_file_path: str) -> dict:
     if data is None:
         return {}
     if not isinstance(data, dict):
-        log.warning("ui.yaml at %s did not parse to a mapping (got %s)", path, type(data).__name__)
+        log.warning(
+            "ui.yaml at %s did not parse to a mapping (got %s)",
+            path,
+            type(data).__name__,
+        )
         return {}
     return data

@@ -19,7 +19,10 @@ export function resolveAccounts(
 ): AccountsConfig {
   if (!user) return ACCOUNTS_DEFAULTS
   return {
-    displayNames: { ...ACCOUNTS_DEFAULTS.displayNames, ...(user.display_names ?? {}) },
+    displayNames: {
+      ...ACCOUNTS_DEFAULTS.displayNames,
+      ...(user.display_names ?? {}),
+    },
     logos: { ...ACCOUNTS_DEFAULTS.logos, ...(user.logos ?? {}) },
     colors: { ...ACCOUNTS_DEFAULTS.colors, ...(user.colors ?? {}) },
     categoryRollup:
@@ -55,10 +58,7 @@ export function lookupColor(
 }
 
 /** Map a leaf path to its rollup bucket prefix, or itself if no rollup. */
-export function rollupKey(
-  cfg: AccountsConfig,
-  path: AccountPath
-): AccountPath {
+export function rollupKey(cfg: AccountsConfig, path: AccountPath): AccountPath {
   for (const prefix of cfg.categoryRollup) {
     if (path === prefix || path.startsWith(prefix + ":")) return prefix
   }

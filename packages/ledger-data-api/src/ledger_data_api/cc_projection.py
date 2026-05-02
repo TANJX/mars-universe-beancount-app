@@ -91,9 +91,7 @@ def project_payments(
         # Remaining for the active cycle = statement net of payments already
         # committed this cycle. When `remaining == 0` the cycle is effectively
         # done — no `cc-locked` row needs to render.
-        remaining = (
-            max(Decimal("0"), stmt - paid) if stmt is not None else None
-        )
+        remaining = max(Decimal("0"), stmt - paid) if stmt is not None else None
 
         # Cards on a minimum-payment plan (e.g., 0% APR balance carry) get no
         # forecast row — next month's payment is approximately the same minimum.

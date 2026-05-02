@@ -46,7 +46,9 @@ export function hashColor(seed: string): string {
 }
 
 /** Build the letter-mark for a given name. Empty/missing → muted unknown. */
-export function deriveFallback(name: string | null | undefined): AvatarFallback {
+export function deriveFallback(
+  name: string | null | undefined
+): AvatarFallback {
   if (!name) return UNKNOWN
   const trimmed = name.trim()
   if (!trimmed) return UNKNOWN

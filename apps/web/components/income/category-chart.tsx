@@ -11,10 +11,7 @@ import {
 } from "@/components/ui/chart"
 import { formatChartDate } from "@/components/charts/chart-tooltip"
 import { useDisplayAccount } from "@/lib/accounts/display-names"
-import {
-  useLookupCategoryColor,
-  useRollupKey,
-} from "@/lib/accounts/palette"
+import { useLookupCategoryColor, useRollupKey } from "@/lib/accounts/palette"
 import { formatMoney } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { AccountPath } from "@/lib/types/beancount"
@@ -276,7 +273,14 @@ export function CategoryChart({
       }
     }
     return c
-  }, [incTop, expTop, incHasOther, expHasOther, displayAccount, lookupCategoryColor])
+  }, [
+    incTop,
+    expTop,
+    incHasOther,
+    expHasOther,
+    displayAccount,
+    lookupCategoryColor,
+  ])
 
   const incOtherKey = safeKey("inc", "__other")
   const expOtherKey = safeKey("exp", "__other")

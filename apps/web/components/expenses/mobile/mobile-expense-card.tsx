@@ -27,7 +27,9 @@ export function MobileExpenseCard({ data }: MobileExpenseCardProps) {
   const isSplit = cls === "split"
   const payee = txn.payee || txn.narration || "—"
   const displayAccount = useDisplayAccount()
-  const categoryLabel = categoryAccount ? displayAccount(categoryAccount) : category
+  const categoryLabel = categoryAccount
+    ? displayAccount(categoryAccount)
+    : category
 
   return (
     <div
@@ -71,7 +73,7 @@ export function MobileExpenseCard({ data }: MobileExpenseCardProps) {
             </span>
           </>
         ) : (
-          <span className="font-mono text-[14px] font-medium tabular-nums text-rose-600 dark:text-rose-400">
+          <span className="font-mono text-[14px] font-medium text-rose-600 tabular-nums dark:text-rose-400">
             {formatNativeAmount(-share, "USD")}
           </span>
         )}
