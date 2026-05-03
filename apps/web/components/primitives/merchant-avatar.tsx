@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { DynamicIcon, type IconName } from "lucide-react/dynamic"
 
 import { useResolvedUIConfig } from "@/lib/config"
 import { resolveMerchant, type Resolved } from "@/lib/merchants/resolve"
@@ -57,6 +58,15 @@ export function MerchantAvatar({
   }
   if (resolved.kind === "glyph") {
     return <GlyphAvatar resolved={resolved} size={px} className={className} />
+  }
+  if (resolved.kind === "category-icon") {
+    return (
+      <CategoryIconAvatar
+        resolved={resolved}
+        size={px}
+        className={className}
+      />
+    )
   }
   return <InitialAvatar resolved={resolved} size={px} className={className} />
 }
@@ -170,6 +180,48 @@ function GlyphAvatar({
       title={resolved.alt}
     >
       <Icon size={Math.round(size * 0.5)} strokeWidth={1.75} />
+    </span>
+  )
+}
+
+// ── Category icon: dynamically-loaded lucide icon (stage 4.5) ─────────────
+function CategoryIconAvatar({
+  resolved,
+  size,
+  className,
+}: {
+  resolved: Extract<Resolved, { kind: "category-icon" }>
+  size: number
+  className?: string
+}) {
+  const tone = resolved.tone
+  const toneClass =
+    tone === "muted"
+      ? "bg-muted text-muted-foreground"
+      : tone === "accent"
+        ? "bg-primary/15 text-primary"
+        : "bg-card border text-foreground"
+
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center justify-center",
+        toneClass,
+        className
+      )}
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+      }}
+      aria-label={resolved.alt}
+      title={resolved.alt}
+    >
+      <DynamicIcon
+        name={resolved.name as IconName}
+        size={Math.round(size * 0.5)}
+        strokeWidth={1.75}
+      />
     </span>
   )
 }

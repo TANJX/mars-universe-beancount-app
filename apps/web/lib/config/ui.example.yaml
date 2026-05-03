@@ -38,6 +38,17 @@ branding:
 #   ancestors, so an entry on a parent applies to the whole subtree unless
 #   overridden by a deeper match. Format: oklch(L C H) or oklch(L% C H).
 #
+# `category_icons`
+#   Account-path → lucide icon name (kebab-case, e.g. "utensils", "plane",
+#   "shopping-cart"; full set at https://lucide.dev/icons). Stage 4.5 of
+#   the logo resolver — fires when payee resolution misses, so unrecognized
+#   payees in known categories render as a meaningful glyph instead of a
+#   letter mark. Bundled defaults cover the standard expense / income
+#   taxonomy; entries here override or extend for personal account names.
+#   Lookup walks ancestors. Income rows match against any posting;
+#   non-income rows match the category leg only. Icons load via
+#   lucide-react/dynamic — any valid lucide name works, no allowlist.
+#
 # `category_rollup`
 #   Subtrees that collapse to a single bucket in charts. Any leaf descendant
 #   of a listed prefix is aggregated under that prefix.
@@ -54,6 +65,10 @@ accounts:
   colors:
     # "Income:Salary": "oklch(0.66 0.21 130)"
     # "Expenses:Home": "oklch(0.51 0.22 17)"
+
+  category_icons:
+    # "Expenses:Food:Eating-Out": "utensils"  # non-standard taxonomy
+    # "Income:Salary:Acme": "briefcase"        # personal override
 
   category_rollup:
     # - "Expenses:Transportation"
@@ -78,6 +93,10 @@ accounts:
 #       │ no                (Apple Pay -, Sq *, ZIP, state, …) then exact
 #       │                   then longest-substring match against bundled
 #       │                   defaults + `merchants:` (name + aliases)    ◀── this file
+#       ▼
+#   [4.5] category icon?    account-path of category posting → lucide  ◀── this file
+#       │ no                glyph (walks ancestors; bundled defaults +
+#       │                   `accounts.category_icons`)
 #       ▼
 #   [5] generic fallback    auto-derived letter + hash color
 # ============================================================================

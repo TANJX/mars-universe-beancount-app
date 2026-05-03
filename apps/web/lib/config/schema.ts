@@ -32,6 +32,7 @@ const AccountsSchema = z
     display_names: StringRecordSchema,
     logos: StringRecordSchema,
     colors: StringRecordSchema,
+    category_icons: StringRecordSchema,
     category_rollup: StringArraySchema,
   })
   .partial()

@@ -16,7 +16,10 @@ export interface GlyphSpec {
 }
 
 /** Glyphs for non-merchant transaction kinds. Class-driven; the resolver
- * picks one before consulting the merchant registry. */
+ * picks one before consulting the merchant registry. Static imports for
+ * tree-shaking — the category-icon fallback (stage 4.5) is rendered via
+ * `lucide-react/dynamic` so any icon name from yaml/defaults works without
+ * an allowlist. */
 export const GLYPHS = {
   transfer: {
     icon: ArrowRightLeft,

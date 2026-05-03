@@ -18,6 +18,9 @@ export interface AccountsConfig {
   logos: Record<AccountPath, string>
   /** Account-path → oklch color (ancestor walk). */
   colors: Record<AccountPath, string>
+  /** Account-path → lucide icon name (Stage 4.5 of the logo resolver,
+   * ancestor walk). Bundled defaults merged with user `category_icons`. */
+  categoryIcons: Record<AccountPath, string>
   /** Subtree prefixes whose descendants collapse to a single bucket in charts. */
   categoryRollup: AccountPath[]
 }
