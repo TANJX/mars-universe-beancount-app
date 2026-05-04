@@ -186,7 +186,7 @@ export default function JournalPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4 px-7 pt-5 pb-10">
+    <div className="flex flex-col gap-4 px-7 pt-2 pb-10">
       <header>
         <div className="text-xl font-medium tracking-tight">Journal</div>
         <div className="mt-0.5 font-mono text-xs text-muted-foreground tabular-nums">

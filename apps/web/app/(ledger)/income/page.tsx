@@ -93,7 +93,7 @@ export default function IncomePage() {
   }
 
   return (
-    <div className="flex flex-col gap-4 px-7 pt-5 pb-10">
+    <div className="flex flex-col gap-4 px-7 pt-2 pb-10">
       <header className="flex items-start justify-between gap-6">
         <div>
           <div className="text-xl font-medium tracking-tight">Income</div>

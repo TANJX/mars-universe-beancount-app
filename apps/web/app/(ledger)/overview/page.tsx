@@ -111,7 +111,7 @@ export default function OverviewPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4 px-7 pt-5 pb-10">
+    <div className="flex flex-col gap-4 px-7 pt-2 pb-10">
       {errorMsg && <ErrorBanner message={errorMsg} />}
 
       {stats ? (
