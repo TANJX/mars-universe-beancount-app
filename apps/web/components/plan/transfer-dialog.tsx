@@ -19,6 +19,7 @@ export interface TransferDialogSeed {
   toAccount: string
   amount: string
   description: string
+  state?: "todo" | "pending" | null
 }
 
 interface TransferDialogProps {
@@ -82,7 +83,7 @@ function TransferEditor({
         toAccount: to,
         amount,
         description,
-        state: null,
+        state: seed.state ?? null,
       },
       { onSuccess: () => onClose() }
     )

@@ -5,13 +5,22 @@ import * as React from "react"
 import { Money } from "@/components/primitives/money"
 import { cn } from "@/lib/utils"
 import { parseAmount } from "@/lib/plan/format"
-import { useDeletePlan, useSaveCcOverride, useSavePlan } from "@/hooks/use-plan"
+import {
+  useDeletePlan,
+  useSaveCcOverride,
+  useSavePlan,
+  useSaveTransfer,
+} from "@/hooks/use-plan"
 import { mergeBankOrder } from "@/components/plan/bank-panel"
 import { CcOverrideDialog } from "@/components/plan/cc-override-dialog"
 import {
   TransferDialog,
   type TransferDialogSeed,
 } from "@/components/plan/transfer-dialog"
+import {
+  MovePlanDialog,
+  type MovePlanSeed,
+} from "@/components/plan/move-plan-dialog"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -47,6 +56,8 @@ interface DisplayRow {
   date?: string
   count?: number
   ref?: PlanGridResponse["rows"][number]
+  gapKey?: string
+  expanded?: boolean
 }
 
 export function PlanGrid({
@@ -70,6 +81,38 @@ export function PlanGrid({
   const savePlan = useSavePlan()
   const deletePlan = useDeletePlan()
   const saveCcOverride = useSaveCcOverride()
+  const saveTransfer = useSaveTransfer()
+
+  const findTransferLegs = React.useCallback(
+    (transferId: string) => {
+      let fromAccount = ""
+      let toAccount = ""
+      let date = ""
+      let amount = ""
+      let description = ""
+      let state: StateFlag = null
+      for (const row of data.rows) {
+        for (const [account, entries] of Object.entries(row.entries)) {
+          for (const e of entries) {
+            if (e.transferId !== transferId) continue
+            const amt = parseFloat(e.amount)
+            if (amt < 0) {
+              fromAccount = account
+            } else if (amt > 0) {
+              toAccount = account
+              amount = e.amount
+            }
+            if (!date) date = row.date
+            if (!description) description = e.description
+            if (state == null) state = (e.state ?? null) as StateFlag
+          }
+        }
+      }
+      if (!fromAccount || !toAccount) return null
+      return { fromAccount, toAccount, date, amount, description, state }
+    },
+    [data.rows]
+  )
 
   const handleSave = React.useCallback(
     (date: string, account: string, entryId: string, patch: EntryPatch) => {
@@ -117,6 +160,35 @@ export function PlanGrid({
   const [transferSeed, setTransferSeed] =
     React.useState<TransferDialogSeed | null>(null)
 
+  const [moveSeed, setMoveSeed] = React.useState<MovePlanSeed | null>(null)
+
+  const handleMovePlan = React.useCallback(
+    (entry: GridEntry, date: string, account: string) => {
+      if (entry.kind !== "plan") return
+      setMoveSeed({
+        id: entry.id,
+        fromDate: date,
+        fromAccount: account,
+        amount: entry.amount,
+        description: entry.description,
+        state: (entry.state ?? null) as StateFlag,
+      })
+    },
+    []
+  )
+
+  const [expandedGaps, setExpandedGaps] = React.useState<Set<string>>(
+    () => new Set()
+  )
+  const toggleGap = React.useCallback((key: string) => {
+    setExpandedGaps((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
+
   const handleNewTransfer = React.useCallback(
     (date: string, fromAccount: string) => {
       setTransferSeed({
@@ -128,6 +200,23 @@ export function PlanGrid({
       })
     },
     []
+  )
+
+  const handleEditTransfer = React.useCallback(
+    (transferId: string) => {
+      const legs = findTransferLegs(transferId)
+      if (!legs) return
+      setTransferSeed({
+        id: transferId,
+        date: legs.date,
+        fromAccount: legs.fromAccount,
+        toAccount: legs.toAccount,
+        amount: legs.amount,
+        description: legs.description,
+        state: legs.state,
+      })
+    },
+    [findTransferLegs]
   )
 
   const setEntryState = React.useCallback(
@@ -155,8 +244,20 @@ export function PlanGrid({
         return
       }
       if (entry.kind !== "plan") return
-      // TODO(stage 5): transfer legs route to transfer_save once that lands.
-      if (entry.transferId) return
+      if (entry.transferId) {
+        const legs = findTransferLegs(entry.transferId)
+        if (!legs) return
+        saveTransfer.mutate({
+          id: entry.transferId,
+          date: legs.date,
+          fromAccount: legs.fromAccount,
+          toAccount: legs.toAccount,
+          amount: legs.amount,
+          description: legs.description,
+          state: next,
+        })
+        return
+      }
       savePlan.mutate({
         id: entry.id,
         date,
@@ -169,7 +270,7 @@ export function PlanGrid({
         ccCycleMonth: entry.ccCycleMonth ?? null,
       })
     },
-    [savePlan, saveCcOverride]
+    [savePlan, saveCcOverride, saveTransfer, findTransferLegs]
   )
 
   const handleOpenCcDialog = React.useCallback(
@@ -197,8 +298,8 @@ export function PlanGrid({
   }, [])
 
   const displayRows = React.useMemo(
-    () => collapseQuietDays(data.rows, data.today),
-    [data.rows, data.today]
+    () => collapseQuietDays(data.rows, data.today, expandedGaps),
+    [data.rows, data.today, expandedGaps]
   )
 
   return (
@@ -232,9 +333,11 @@ export function PlanGrid({
               if (dr.kind === "quiet") {
                 return (
                   <QuietRow
-                    key={`quiet-${idx}`}
+                    key={`quiet-${dr.gapKey}`}
                     count={dr.count!}
                     banksCount={banks.length}
+                    expanded={!!dr.expanded}
+                    onToggle={() => toggleGap(dr.gapKey!)}
                   />
                 )
               }
@@ -252,6 +355,8 @@ export function PlanGrid({
                   onNewTransfer={handleNewTransfer}
                   onSetState={setEntryState}
                   onDeletePlan={(id) => deletePlan.mutate(id)}
+                  onMovePlan={handleMovePlan}
+                  onEditTransfer={handleEditTransfer}
                   stateFilter={stateFilter ?? null}
                 />
               )
@@ -280,6 +385,14 @@ export function PlanGrid({
         banks={data.banks}
         seed={transferSeed}
       />
+      <MovePlanDialog
+        open={!!moveSeed}
+        onOpenChange={(open) => {
+          if (!open) setMoveSeed(null)
+        }}
+        banks={data.banks}
+        seed={moveSeed}
+      />
     </>
   )
 }
@@ -296,7 +409,8 @@ function paymentDateFor(card: CCCard, cycleMonth: string): string | null {
 
 function collapseQuietDays(
   rows: PlanGridResponse["rows"],
-  today: string
+  today: string,
+  expandedGaps: Set<string>
 ): DisplayRow[] {
   const out: DisplayRow[] = []
   let quietRun: PlanGridResponse["rows"] = []
@@ -306,7 +420,12 @@ function collapseQuietDays(
       // Don't bother collapsing tiny runs — the placeholder is bigger than 2 rows.
       for (const r of quietRun) out.push({ kind: "day", date: r.date, ref: r })
     } else {
-      out.push({ kind: "quiet", count: quietRun.length })
+      const gapKey = quietRun[0].date
+      const expanded = expandedGaps.has(gapKey)
+      out.push({ kind: "quiet", count: quietRun.length, gapKey, expanded })
+      if (expanded) {
+        for (const r of quietRun) out.push({ kind: "day", date: r.date, ref: r })
+      }
     }
     quietRun = []
   }
@@ -334,17 +453,25 @@ function addDays(iso: string, days: number): string {
 function QuietRow({
   count,
   banksCount,
+  expanded,
+  onToggle,
 }: {
   count: number
   banksCount: number
+  expanded: boolean
+  onToggle: () => void
 }) {
   return (
     <tr className="border-t border-border/30 bg-muted/10">
-      <td
-        colSpan={2 + banksCount * 2}
-        className="px-3 py-1 text-left text-[10px] text-muted-foreground italic"
-      >
-        +{count} quiet days
+      <td colSpan={2 + banksCount * 2} className="p-0">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="w-full cursor-pointer px-3 py-1 text-left text-[10px] text-muted-foreground italic hover:bg-muted/30"
+        >
+          {expanded ? "−" : "+"}
+          {count} quiet days {expanded ? "(collapse)" : ""}
+        </button>
       </td>
     </tr>
   )
@@ -361,6 +488,8 @@ function Row({
   onNewTransfer,
   onSetState,
   onDeletePlan,
+  onMovePlan,
+  onEditTransfer,
   stateFilter,
 }: {
   row: PlanGridResponse["rows"][number]
@@ -383,6 +512,8 @@ function Row({
     next: StateFlag
   ) => void
   onDeletePlan: (id: string) => void
+  onMovePlan: (entry: GridEntry, date: string, account: string) => void
+  onEditTransfer: (transferId: string) => void
   stateFilter: "todo" | "pending" | null
 }) {
   const isToday = row.date === today
@@ -434,6 +565,8 @@ function Row({
           onNewTransfer={onNewTransfer}
           onSetState={onSetState}
           onDeletePlan={onDeletePlan}
+          onMovePlan={onMovePlan}
+          onEditTransfer={onEditTransfer}
           stateFilter={stateFilter}
         />
       ))}
@@ -453,6 +586,8 @@ function BankCells({
   onNewTransfer,
   onSetState,
   onDeletePlan,
+  onMovePlan,
+  onEditTransfer,
   stateFilter,
 }: {
   date: string
@@ -476,6 +611,8 @@ function BankCells({
     next: StateFlag
   ) => void
   onDeletePlan: (id: string) => void
+  onMovePlan: (entry: GridEntry, date: string, account: string) => void
+  onEditTransfer: (transferId: string) => void
   stateFilter: "todo" | "pending" | null
 }) {
   const negativeBalance = balance < 0
@@ -558,6 +695,10 @@ function BankCells({
                   onOpenCcDialog={() => onOpenCcDialog(entry, date)}
                   onSetState={(next) => onSetState(entry, date, account, next)}
                   onDeletePlan={() => onDeletePlan(entry.id)}
+                  onMovePlan={() => onMovePlan(entry, date, account)}
+                  onEditTransfer={() =>
+                    entry.transferId && onEditTransfer(entry.transferId)
+                  }
                   onNewPlanHere={startCreate}
                   onNewTransferHere={() => onNewTransfer(date, account)}
                 />
@@ -583,6 +724,10 @@ function BankCells({
                         onSetState(entry, date, account, next)
                       }
                       onDeletePlan={() => onDeletePlan(entry.id)}
+                      onMovePlan={() => onMovePlan(entry, date, account)}
+                      onEditTransfer={() =>
+                        entry.transferId && onEditTransfer(entry.transferId)
+                      }
                       onNewPlanHere={startCreate}
                       onNewTransferHere={() => onNewTransfer(date, account)}
                     />
@@ -613,6 +758,8 @@ function EntryView({
   onOpenCcDialog,
   onSetState,
   onDeletePlan,
+  onMovePlan,
+  onEditTransfer,
   onNewPlanHere,
   onNewTransferHere,
 }: {
@@ -623,6 +770,8 @@ function EntryView({
   onOpenCcDialog: () => void
   onSetState: (next: StateFlag) => void
   onDeletePlan: () => void
+  onMovePlan: () => void
+  onEditTransfer: () => void
   onNewPlanHere: () => void
   onNewTransferHere: () => void
 }) {
@@ -657,15 +806,14 @@ function EntryView({
 
   // Every non-past entry gets a context menu so the "New plan / New transfer"
   // items are reachable from any cell (otherwise cells full of entries leave
-  // no empty space for the cell-level menu). State actions are conditional —
-  // only plans + CC projections carry them. Transfer legs route state through
-  // the transfer endpoint, which isn't wired through legs yet (follow-up).
+  // no empty space for the cell-level menu). State actions cover plans
+  // (incl. transfer legs, which route through saveTransfer) and CC projections.
   const showStateActions =
-    !entry.transferId &&
-    (entry.kind === "plan" ||
-      entry.kind === "cc-locked" ||
-      entry.kind === "cc-forecast")
+    entry.kind === "plan" ||
+    entry.kind === "cc-locked" ||
+    entry.kind === "cc-forecast"
   const canDelete = entry.kind === "plan" && !entry.transferId
+  const canEditTransfer = !!entry.transferId && !isPast
   const currentState = (entry.state ?? null) as StateFlag
   // Past entries: deletable plans get a stripped-down menu (Delete only).
   // Editing/marking new state on the past doesn't make sense; cleaning up
@@ -847,6 +995,11 @@ function EntryView({
     <ContextMenu>
       <ContextMenuTrigger className="contents">{body}</ContextMenuTrigger>
       <ContextMenuContent className="text-xs">
+        {canEditTransfer && (
+          <ContextMenuItem onClick={onEditTransfer}>
+            Edit transfer…
+          </ContextMenuItem>
+        )}
         {!isPast && showStateActions && (
           <>
             <ContextMenuItem
@@ -864,6 +1017,9 @@ function EntryView({
               {currentState === "pending" ? "Clear Pending" : "Mark as Pending"}
             </ContextMenuItem>
           </>
+        )}
+        {editable && (
+          <ContextMenuItem onClick={onMovePlan}>Move to…</ContextMenuItem>
         )}
         {canDelete && (
           <ContextMenuItem variant="destructive" onClick={onDeletePlan}>
