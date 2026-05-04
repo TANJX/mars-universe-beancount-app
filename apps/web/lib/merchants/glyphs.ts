@@ -3,7 +3,6 @@ import {
   CalendarClock,
   Hourglass,
   LineChart,
-  Repeat,
   type LucideIcon,
 } from "lucide-react"
 
@@ -25,11 +24,6 @@ export const GLYPHS = {
     icon: ArrowRightLeft,
     tone: "muted",
     label: "Transfer",
-  } satisfies GlyphSpec,
-  rebalance: {
-    icon: Repeat,
-    tone: "accent",
-    label: "Rebalance",
   } satisfies GlyphSpec,
   investment: {
     icon: LineChart,

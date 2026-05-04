@@ -16,7 +16,6 @@ export type TransactionClass =
   | "transfer"
   | "split"
   | "investment"
-  | "rebalance"
   | "complex"
 
 export interface JournalRow {
@@ -26,7 +25,7 @@ export interface JournalRow {
   /** The account the user perceives money came from / went to. */
   primary: Posting | null
 
-  /** The "category" leg — usually unique E or I leg. Null for transfers/rebalances. */
+  /** The "category" leg — usually unique E or I leg. Null for transfers. */
   category: Posting | null
 
   /** The other A/L leg for transfers. */

@@ -93,16 +93,6 @@ function classifyClass(
   const hasE = b.expenses.length > 0
   const hasI = b.income.length > 0
 
-  // Rule 1: rebalance — 6+ postings, 5+ with cost, all in Assets:Investment
-  if (len >= 6) {
-    const lots = txn.postings.filter((p) => p.cost !== undefined)
-    const investments = txn.postings.filter((p) =>
-      p.account.startsWith("Assets:Investment")
-    )
-    if (lots.length >= 5 && investments.length >= 5) return "rebalance"
-  }
-
-  // Rule 2: investment (any lot spec, but not a rebalance)
   if (hasInvestmentLot) return "investment"
 
   // Rule 5-7: 2-leg simple cases
@@ -169,20 +159,7 @@ function pickPrimaryCategoryCounterparty(
       const category = sortByAbs(b.expenses)[0] ?? null
       return { primary, category, counterparty: null }
     }
-    case "rebalance": {
-      const cashLeg =
-        postings.find(
-          (p) =>
-            p.account.endsWith(":USD") ||
-            p.account.endsWith(":Cash") ||
-            p.account.endsWith(":Cash:USD")
-        ) ??
-        postings.find((p) => p.cost === undefined) ??
-        null
-      return { primary: cashLeg, category: null, counterparty: null }
-    }
     case "investment": {
-      // Buy/sell: cash leg is the user's "account"; lot leg is the "category"
       const cashLeg =
         al.find((p) => p.amount.currency === "USD" && p.cost === undefined) ??
         null
@@ -270,7 +247,7 @@ export function classify(
     hasInvestmentLot,
     hasFxPrice,
     isForecast,
-    isComplex: txn.postings.length > 4 && cls !== "rebalance",
+    isComplex: txn.postings.length > 4,
   }
 }
 

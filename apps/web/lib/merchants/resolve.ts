@@ -4,7 +4,7 @@
 //   - initial: a derived letter mark (registry hit or generic fallback)
 //
 // Stage order — first match wins:
-//   1.   Class override (transfer/rebalance/investment/pending/forecast)
+//   1.   Class override (transfer/investment/pending/forecast)
 //   2.   Account override (Income:Salary:Acme → Acme via accounts.logos)
 //   3.   Payee patterns → registry (Tm *, ACH Des:…)
 //   4.   Cleaned payee → registry (exact then longest-substring on name|aliases)
@@ -80,9 +80,6 @@ export function resolveMerchant(ctx: ResolveContext): Resolved {
     }
     if (row.class === "transfer") {
       return { kind: "glyph", glyph: GLYPHS.transfer, alt: "Transfer" }
-    }
-    if (row.class === "rebalance") {
-      return { kind: "glyph", glyph: GLYPHS.rebalance, alt: "Rebalance" }
     }
     if (row.class === "investment") {
       return { kind: "glyph", glyph: GLYPHS.investment, alt: "Investment" }

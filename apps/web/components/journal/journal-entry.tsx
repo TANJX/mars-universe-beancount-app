@@ -36,7 +36,7 @@ export function JournalEntry({
   const contextual = filtered ? contextualNet(matching) : null
 
   // Classify on the fly so the avatar resolver can pick a class glyph for
-  // transfers, rebalances, etc.
+  // transfers, etc.
   const row = React.useMemo(() => classify(txn), [txn])
 
   return (

@@ -93,7 +93,6 @@ function ActivityRow({ row }: { row: JournalRow }) {
 }
 
 function displayPayeeFallback(row: JournalRow): string {
-  if (row.class === "rebalance") return row.txn.narration || "Rebalance"
   if (row.class === "transfer") return row.txn.narration || "Transfer"
   return row.txn.narration || "—"
 }
@@ -111,8 +110,6 @@ function pickClassTag(row: JournalRow): ClassTag | null {
       return { tone: "accent", label: "Split" }
     case "investment":
       return { tone: "accent", label: "Invest" }
-    case "rebalance":
-      return { tone: "accent", label: "Rebalance" }
     case "income":
       return { tone: "pos", label: "Income" }
     case "complex":
