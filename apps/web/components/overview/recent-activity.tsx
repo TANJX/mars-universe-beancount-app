@@ -110,6 +110,8 @@ function pickClassTag(row: JournalRow): ClassTag | null {
       return { tone: "accent", label: "Split" }
     case "investment":
       return { tone: "accent", label: "Invest" }
+    case "rebate":
+      return { tone: "pos", label: "Rebate" }
     case "income":
       return { tone: "pos", label: "Income" }
     case "complex":

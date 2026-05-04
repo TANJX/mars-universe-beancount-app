@@ -1,5 +1,6 @@
 import {
   ArrowRightLeft,
+  BadgePercent,
   CalendarClock,
   Hourglass,
   LineChart,
@@ -29,6 +30,11 @@ export const GLYPHS = {
     icon: LineChart,
     tone: "accent",
     label: "Investment",
+  } satisfies GlyphSpec,
+  rebate: {
+    icon: BadgePercent,
+    tone: "accent",
+    label: "Rebate",
   } satisfies GlyphSpec,
   pending: {
     icon: Hourglass,

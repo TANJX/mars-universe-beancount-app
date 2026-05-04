@@ -91,9 +91,22 @@ function classifyClass(
   const len = txn.postings.length
   const al = b.assets.length + b.liabilities.length
   const hasE = b.expenses.length > 0
-  const hasI = b.income.length > 0
+  // Rebate legs are cosmetic — they don't make a transfer stop being a
+  // transfer. Exclude them from hasI so a contribution-with-match still
+  // classifies as transfer, an expense-with-promo still as expense, etc.
+  const hasRebate = b.income.some((p) =>
+    accountMatches(p.account, "Income:Rebate")
+  )
+  const hasI = b.income.some(
+    (p) => !accountMatches(p.account, "Income:Rebate")
+  )
 
   if (hasInvestmentLot) return "investment"
+
+  // Pure rebate: free money lands in a single account (card cashback,
+  // gift-card credit). When another A/L leg or an expense is present, the
+  // rebate is auxiliary and the txn classifies by its underlying shape.
+  if (hasRebate && !hasE && !hasI && al <= 1) return "rebate"
 
   // Rule 5-7: 2-leg simple cases
   if (len === 2) {
@@ -137,7 +150,8 @@ function pickPrimaryCategoryCounterparty(
       const category = sortByAbs(b.expenses)[0] ?? null
       return { primary, category, counterparty: null }
     }
-    case "income": {
+    case "income":
+    case "rebate": {
       const posAL = al.filter((p) => p.amount.number > 0)
       const primary = sortByAbs(posAL.length ? posAL : al)[0] ?? null
       const category = sortByAbs(b.income)[0] ?? null

@@ -13,6 +13,7 @@ export type AccountRoot =
 export type TransactionClass =
   | "expense"
   | "income"
+  | "rebate"
   | "transfer"
   | "split"
   | "investment"
