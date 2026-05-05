@@ -2,13 +2,13 @@
 
 import * as React from "react"
 import { usePathname, useSearchParams } from "next/navigation"
-import { AlertCircle, Search, X } from "lucide-react"
+import { AlertCircle } from "lucide-react"
 
 import { DailyChart } from "@/components/expenses/daily-chart"
 import { ExpensesTable } from "@/components/expenses/expenses-table"
 import { MobileExpenses } from "@/components/expenses/mobile/mobile-expenses"
 import { Money } from "@/components/primitives/money"
-import { Tag } from "@/components/primitives/tag"
+import { SearchBar } from "@/components/search/search-bar"
 import { MobileExpensesSkeleton } from "@/components/skeletons/expenses-skeleton"
 import { Card } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -16,14 +16,13 @@ import { useUIState } from "@/components/layout/ui-state"
 import { useJournal } from "@/hooks/use-fava"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { deriveExpenseRows } from "@/lib/transform/expense-row"
-import { accountSegment } from "@/lib/transform/classify"
 import {
   applySearch,
   isQueryEmpty,
   parseSearch,
   pickPrimaryAccount,
-  stringifySearch,
 } from "@/lib/search/parse"
+import { useSearchVocabulary } from "@/lib/search/vocabulary"
 
 function readUrl(): { account: string; q: string } {
   if (typeof window === "undefined") return { account: "", q: "" }
@@ -41,8 +40,6 @@ export default function ExpensesPage() {
   const [account, setAccount] = React.useState("")
   const [q, setQ] = React.useState("")
   const [hydrated, setHydrated] = React.useState(false)
-  const [draft, setDraft] = React.useState("")
-  React.useEffect(() => setDraft(q), [q])
 
   // Track the last URL we wrote so we don't re-sync our own writes.
   const lastWrittenRef = React.useRef<string>("")
@@ -100,17 +97,11 @@ export default function ExpensesPage() {
   const totalSpent = filtered.reduce((s, r) => s + r.share, 0)
   const isMobile = useIsMobile()
 
-  function commit(value: string) {
-    setQ(value)
+  function clearAccount() {
+    setAccount("")
   }
 
-  function clearAccount() {
-    const clean = parseSearch(q)
-    clean.accounts = []
-    clean.excludeAccounts = []
-    setAccount("")
-    setQ(stringifySearch(clean))
-  }
+  const vocabulary = useSearchVocabulary(txns)
 
   if (isMobile) {
     return (
@@ -181,52 +172,15 @@ export default function ExpensesPage() {
         </Card>
       )}
 
-      <div className="flex flex-wrap items-center gap-2 rounded-md border bg-card px-2.5 py-1.5">
-        <Search size={14} className="shrink-0 text-muted-foreground" />
-        {primaryAccount && (
-          <Tag tone="accent" size="sm" className="gap-1">
-            <span>account:{accountSegment(primaryAccount)}</span>
-            <button
-              type="button"
-              onClick={clearAccount}
-              aria-label="Remove account filter"
-              className="text-current/60 hover:text-current"
-            >
-              <X size={10} />
-            </button>
-          </Tag>
-        )}
-        {parsed.tags.map((t) => (
-          <Tag key={`tag-${t}`} tone="neutral" size="sm">
-            #{t}
-          </Tag>
-        ))}
-        {parsed.payees.map((p) => (
-          <Tag key={`payee-${p}`} tone="neutral" size="sm">
-            payee:{p}
-          </Tag>
-        ))}
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault()
-              commit(draft)
-            }
-            if (e.key === "Escape") {
-              ;(e.target as HTMLInputElement).blur()
-            }
-          }}
-          onBlur={() => commit(draft)}
-          placeholder="Search… try account:Restaurants  payee:Tesla  exclude:account:Travel"
-          className="min-w-36 flex-1 border-0 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
-          data-search="primary"
-        />
-        <span className="shrink-0 font-mono text-xs text-muted-foreground/70">
-          {filtered.length} rows
-        </span>
-      </div>
+      <SearchBar
+        value={q}
+        onChange={setQ}
+        vocabulary={vocabulary}
+        accountFilter={account || undefined}
+        onClearAccount={account ? clearAccount : undefined}
+        matchedCount={filtered.length}
+        countLabel="rows"
+      />
 
       {isPending ? (
         <div className="flex flex-col">

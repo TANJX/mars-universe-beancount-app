@@ -163,5 +163,59 @@ export function pickPrimaryAccount(q: SearchQuery): string | undefined {
   return q.accounts[0]
 }
 
+export type TokenKind =
+  | "account"
+  | "exclude:account"
+  | "payee"
+  | "tag"
+  | "link"
+  | "text"
+
+export interface Token {
+  kind: TokenKind
+  value: string
+}
+
+const FIELD_BY_KIND: Record<TokenKind, keyof SearchQuery> = {
+  account: "accounts",
+  "exclude:account": "excludeAccounts",
+  payee: "payees",
+  tag: "tags",
+  link: "links",
+  text: "text",
+}
+
+function cloneQuery(q: SearchQuery): SearchQuery {
+  return {
+    accounts: q.accounts.slice(),
+    excludeAccounts: q.excludeAccounts.slice(),
+    payees: q.payees.slice(),
+    tags: q.tags.slice(),
+    links: q.links.slice(),
+    text: q.text.slice(),
+  }
+}
+
+/** Append a token to a SearchQuery and return a new query. */
+export function addToken(q: SearchQuery, token: Token): SearchQuery {
+  const next = cloneQuery(q)
+  next[FIELD_BY_KIND[token.kind]].push(token.value)
+  return next
+}
+
+/**
+ * Remove the first matching token from a SearchQuery and return a new query.
+ * Match is exact-string on value within the kind's field. If no match, returns
+ * the original query unchanged.
+ */
+export function removeToken(q: SearchQuery, token: Token): SearchQuery {
+  const field = FIELD_BY_KIND[token.kind]
+  const idx = q[field].indexOf(token.value)
+  if (idx === -1) return q
+  const next = cloneQuery(q)
+  next[field].splice(idx, 1)
+  return next
+}
+
 // Re-export for callers that want the helper in one import.
 export { accountRoot }

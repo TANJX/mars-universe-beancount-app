@@ -2,11 +2,11 @@
 
 import * as React from "react"
 import { usePathname, useSearchParams } from "next/navigation"
-import { AlertCircle, Search, X } from "lucide-react"
+import { AlertCircle } from "lucide-react"
 
 import { JournalEntry } from "@/components/journal/journal-entry"
 import { MobileJournal } from "@/components/journal/mobile/mobile-journal"
-import { Tag } from "@/components/primitives/tag"
+import { SearchBar } from "@/components/search/search-bar"
 import { MobileJournalSkeleton } from "@/components/skeletons/journal-skeleton"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Card } from "@/components/ui/card"
@@ -20,8 +20,8 @@ import {
   isQueryEmpty,
   parseSearch,
   pickPrimaryAccount,
-  stringifySearch,
 } from "@/lib/search/parse"
+import { useSearchVocabulary } from "@/lib/search/vocabulary"
 import type { Posting } from "@/lib/types/beancount"
 import { cn } from "@/lib/utils"
 
@@ -44,8 +44,6 @@ export default function JournalPage() {
   const [account, setAccount] = React.useState("")
   const [q, setQ] = React.useState("")
   const [hydrated, setHydrated] = React.useState(false)
-  const [draft, setDraft] = React.useState("")
-  React.useEffect(() => setDraft(q), [q])
 
   // Track the last URL we wrote so we don't re-sync our own writes.
   const lastWrittenRef = React.useRef<string>("")
@@ -144,17 +142,11 @@ export default function JournalPage() {
     return m
   }, [filteredAsc, accountFilter, openingSeed])
 
-  function commit(value: string) {
-    setQ(value)
+  function clearAccount() {
+    setAccount("")
   }
 
-  function clearAccount() {
-    const clean = parseSearch(q)
-    clean.accounts = []
-    clean.excludeAccounts = []
-    setAccount("")
-    setQ(stringifySearch(clean))
-  }
+  const vocabulary = useSearchVocabulary(txns)
 
   if (isMobile) {
     return (
@@ -206,52 +198,16 @@ export default function JournalPage() {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2 rounded-md border bg-card px-2.5 py-1.5">
-        <Search size={14} className="shrink-0 text-muted-foreground" />
-        {accountFilter && (
-          <Tag tone="accent" size="sm" className="gap-1">
-            <span>account:{accountSegment(accountFilter)}</span>
-            <button
-              type="button"
-              onClick={clearAccount}
-              aria-label="Remove account filter"
-              className="text-current/60 hover:text-current"
-            >
-              <X size={10} />
-            </button>
-          </Tag>
-        )}
-        {parsed.tags.map((t) => (
-          <Tag key={`tag-${t}`} tone="neutral" size="sm">
-            #{t}
-          </Tag>
-        ))}
-        {parsed.payees.map((p) => (
-          <Tag key={`payee-${p}`} tone="neutral" size="sm">
-            payee:{p}
-          </Tag>
-        ))}
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault()
-              commit(draft)
-            }
-            if (e.key === "Escape") {
-              ;(e.target as HTMLInputElement).blur()
-            }
-          }}
-          onBlur={() => commit(draft)}
-          placeholder="Search… try account:Expenses:Restaurants  payee:Tesla  tag:trip-2025-04-japan"
-          className="min-w-36 flex-1 border-0 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
-          data-search="primary"
-        />
-        <span className="shrink-0 font-mono text-xs text-muted-foreground/70">
-          {filteredAndSorted.length} txns
-        </span>
-      </div>
+      <SearchBar
+        value={q}
+        onChange={setQ}
+        vocabulary={vocabulary}
+        accountFilter={account || undefined}
+        onClearAccount={account ? clearAccount : undefined}
+        matchedCount={filteredAndSorted.length}
+        totalCount={txns?.length ?? 0}
+        countLabel="txns"
+      />
 
       <div
         className={cn(
