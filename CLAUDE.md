@@ -30,17 +30,19 @@ Guidance for coding agents working in `mars-universe-beancount`.
 
 ## Lint/Format Commands
 
-This repo currently has no committed lint config (`ruff.toml`, `pyproject` lint sections, etc.).
-However, `.ruff_cache/` exists, so Ruff is a reasonable default for agent work.
+Use the `just` recipes — they cover both the Python packages (`packages/beancount-tooling`, `packages/ledger-data-api`) and the Next.js web app (`apps/web`). Run from the repo root.
 
-- Preferred lint command:
-  - `uv run ruff check packages/beancount-tooling`
-- Auto-fix lint issues when safe:
-  - `uv run ruff check packages/beancount-tooling --fix`
-- Preferred formatting command:
-  - `uv run ruff format packages/beancount-tooling`
+- Lint everything: `just lint` (= `just lint-py` + `just lint-web`)
+- Format everything: `just fmt` (= `just fmt-py` + `just fmt-web`)
+- Python only:
+  - `just lint-py` → `uvx ruff check packages/beancount-tooling packages/ledger-data-api`
+  - `just fmt-py`  → `uvx ruff format packages/beancount-tooling packages/ledger-data-api`
+- Web only:
+  - `just lint-web` → `pnpm --filter web lint`
+  - `just fmt-web`  → `pnpm --filter web format`
+- Auto-fix Python lint issues when safe: `uvx ruff check packages/beancount-tooling packages/ledger-data-api --fix`
 
-If Ruff is unavailable in the environment, install/add it first (dev dependency) before enforcing lint rules.
+After non-trivial edits, run the relevant subset (`lint-py`/`lint-web`) before reporting work as done. Don't invoke `ruff` directly with a different package list — keep the scope aligned with the `Justfile` so cached results stay consistent.
 
 ## Test Commands
 
