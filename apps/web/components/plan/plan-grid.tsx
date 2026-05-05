@@ -424,7 +424,8 @@ function collapseQuietDays(
       const expanded = expandedGaps.has(gapKey)
       out.push({ kind: "quiet", count: quietRun.length, gapKey, expanded })
       if (expanded) {
-        for (const r of quietRun) out.push({ kind: "day", date: r.date, ref: r })
+        for (const r of quietRun)
+          out.push({ kind: "day", date: r.date, ref: r })
       }
     }
     quietRun = []

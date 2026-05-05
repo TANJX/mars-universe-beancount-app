@@ -99,10 +99,7 @@ type Builder =
   | { state: "idle"; draft: string }
   | { state: "value"; prefix: Prefix; draft: string }
 
-function parsedToChips(
-  q: SearchQuery,
-  pinnedAccount?: string
-): Chip[] {
+function parsedToChips(q: SearchQuery, pinnedAccount?: string): Chip[] {
   const out: Chip[] = []
   if (pinnedAccount) {
     out.push({
@@ -122,7 +119,9 @@ function parsedToChips(
   q.payees.forEach((v, i) =>
     out.push({ id: `p:${i}:${v}`, kind: "payee", value: v })
   )
-  q.tags.forEach((v, i) => out.push({ id: `t:${i}:${v}`, kind: "tag", value: v }))
+  q.tags.forEach((v, i) =>
+    out.push({ id: `t:${i}:${v}`, kind: "tag", value: v })
+  )
   q.links.forEach((v, i) =>
     out.push({ id: `l:${i}:${v}`, kind: "link", value: v })
   )
@@ -194,7 +193,9 @@ export function SearchBar({
         onClearAccount?.()
         return
       }
-      onChange(stringifySearch(removeToken(parsed, { kind: c.kind, value: c.value })))
+      onChange(
+        stringifySearch(removeToken(parsed, { kind: c.kind, value: c.value }))
+      )
     },
     [chips, parsed, onChange, onClearAccount]
   )
@@ -203,7 +204,9 @@ export function SearchBar({
     (idx: number) => {
       const c = chips[idx]
       if (!c || c.pinned) return
-      onChange(stringifySearch(removeToken(parsed, { kind: c.kind, value: c.value })))
+      onChange(
+        stringifySearch(removeToken(parsed, { kind: c.kind, value: c.value }))
+      )
       if (c.kind === "text") {
         setBuilder({ state: "idle", draft: c.value })
       } else {
@@ -548,9 +551,7 @@ function ValueDisplay({
     const head = segs.slice(0, -1).join(":")
     return (
       <span className="min-w-0 truncate font-mono text-sm">
-        {head && (
-          <span className="text-muted-foreground/70">{head}:</span>
-        )}
+        {head && <span className="text-muted-foreground/70">{head}:</span>}
         <span className="text-foreground">
           <Highlight text={last} draft={draft} />
         </span>

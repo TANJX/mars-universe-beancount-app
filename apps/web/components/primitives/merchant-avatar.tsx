@@ -61,11 +61,7 @@ export function MerchantAvatar({
   }
   if (resolved.kind === "category-icon") {
     return (
-      <CategoryIconAvatar
-        resolved={resolved}
-        size={px}
-        className={className}
-      />
+      <CategoryIconAvatar resolved={resolved} size={px} className={className} />
     )
   }
   return <InitialAvatar resolved={resolved} size={px} className={className} />

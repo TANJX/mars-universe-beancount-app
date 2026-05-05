@@ -140,7 +140,12 @@ export function resolveMerchant(ctx: ResolveContext): Resolved {
       if (!iconName) continue
       const label =
         lookupDisplayName(accounts, p.account) ?? leafSegment(p.account)
-      return { kind: "category-icon", name: iconName, tone: "muted", alt: label }
+      return {
+        kind: "category-icon",
+        name: iconName,
+        tone: "muted",
+        alt: label,
+      }
     }
   }
 

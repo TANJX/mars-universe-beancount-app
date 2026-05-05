@@ -37,11 +37,11 @@ build-extension:
     pnpm --filter card-balance-browser-extension build
 
 # Run the Next.js viewer (apps/web) in production mode — http://localhost:3000
-web:
-    pnpm --filter web exec next start -H 0.0.0.0 -p 3000
+web *args:
+    pnpm --filter web exec next start {{args}}
 
-web-dev:
-    pnpm --filter web dev
+web-dev *args:
+    pnpm --filter web dev {{args}}
 
 web-build:
     pnpm --filter web build

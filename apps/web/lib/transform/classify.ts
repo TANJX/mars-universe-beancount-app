@@ -97,9 +97,7 @@ function classifyClass(
   const hasRebate = b.income.some((p) =>
     accountMatches(p.account, "Income:Rebate")
   )
-  const hasI = b.income.some(
-    (p) => !accountMatches(p.account, "Income:Rebate")
-  )
+  const hasI = b.income.some((p) => !accountMatches(p.account, "Income:Rebate"))
 
   if (hasInvestmentLot) return "investment"
 
