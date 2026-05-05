@@ -2,6 +2,8 @@
 
 import * as React from "react"
 
+import { useHydrated } from "@/hooks/use-hydrated"
+
 /**
  * Render `children` only after the client has mounted. Used for components
  * that are not SSR-stable — notably Base UI's Floating tree (popover,
@@ -17,8 +19,8 @@ interface ClientOnlyProps {
 }
 
 export function ClientOnly({ children, fallback = null }: ClientOnlyProps) {
-  const [mounted, setMounted] = React.useState(false)
-  React.useEffect(() => setMounted(true), [])
-  if (!mounted) return <>{fallback}</>
+  const hydrated = useHydrated()
+
+  if (!hydrated) return <>{fallback}</>
   return <>{children}</>
 }

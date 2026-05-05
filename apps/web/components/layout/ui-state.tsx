@@ -24,11 +24,55 @@ interface UIState {
 const UIStateContext = React.createContext<UIState | null>(null)
 
 const DENSITY_KEY = "mars-density"
+const densityListeners = new Set<() => void>()
 
-function readInitialDensity(): Density {
+let densityOverride: Density | null = null
+
+function readStoredDensity(): Density {
+  try {
+    const raw = window.localStorage.getItem(DENSITY_KEY)
+    return raw === "compact" || raw === "comfortable" ? raw : "comfortable"
+  } catch {
+    return "comfortable"
+  }
+}
+
+function readDensitySnapshot(): Density {
   if (typeof window === "undefined") return "comfortable"
-  const raw = window.localStorage.getItem(DENSITY_KEY)
-  return raw === "compact" || raw === "comfortable" ? raw : "comfortable"
+  return densityOverride ?? readStoredDensity()
+}
+
+function subscribeDensity(onStoreChange: () => void): () => void {
+  densityListeners.add(onStoreChange)
+
+  if (typeof window === "undefined") {
+    return () => {
+      densityListeners.delete(onStoreChange)
+    }
+  }
+
+  function onStorage(event: StorageEvent) {
+    if (event.key !== null && event.key !== DENSITY_KEY) return
+    densityOverride = null
+    onStoreChange()
+  }
+
+  window.addEventListener("storage", onStorage)
+
+  return () => {
+    densityListeners.delete(onStoreChange)
+    window.removeEventListener("storage", onStorage)
+  }
+}
+
+function emitDensityChange() {
+  for (const onStoreChange of densityListeners) {
+    onStoreChange()
+  }
+}
+
+function getDensityServerSnapshot(): Density {
+  return "comfortable"
 }
 
 const VALID_PRESETS: PeriodPresetId[] = [
@@ -42,7 +86,11 @@ const VALID_PRESETS: PeriodPresetId[] = [
 ]
 
 export function UIStateProvider({ children }: { children: React.ReactNode }) {
-  const [density, setDensityState] = React.useState<Density>("comfortable")
+  const density = React.useSyncExternalStore(
+    subscribeDensity,
+    readDensitySnapshot,
+    getDensityServerSnapshot
+  )
   // Period URL state: ?p=mtd / ?p=custom&from=2026-04-01&to=2026-04-25
   const [{ p, from, to }, setUrlPeriod] = useQueryStates(
     {
@@ -58,15 +106,12 @@ export function UIStateProvider({ children }: { children: React.ReactNode }) {
     { history: "replace" }
   )
 
-  React.useEffect(() => {
-    setDensityState(readInitialDensity())
-  }, [])
-
   const setDensity = React.useCallback((d: Density) => {
-    setDensityState(d)
+    densityOverride = d
     try {
       window.localStorage.setItem(DENSITY_KEY, d)
     } catch {}
+    emitDensityChange()
   }, [])
 
   const period = React.useMemo<Period>(() => {

@@ -2,6 +2,7 @@
 
 import * as React from "react"
 
+import { useHydrated } from "@/hooks/use-hydrated"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -35,18 +36,19 @@ function isDemo(): boolean {
   return !!v && v !== "0" && v.toLowerCase() !== "false"
 }
 
-export function DemoWelcome() {
-  const [open, setOpen] = React.useState(false)
+function isDismissed(): boolean {
+  if (typeof window === "undefined") return false
 
-  React.useEffect(() => {
-    if (!isDemo()) return
-    try {
-      if (window.localStorage.getItem(STORAGE_KEY)) return
-    } catch {
-      // localStorage blocked (private mode, etc.) — fall through and show.
-    }
-    setOpen(true)
-  }, [])
+  try {
+    return window.localStorage.getItem(STORAGE_KEY) === "1"
+  } catch {
+    return false
+  }
+}
+
+export function DemoWelcome() {
+  const hydrated = useHydrated()
+  const [dismissed, setDismissed] = React.useState(false)
 
   function dismiss() {
     try {
@@ -54,13 +56,20 @@ export function DemoWelcome() {
     } catch {
       // ignore — non-fatal
     }
-    setOpen(false)
+    setDismissed(true)
   }
 
   if (!isDemo()) return null
 
+  const open = hydrated && !dismissed && !isDismissed()
+
   return (
-    <Dialog open={open} onOpenChange={(o) => (o ? setOpen(true) : dismiss())}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) dismiss()
+      }}
+    >
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Welcome to the demo</DialogTitle>

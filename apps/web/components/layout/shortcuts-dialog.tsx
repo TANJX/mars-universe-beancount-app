@@ -2,6 +2,7 @@
 
 import * as React from "react"
 
+import { useHydrated } from "@/hooks/use-hydrated"
 import {
   Dialog,
   DialogContent,
@@ -78,9 +79,7 @@ export function useShortcutsDialog(): ShortcutsContextValue {
 /** Mounts the dialog + listens for `?`. Wrap the route group with this. */
 export function ShortcutsDialog({ children }: { children?: React.ReactNode }) {
   const [open, setOpen] = React.useState(false)
-  const [mounted, setMounted] = React.useState(false)
-
-  React.useEffect(() => setMounted(true), [])
+  const hydrated = useHydrated()
 
   React.useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -111,7 +110,7 @@ export function ShortcutsDialog({ children }: { children?: React.ReactNode }) {
   return (
     <ShortcutsContext.Provider value={value}>
       {children}
-      {mounted && (
+      {hydrated && (
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogContent className="max-w-md">
             <DialogHeader>

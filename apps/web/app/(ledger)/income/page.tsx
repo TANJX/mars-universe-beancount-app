@@ -23,15 +23,28 @@ type ChartView = "summary" | "categories"
 
 export default function IncomePage() {
   const { period } = useUIState()
+  const periodKey = `${period.id}:${period.from ?? ""}:${period.to ?? ""}`
+  const defaultChartGranularity = clampGranularity(defaultGranularity(period))
 
-  // Chart granularity. Auto-pick from period length on mount; user can override.
-  // Day/week are disabled on this page, so clamp the auto-pick to month+.
-  const [granularity, setGranularity] = React.useState<Granularity>(() =>
-    clampGranularity(defaultGranularity(period))
+  // Granularity defaults from the active period. A user override only applies
+  // to the current period snapshot instead of being synchronized in an effect.
+  const [granularityOverride, setGranularityOverride] = React.useState<{
+    periodKey: string
+    value: Granularity
+  } | null>(null)
+  const granularity =
+    granularityOverride?.periodKey === periodKey
+      ? granularityOverride.value
+      : defaultChartGranularity
+  const setGranularity = React.useCallback(
+    (value: string) => {
+      const next = value as Granularity
+      setGranularityOverride(
+        next === defaultChartGranularity ? null : { periodKey, value: next }
+      )
+    },
+    [defaultChartGranularity, periodKey]
   )
-  React.useEffect(() => {
-    setGranularity(clampGranularity(defaultGranularity(period)))
-  }, [period])
 
   const [chartView, setChartView] = React.useState<ChartView>("summary")
 
@@ -134,7 +147,7 @@ export default function IncomePage() {
             </TabsList>
             <Tabs
               value={granularity}
-              onValueChange={(v) => setGranularity(v as Granularity)}
+              onValueChange={setGranularity}
             >
               <TabsList>
                 {GRANULARITY_OPTIONS.map((o) => (
