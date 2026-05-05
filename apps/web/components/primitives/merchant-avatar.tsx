@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import Image from "next/image"
 import { DynamicIcon, type IconName } from "lucide-react/dynamic"
 
 import { useResolvedUIConfig } from "@/lib/config"
@@ -122,13 +123,13 @@ function LogoAvatar({
           {resolved.fallback.initial}
         </span>
       )}
-      <img
+      <Image
         src={resolved.src}
         alt={resolved.alt}
         width={size}
         height={size}
+        unoptimized
         loading="lazy"
-        decoding="async"
         onLoad={() => setLoaded(true)}
         onError={() => setErrored(true)}
         className={cn(

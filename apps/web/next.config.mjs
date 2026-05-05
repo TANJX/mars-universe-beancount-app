@@ -12,6 +12,14 @@ const FAVA_LEDGER_SLUG =
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "img.logo.dev",
+      },
+    ],
+  },
   async rewrites() {
     return [
       {

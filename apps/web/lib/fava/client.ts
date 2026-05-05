@@ -37,7 +37,7 @@ export async function favaFetch<T>(
   let res: Response
   try {
     res = await fetch(url, init)
-  } catch (e) {
+  } catch {
     throw new FavaError(
       `Network error contacting Fava (${url}). Is \`just fava\` running?`,
       undefined,

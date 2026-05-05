@@ -329,7 +329,7 @@ export function PlanGrid({
             </tr>
           </thead>
           <tbody>
-            {displayRows.map((dr, idx) => {
+            {displayRows.map((dr) => {
               if (dr.kind === "quiet") {
                 return (
                   <QuietRow

@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import Image from "next/image"
 
 import { useHydrated } from "@/hooks/use-hydrated"
 import { Button } from "@/components/ui/button"
@@ -97,11 +98,12 @@ export function DemoWelcome() {
               className="flex items-center gap-3 rounded-lg border bg-card px-3 py-2 transition-colors hover:bg-accent"
             >
               {GH_LOGO ? (
-                <img
+                <Image
                   src={GH_LOGO}
                   alt=""
                   width={20}
                   height={20}
+                  unoptimized
                   className="size-5 shrink-0 rounded"
                 />
               ) : (

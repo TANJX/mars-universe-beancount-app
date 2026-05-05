@@ -9,7 +9,7 @@
 //   2026-04-15    → day
 //   2026-01 - 2026-03  → range (with surrounding spaces)
 
-import type { Granularity, Period, PeriodPresetId } from "@/lib/types/views"
+import type { Granularity, Period } from "@/lib/types/views"
 import { getPreset } from "@/lib/mock/periods"
 
 // ─── Fava `time=` ─────────────────────────────────────────────────────────

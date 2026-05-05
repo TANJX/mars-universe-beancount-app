@@ -145,10 +145,7 @@ export default function IncomePage() {
               <TabsTrigger value="summary">Summary</TabsTrigger>
               <TabsTrigger value="categories">Categories</TabsTrigger>
             </TabsList>
-            <Tabs
-              value={granularity}
-              onValueChange={setGranularity}
-            >
+            <Tabs value={granularity} onValueChange={setGranularity}>
               <TabsList>
                 {GRANULARITY_OPTIONS.map((o) => (
                   <TabsTrigger key={o.value} value={o.value}>

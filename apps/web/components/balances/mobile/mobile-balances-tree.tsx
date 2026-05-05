@@ -34,7 +34,7 @@ export function MobileBalancesTree({
 }: MobileBalancesTreeProps) {
   const rawTotal = pickValue(root.balanceChildren, baseCurrency)
   const total = flipSign ? -rawTotal : rawTotal
-  const visibleChildren = root.children.filter((c) => !isDust(c))
+  const visibleChildren = root.children.filter((c) => !isDust(c, baseCurrency))
 
   const [openRoot, setOpenRoot] = React.useState(defaultOpen)
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set())
@@ -97,7 +97,8 @@ function NodeRow({
   baseCurrency: string
   flipSign: boolean
 }) {
-  const visibleChildren = node.children?.filter((c) => !isDust(c)) ?? []
+  const visibleChildren =
+    node.children?.filter((c) => !isDust(c, baseCurrency)) ?? []
   const hasChildren = visibleChildren.length > 0
   const isOpen = expanded.has(node.account)
 
@@ -166,8 +167,6 @@ function pickValue(inv: Record<string, number>, currency: string): number {
   return inv[currency] ?? 0
 }
 
-function isDust(node: BalanceTreeNode): boolean {
-  const values = Object.values(node.balanceChildren ?? {})
-  if (values.length === 0) return true
-  return values.every((v) => Math.abs(v) < DUST_USD)
+function isDust(node: BalanceTreeNode, baseCurrency: string): boolean {
+  return Math.abs(pickValue(node.balanceChildren, baseCurrency)) < DUST_USD
 }

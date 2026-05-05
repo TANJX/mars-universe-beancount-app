@@ -210,7 +210,5 @@ function pickValue(inv: Record<string, number>, currency: string): number {
 }
 
 function isDust(node: BalanceTreeNode, baseCurrency: string): boolean {
-  const values = Object.values(node.balanceChildren ?? {})
-  if (values.length === 0) return true
-  return values.every((v) => Math.abs(v) < DUST_USD)
+  return Math.abs(pickValue(node.balanceChildren, baseCurrency)) < DUST_USD
 }

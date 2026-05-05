@@ -151,7 +151,7 @@ export function useIncomeStatement(opts: UseIncomeStatementOptions = {}) {
         `income_statement${favaQuery({ time, conversion, interval })}`,
         IncomeStatementSchema
       )
-      return toIncomeStatement(res.data, interval)
+      return toIncomeStatement(res.data)
     },
   })
 }
@@ -219,13 +219,10 @@ function toTrialBalance(
   return { dateRange, conversion, trees }
 }
 
-function toIncomeStatement(
-  data: {
-    trees: Parameters<typeof convertTreeNode>[0][]
-    charts: { type?: string; data: unknown }[]
-  },
-  _interval: string
-): IncomeStatement {
+function toIncomeStatement(data: {
+  trees: Parameters<typeof convertTreeNode>[0][]
+  charts: { type?: string; data: unknown }[]
+}): IncomeStatement {
   const incomeWire = data.trees.find((t) => t.account === "Income")
   const expensesWire = data.trees.find((t) => t.account === "Expenses")
   if (!incomeWire || !expensesWire) {

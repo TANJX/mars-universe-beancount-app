@@ -15,7 +15,8 @@ import { useResolvedUIConfig } from "@/lib/config"
 import { lookupColor, rollupKey as rollupKeyImpl } from "@/lib/config/accounts"
 
 /** Pure no-op — undefined unless a config-aware caller is used. */
-export function lookupCategoryColor(_path: AccountPath): string | undefined {
+export function lookupCategoryColor(path: AccountPath): string | undefined {
+  void path
   return undefined
 }
 

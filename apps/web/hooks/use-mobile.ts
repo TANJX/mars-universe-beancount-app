@@ -25,9 +25,5 @@ function getServerSnapshot(): boolean {
 }
 
 export function useIsMobile(): boolean {
-  return React.useSyncExternalStore(
-    subscribe,
-    getSnapshot,
-    getServerSnapshot
-  )
+  return React.useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
 }
