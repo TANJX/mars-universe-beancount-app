@@ -31,4 +31,4 @@ docker save "${IMAGES[@]}" \
   | gzip \
   | ssh "${NAS_USER}@${NAS_HOST}" 'gunzip | sudo docker load'
 
-echo "==> Done. SSH to the NAS and run: cd /volume1/docker/mars-universe-beancount/deploy && sudo docker compose up -d"
+echo "==> Done. SSH to the NAS and run: cd /volume1/docker/mars-universe-beancount-app/deploy && sudo docker-compose up -d"
