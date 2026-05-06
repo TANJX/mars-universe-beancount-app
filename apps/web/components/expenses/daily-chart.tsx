@@ -32,9 +32,22 @@ export function DailyChart({ rows, onHover }: DailyChartProps) {
       const date = r.row.txn.date
       totals.set(date, (totals.get(date) ?? 0) + r.share)
     }
-    return Array.from(totals.entries())
-      .map(([date, expense]) => ({ date, expense }))
-      .sort((a, b) => a.date.localeCompare(b.date))
+    if (totals.size === 0) return []
+    const dates = Array.from(totals.keys()).sort()
+    const start = dates[0]
+    const end = dates[dates.length - 1]
+    const out: DailyEntry[] = []
+    const cursor = new Date(`${start}T00:00:00`)
+    const last = new Date(`${end}T00:00:00`)
+    while (cursor <= last) {
+      const y = cursor.getFullYear()
+      const m = String(cursor.getMonth() + 1).padStart(2, "0")
+      const d = String(cursor.getDate()).padStart(2, "0")
+      const key = `${y}-${m}-${d}`
+      out.push({ date: key, expense: totals.get(key) ?? 0 })
+      cursor.setDate(cursor.getDate() + 1)
+    }
+    return out
   }, [rows])
 
   return (
