@@ -1,8 +1,29 @@
 import { displayDialog } from '../utils.js';
 
+// Robinhood renders share count + execution price as e.g.
+// "28.580559 shares at $33.27" (header right span when filled, or the
+// "Filled quantity" cell-label as fallback). Numbers may contain commas.
+function parseSharesAndPrice(text) {
+  if (!text) return null;
+  const m = text.match(/([\d,]+\.?\d*)\s+shares?\s+at\s+\$([\d,]+\.?\d*)/i);
+  if (!m) return null;
+  return {
+    amount: parseFloat(m[1].replace(/,/g, '')),
+    price: parseFloat(m[2].replace(/,/g, '')),
+  };
+}
+
 export function extractRobinhood() {
-  // get page url
-  const accountType = document.querySelector("button#downshift-1-toggle-button")?.innerText || "";
+  // The account selector button uses dynamic downshift IDs (e.g. downshift-1,
+  // downshift-7), so locate it by the recognized label text instead.
+  let accountType = "";
+  for (const btn of document.querySelectorAll('button[id^="downshift-"][id$="-toggle-button"]')) {
+    const label = (btn.innerText || "").trim();
+    if (label === 'Roth IRA' || label === 'Traditional IRA' || label === 'Individual') {
+      accountType = label;
+      break;
+    }
+  }
   let entries = []
   let dateRegex = /^[A-Z][a-z]{2} \d{1,2}(, \d{4})?$/g
   let hourRegex = /^\d{1,2}h$/g
@@ -64,7 +85,9 @@ export function extractRobinhood() {
 
     // amount
     let costStr = rightDiv.querySelector('h3')?.textContent || '';
-    if (transaction.textContent.includes("Canceled") || transaction.textContent.includes("Placed")) {
+    if (transaction.textContent.includes("Canceled") ||
+        transaction.textContent.includes("Placed") ||
+        transaction.textContent.includes("Failed")) {
       continue;
     }
     if (costStr.startsWith("$")) {
@@ -74,7 +97,8 @@ export function extractRobinhood() {
     } else if (costStr.startsWith("+$")) {
       costStr = costStr.substring(2)
     }
-    entry.cost = costStr;
+    // Strip thousands separators — parseFloat("1,402.43") returns 1.
+    entry.cost = costStr.replace(/,/g, '');
 
     const rightSpan = rightDiv.querySelector(':scope > span');
     if (rightSpan && rightSpan.textContent.trim())
@@ -101,18 +125,26 @@ export function extractRobinhood() {
     entries.push(entry);
   }
 
+  // Sort by date asc, then put all buys before sells within a day so that
+  // same-direction transactions end up adjacent for grouping below.
   entries.sort((a, b) => {
     if (a.date < b.date) return -1;
     if (a.date > b.date) return 1;
-    return 0;
+    const aSell = a.info?.toLowerCase().endsWith('sell') ? 1 : 0;
+    const bSell = b.info?.toLowerCase().endsWith('sell') ? 1 : 0;
+    return aSell - bSell;
   });
 
   let results = [];
-  // Filter out entries that should be skipped
+  // Drop transaction rows we couldn't parse a fill for (failed/pending/etc.)
   entries = entries.filter(entry => {
-    if (entry.transaction && (!entry.amountInfo || entry.amountInfo.split(" ").length <= 3)) {
-      console.warn("Skipping", entry);
-      return false;
+    if (entry.transaction) {
+      const parsed = parseSharesAndPrice(entry.amountInfo);
+      if (!parsed) {
+        console.warn("Skipping (no shares/price)", entry);
+        return false;
+      }
+      entry._parsed = parsed;
     }
     return true;
   });
@@ -125,36 +157,53 @@ export function extractRobinhood() {
     if (entry.transaction) {
       const symbol = entry.symbol;
       const description = `${entry.info}`;
-      const amount = parseFloat(entry.amountInfo.split(" ")[0]);
-      const price = parseFloat(entry.amountInfo.split(" ")[3].substring(1));
+      const { amount, price } = entry._parsed;
       const cost = Math.round(amount * price * 100) / 100;
+      const direction = entry.info.toLowerCase().endsWith("sell") ? "sell" : "buy";
 
       if (entry.ira) {
-        // Group IRA investments within one day
-        if (i === 0 || entries[i - 1].date !== entry.date || !entries[i - 1].transaction || entries[i - 1].ira !== entry.ira) {
-          results.push(`${entry.date} * "IRA Contribution"`);
-        }
-        results.push(`  Assets:Investment:Robinhood:${entry.ira}-IRA:${symbol}          ${amount} ${symbol} {${price} USD}`);
+        const sharesAcct = `Assets:Investment:Robinhood:${entry.ira}-IRA:${symbol}`;
+        const usdAcct = `Assets:Investment:Robinhood:${entry.ira}-IRA:USD`;
 
-        // If it's the last entry of the day or the next entry is not an IRA investment
-        if (i === entries.length - 1 || entries[i + 1].date !== entry.date || !entries[i + 1].transaction || entries[i + 1].ira !== entry.ira) {
-          // Calculate the total cost for the day
-          let totalCost = 0;
-          for (let j = i; j >= 0 && entries[j].date === entry.date && entries[j].transaction && entries[j].ira === entry.ira; j--) {
-            const entryAmount = parseFloat(entries[j].amountInfo.split(" ")[0]);
-            const entryPrice = parseFloat(entries[j].amountInfo.split(" ")[3].substring(1));
-            totalCost += Math.round(entryAmount * entryPrice * 100) / 100;
-          }
-          results.push(`  Assets:Pending-Transfer                           -${totalCost.toFixed(2)} USD`);
-          // results.push(`  Equity:Others:Rounding`);
+        if (direction === "sell") {
+          // Sells are emitted one-per-transaction so each lot disposal is
+          // its own entry — keeps gain/loss attribution clean per symbol.
+          results.push(`${entry.date} * "${entry.info}"`);
+          results.push(`  ${sharesAcct}          -${amount} ${symbol} {} @ ${price} USD`);
+          results.push(`  ${usdAcct}          ${cost.toFixed(2)} USD`);
+          results.push(`  Income:Trading:Stock`);
           results.push("");
+        } else {
+          // Buys still group across same-day same-IRA so contributions
+          // show as one entry rather than N tiny rebalance rows.
+          const sameGroup = (other) =>
+            other && other.transaction && other.ira === entry.ira &&
+            other.date === entry.date &&
+            !other.info.toLowerCase().endsWith("sell");
+
+          const isFirst = i === 0 || !sameGroup(entries[i - 1]);
+          const isLast = i === entries.length - 1 || !sameGroup(entries[i + 1]);
+
+          if (isFirst) {
+            results.push(`${entry.date} * "IRA Contribution"`);
+          }
+          results.push(`  ${sharesAcct}          ${amount} ${symbol} {${price} USD}`);
+
+          if (isLast) {
+            let totalCost = 0;
+            for (let j = i; j >= 0 && sameGroup(entries[j]); j--) {
+              const { amount: a, price: p } = entries[j]._parsed;
+              totalCost += Math.round(a * p * 100) / 100;
+            }
+            results.push(`  ${usdAcct}          -${totalCost.toFixed(2)} USD`);
+            results.push("");
+          }
         }
       } else {
         results.push(`${entry.date} * "${description} ${entry.amountInfo}"`);
-        if (entry.info.toLowerCase().endsWith("buy") || entry.info.toLowerCase().endsWith("recurring investment")) {
+        if (direction === "buy") {
           results.push(`  Assets:Investment:Robinhood:Brokerage:${symbol}          ${amount} ${symbol} {${price} USD}`);
           results.push(`  Assets:Investment:Robinhood:Brokerage:USD          -${cost} USD`);
-          // results.push(`  Equity:Others:Rounding`);
         } else {
           results.push(`  Assets:Investment:Robinhood:Brokerage:${symbol}          -${amount} ${symbol} {} @ ??? USD`);
           results.push(`  Assets:Investment:Robinhood:Brokerage:USD          ${cost} USD`);

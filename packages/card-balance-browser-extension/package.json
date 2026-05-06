@@ -1,7 +1,7 @@
 {
   "name": "card-balance-browser-extension",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.1.0",
   "license": "MIT",
   "dependencies": {
     "copy-webpack-plugin": "^12.0.2",

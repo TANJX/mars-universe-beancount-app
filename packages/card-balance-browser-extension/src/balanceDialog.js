@@ -6,9 +6,9 @@ import { extractFuture } from './extractors/future.js';
 import { extractRobinhood } from './extractors/robinhood.js';
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
-// Fava slugifies the journal title for the URL prefix. Change to match your
-// own journal's title if forking. Default matches the public demo ledger.
-const FAVA_LEDGER_SLUG = 'acme-demo';
+// Fava slugifies the journal title for the URL prefix. Set FAVA_LEDGER_SLUG at
+// build time (see build.js); falls back to the public demo ledger's slug.
+const FAVA_LEDGER_SLUG = process.env.FAVA_LEDGER_SLUG || 'acme-demo';
 
 export function createBalanceDialog(account) {
   const dialog = document.createElement('div');
