@@ -4,6 +4,7 @@ import * as React from "react"
 import { usePathname, useSearchParams } from "next/navigation"
 import { AlertCircle } from "lucide-react"
 
+import { COLS_BASE, COLS_FILTERED } from "@/components/journal/cols"
 import { JournalEntry } from "@/components/journal/journal-entry"
 import { MobileJournal } from "@/components/journal/mobile/mobile-journal"
 import { SearchBar } from "@/components/search/search-bar"
@@ -24,9 +25,6 @@ import {
 import { useSearchVocabulary } from "@/lib/search/vocabulary"
 import type { Posting } from "@/lib/types/beancount"
 import { cn } from "@/lib/utils"
-
-const COLS_BASE = "grid-cols-[5.5rem_1rem_1fr_9rem]"
-const COLS_FILTERED = "grid-cols-[5.5rem_1rem_1fr_9rem_7rem_7rem]"
 
 function readUrl(): { account: string; q: string } {
   if (typeof window === "undefined") return { account: "", q: "" }

@@ -12,8 +12,7 @@ import {
 import { accountMatches, classify } from "@/lib/transform/classify"
 import type { Posting, Transaction } from "@/lib/types/beancount"
 
-const COLS_BASE = "grid-cols-[5.5rem_1rem_1fr_9rem]"
-const COLS_FILTERED = "grid-cols-[5.5rem_1rem_1fr_9rem_7rem_7rem]"
+import { COLS_BASE, COLS_FILTERED } from "./cols"
 
 interface JournalEntryProps {
   txn: Transaction
