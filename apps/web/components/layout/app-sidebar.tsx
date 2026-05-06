@@ -43,7 +43,7 @@ import { AccountDot } from "@/components/primitives/account-dot"
 import { ClientOnly } from "@/components/primitives/client-only"
 import { useCommandPalette } from "@/components/layout/command-palette"
 import { useShortcutsDialog } from "@/components/layout/shortcuts-dialog"
-import { useUIState } from "@/components/layout/ui-state"
+import { usePeriodHref, useUIState } from "@/components/layout/ui-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useResolvedUIConfig, useUIConfig } from "@/lib/config"
 import type { Density } from "@/lib/types/views"
@@ -67,6 +67,7 @@ const NAV_ITEMS: NavItem[] = [
 export function AppSidebar() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
+  const periodHref = usePeriodHref()
   const activeAccount = searchParams.get("account") ?? ""
   const { openCommandPalette } = useCommandPalette()
   const { branding, sidebar } = useResolvedUIConfig()
@@ -120,7 +121,7 @@ export function AppSidebar() {
                 return (
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton
-                      render={<Link href={item.href} />}
+                      render={<Link href={periodHref(item.href)} />}
                       isActive={active}
                     >
                       <Icon size={14} />
@@ -150,7 +151,9 @@ export function AppSidebar() {
                       </SidebarMenuItem>
                     ))
                   : sidebar.bookmarks.map((b) => {
-                      const href = `/journal?account=${encodeURIComponent(b.accountPath)}`
+                      const href = periodHref(
+                        `/journal?account=${encodeURIComponent(b.accountPath)}`
+                      )
                       // Highlight only the bookmark whose account is the current
                       // filter — not every bookmark when on /journal.
                       const active =

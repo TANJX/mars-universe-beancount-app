@@ -11,6 +11,7 @@ import {
   Receipt,
 } from "lucide-react"
 
+import { usePeriodHref } from "@/components/layout/ui-state"
 import { cn } from "@/lib/utils"
 
 interface TabItem {
@@ -29,6 +30,7 @@ const TABS: TabItem[] = [
 
 export function MobileTabBar() {
   const pathname = usePathname()
+  const periodHref = usePeriodHref()
 
   return (
     <nav
@@ -43,7 +45,7 @@ export function MobileTabBar() {
         return (
           <Link
             key={tab.href}
-            href={tab.href}
+            href={periodHref(tab.href)}
             aria-current={active ? "page" : undefined}
             className={cn(
               "flex min-h-11 flex-col items-center gap-1 px-3 py-1 text-[10.5px]",

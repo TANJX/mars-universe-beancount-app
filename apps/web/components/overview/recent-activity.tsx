@@ -3,6 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { Panel } from "@/components/overview/panel"
+import { usePeriodHref } from "@/components/layout/ui-state"
 import { MerchantAvatar } from "@/components/primitives/merchant-avatar"
 import { Money } from "@/components/primitives/money"
 import { Tag } from "@/components/primitives/tag"
@@ -16,12 +17,14 @@ interface RecentActivityProps {
 }
 
 export function RecentActivity({ rows }: RecentActivityProps) {
+  const periodHref = usePeriodHref()
+
   return (
     <Panel
       title="Recent activity"
       action={
         <Link
-          href="/journal"
+          href={periodHref("/journal")}
           className="text-xs text-muted-foreground hover:text-foreground"
         >
           View all →

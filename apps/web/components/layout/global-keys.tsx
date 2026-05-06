@@ -3,6 +3,8 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 
+import { usePeriodHref } from "@/components/layout/ui-state"
+
 /**
  * Vim-style "leader" keyboard nav for the app. Mounted once at the
  * route-group layout. Listens at the window level; no-ops when an input,
@@ -22,6 +24,7 @@ import { useRouter } from "next/navigation"
  */
 export function GlobalKeys() {
   const router = useRouter()
+  const periodHref = usePeriodHref()
   const leaderRef = React.useRef<number | null>(null)
 
   React.useEffect(() => {
@@ -43,27 +46,27 @@ export function GlobalKeys() {
         switch (e.key.toLowerCase()) {
           case "o":
             e.preventDefault()
-            router.push("/overview")
+            router.push(periodHref("/overview"))
             return
           case "b":
             e.preventDefault()
-            router.push("/balances")
+            router.push(periodHref("/balances"))
             return
           case "i":
             e.preventDefault()
-            router.push("/income")
+            router.push(periodHref("/income"))
             return
           case "e":
             e.preventDefault()
-            router.push("/expenses")
+            router.push(periodHref("/expenses"))
             return
           case "j":
             e.preventDefault()
-            router.push("/journal")
+            router.push(periodHref("/journal"))
             return
           case "p":
             e.preventDefault()
-            router.push("/plan")
+            router.push(periodHref("/plan"))
             return
         }
       }
@@ -84,7 +87,7 @@ export function GlobalKeys() {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [router])
+  }, [periodHref, router])
 
   return null
 }

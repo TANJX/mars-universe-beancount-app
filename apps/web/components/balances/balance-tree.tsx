@@ -5,6 +5,7 @@ import Link from "next/link"
 import { ChevronRight } from "lucide-react"
 
 import { AccountDot } from "@/components/primitives/account-dot"
+import { usePeriodHref } from "@/components/layout/ui-state"
 import { Money } from "@/components/primitives/money"
 import { cn } from "@/lib/utils"
 import { formatPercent } from "@/lib/format"
@@ -117,6 +118,7 @@ function NodeRow({
     node.children?.filter((c) => !isDust(c, baseCurrency)) ?? []
   const hasChildren = visibleChildren.length > 0
   const isOpen = expanded.has(node.account)
+  const periodHref = usePeriodHref()
 
   // Prefer own balance when the account has its own postings; else aggregate.
   const ownVal = node.balance[baseCurrency]
@@ -129,7 +131,9 @@ function NodeRow({
   const subtree = childVal ?? 0
   const share = totalForShare > 0 ? Math.abs(subtree) / totalForShare : 0
 
-  const journalHref = `/journal?account=${encodeURIComponent(node.account)}`
+  const journalHref = periodHref(
+    `/journal?account=${encodeURIComponent(node.account)}`
+  )
 
   return (
     <>

@@ -85,6 +85,21 @@ const VALID_PRESETS: PeriodPresetId[] = [
   "custom",
 ]
 
+function applyPeriodParams(params: URLSearchParams, period: Period) {
+  params.set("p", period.id)
+  if (period.from) params.set("from", period.from)
+  else params.delete("from")
+  if (period.to) params.set("to", period.to)
+  else params.delete("to")
+}
+
+export function withPeriodHref(href: string, period: Period): string {
+  const url = new URL(href, "http://ledger.local")
+  applyPeriodParams(url.searchParams, period)
+  const search = url.searchParams.toString()
+  return `${url.pathname}${search ? `?${search}` : ""}${url.hash}`
+}
+
 export function UIStateProvider({ children }: { children: React.ReactNode }) {
   const density = React.useSyncExternalStore(
     subscribeDensity,
@@ -167,4 +182,12 @@ export function useUIState(): UIState {
     throw new Error("useUIState must be used inside <UIStateProvider>")
   }
   return ctx
+}
+
+export function usePeriodHref(): (href: string) => string {
+  const { period } = useUIState()
+
+  return React.useCallback((href: string) => withPeriodHref(href, period), [
+    period,
+  ])
 }

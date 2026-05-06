@@ -65,9 +65,11 @@ export default function JournalPage() {
   // reload / share works.
   React.useEffect(() => {
     if (!hydrated) return
-    const params = new URLSearchParams()
+    const params = new URLSearchParams(window.location.search)
     if (account) params.set("account", account)
+    else params.delete("account")
     if (q) params.set("q", q)
+    else params.delete("q")
     const qs = params.toString()
     const target = qs ? `${pathname}?${qs}` : pathname
     if (target !== window.location.pathname + window.location.search) {

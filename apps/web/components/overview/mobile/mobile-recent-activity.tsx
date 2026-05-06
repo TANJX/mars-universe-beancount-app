@@ -3,6 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 
+import { usePeriodHref } from "@/components/layout/ui-state"
 import { MerchantAvatar } from "@/components/primitives/merchant-avatar"
 import { Money } from "@/components/primitives/money"
 import { Tag } from "@/components/primitives/tag"
@@ -16,12 +17,14 @@ interface MobileRecentActivityProps {
 }
 
 export function MobileRecentActivity({ rows }: MobileRecentActivityProps) {
+  const periodHref = usePeriodHref()
+
   return (
     <section>
       <SectionLabel
         right={
           <Link
-            href="/journal"
+            href={periodHref("/journal")}
             className="text-[11.5px] text-primary active:text-primary/80"
           >
             See all ›

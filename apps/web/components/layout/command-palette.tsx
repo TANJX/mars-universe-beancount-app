@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/command"
 import { ClientOnly } from "@/components/primitives/client-only"
 import { useShortcutsDialog } from "@/components/layout/shortcuts-dialog"
+import { usePeriodHref } from "@/components/layout/ui-state"
 import { useLedgerData } from "@/hooks/use-fava"
 
 interface NavItem {
@@ -85,6 +86,7 @@ function CommandPaletteInner({
 }) {
   const [query, setQuery] = React.useState("")
   const router = useRouter()
+  const periodHref = usePeriodHref()
   const { data: ledger } = useLedgerData()
   const { openShortcuts } = useShortcutsDialog()
 
@@ -103,7 +105,7 @@ function CommandPaletteInner({
 
   function go(href: string) {
     setOpen(false)
-    router.push(href)
+    router.push(periodHref(href))
   }
 
   return (
