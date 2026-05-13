@@ -6,6 +6,7 @@ import { MobilePeriodControl } from "@/components/filters/mobile-period-control"
 import { MobileJournalCard } from "@/components/journal/mobile/mobile-journal-card"
 import { MobilePageHeader } from "@/components/layout/mobile-page-header"
 import { formatRelativeDate } from "@/lib/format"
+import type { Token } from "@/lib/search/parse"
 import { groupByDate, type DateGroup } from "@/lib/transform/group-by-date"
 import type { Transaction } from "@/lib/types/beancount"
 import type { Period } from "@/lib/types/views"
@@ -17,6 +18,8 @@ interface MobileJournalProps {
   accountFilter?: string
   /** Map of txn.id → cumulative USD running balance (when filtered). */
   cumulative?: Map<string, number>
+  /** Click handler for tag/link badges — appends to the search filter. */
+  onAddToken?: (token: Token) => void
 }
 
 export function MobileJournal({
@@ -25,6 +28,7 @@ export function MobileJournal({
   totalCount,
   accountFilter,
   cumulative,
+  onAddToken,
 }: MobileJournalProps) {
   const groups = React.useMemo(() => groupByDate(rows, (t) => t.date), [rows])
 
@@ -58,6 +62,7 @@ export function MobileJournal({
               group={g}
               accountFilter={accountFilter}
               cumulative={cumulative}
+              onAddToken={onAddToken}
             />
           ))}
         </div>
@@ -70,10 +75,12 @@ function DateGroupSection({
   group,
   accountFilter,
   cumulative,
+  onAddToken,
 }: {
   group: DateGroup<Transaction>
   accountFilter?: string
   cumulative?: Map<string, number>
+  onAddToken?: (token: Token) => void
 }) {
   return (
     <section>
@@ -96,6 +103,7 @@ function DateGroupSection({
                 ? (cumulative.get(txn.id) ?? null)
                 : null
             }
+            onAddToken={onAddToken}
           />
         ))}
       </div>

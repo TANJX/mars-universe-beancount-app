@@ -4,6 +4,7 @@ import * as React from "react"
 
 import { MerchantAvatar } from "@/components/primitives/merchant-avatar"
 import { formatNativeAmount, formatPostingAmount } from "@/lib/format"
+import type { Token } from "@/lib/search/parse"
 import { accountMatches, classify } from "@/lib/transform/classify"
 import type { Posting, Transaction } from "@/lib/types/beancount"
 import { cn } from "@/lib/utils"
@@ -14,12 +15,15 @@ interface MobileJournalCardProps {
   accountFilter?: string
   /** USD running balance through this transaction, when filtered. */
   cumulativeUSD?: number | null
+  /** Click handler for tag/link badges — appends to the search filter. */
+  onAddToken?: (token: Token) => void
 }
 
 export function MobileJournalCard({
   txn,
   accountFilter,
   cumulativeUSD,
+  onAddToken,
 }: MobileJournalCardProps) {
   const filtered = !!accountFilter
   const matching = filtered
@@ -53,17 +57,24 @@ export function MobileJournalCard({
               </span>
             )}
             {txn.tags.map((t) => (
-              <span key={t} className="font-mono text-[11px] text-primary">
+              <button
+                key={t}
+                type="button"
+                onClick={() => onAddToken?.({ kind: "tag", value: t })}
+                className="rounded font-mono text-[11px] text-primary hover:underline focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:outline-none"
+              >
                 #{t}
-              </span>
+              </button>
             ))}
             {txn.links.map((l) => (
-              <span
+              <button
                 key={l}
-                className="font-mono text-[11px] text-sky-500 dark:text-sky-400"
+                type="button"
+                onClick={() => onAddToken?.({ kind: "link", value: l })}
+                className="rounded font-mono text-[11px] text-sky-500 hover:underline focus-visible:ring-2 focus-visible:ring-sky-500/30 focus-visible:outline-none dark:text-sky-400"
               >
                 ^{l}
-              </span>
+              </button>
             ))}
           </div>
           {filtered && contextual && (

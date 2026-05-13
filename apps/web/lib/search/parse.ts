@@ -203,6 +203,11 @@ export function addToken(q: SearchQuery, token: Token): SearchQuery {
   return next
 }
 
+/** True iff the SearchQuery already carries this exact token. */
+export function hasToken(q: SearchQuery, token: Token): boolean {
+  return q[FIELD_BY_KIND[token.kind]].includes(token.value)
+}
+
 /**
  * Remove the first matching token from a SearchQuery and return a new query.
  * Match is exact-string on value within the kind's field. If no match, returns

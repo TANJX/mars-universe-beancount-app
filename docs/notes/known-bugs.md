@@ -4,6 +4,24 @@ Pragmatic list of bugs we've noticed but haven't fixed yet. Add new entries on t
 
 ---
 
+## ~~Journal Σ USD column ignores narrowing filters in opening seed~~ — **fixed 2026-05-13**
+
+**File:** `apps/web/app/(ledger)/journal/page.tsx` (seed override now applied at the cumulative useMemo).
+**Fix:** Option 1 from below — collapse the opening seed to 0 whenever `parsed.links | tags | payees | text | excludeAccounts` is non-empty, or `parsed.accounts.length > 1`. Matches Fava: its `filter=` is applied to the synthesized opening `Balance` entry too, and that entry carries no link/tag/payee, so it gets filtered out at the period boundary.
+
+Keeping the matrix below as reference — useful next time someone touches `use-opening-balance.ts` or the cumulative column.
+
+**Fava's full behavior matrix:**
+
+| Account root | No narrowing filter | Narrowing filter present |
+|---|---|---|
+| Assets / Liabilities / Equity | Opening = balance-sheet snapshot at period start (carries history). | Opening collapses to **0** (synthesized opening entry is filtered out). |
+| Income / Expenses | Opening = 0 (swept into retained earnings at fiscal-year boundary). | Opening = 0 (unchanged). |
+
+Time-range alone doesn't change the matrix beyond what the period-open snapshot already encodes.
+
+---
+
 ## `AppleImporter.handle_transaction` — bad kwarg to `prompt_user_select`
 
 **File:** `packages/beancount-tooling/src/beancount_tooling/importer/apple.py:70`

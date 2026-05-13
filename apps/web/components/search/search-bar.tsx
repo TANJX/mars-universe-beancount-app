@@ -373,7 +373,24 @@ export function SearchBar({
           <CommandPrimitive.Input
             ref={inputRef}
             value={draft}
-            onValueChange={(v) => setBuilder((b) => ({ ...b, draft: v }))}
+            onValueChange={(v) => {
+              // Shortcut: `^` and `#` from an empty idle draft jump
+              // straight into the link / tag builder (fava's URL-filter
+              // glyphs). Also supports paste like `^abc` → builder open
+              // with `abc` pre-filled. Mid-query glyphs are preserved by
+              // the empty-draft gate.
+              if (builder.state === "idle" && builder.draft === "") {
+                if (v.startsWith("^")) {
+                  setBuilder({ state: "value", prefix: "link", draft: v.slice(1) })
+                  return
+                }
+                if (v.startsWith("#")) {
+                  setBuilder({ state: "value", prefix: "tag", draft: v.slice(1) })
+                  return
+                }
+              }
+              setBuilder((b) => ({ ...b, draft: v }))
+            }}
             onKeyDown={onInputKeyDown}
             placeholder={
               chips.length === 0 && builder.state === "idle"

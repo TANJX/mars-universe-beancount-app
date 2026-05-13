@@ -10,6 +10,7 @@ import {
   formatShortDate,
 } from "@/lib/format"
 import { accountMatches, classify } from "@/lib/transform/classify"
+import type { Token } from "@/lib/search/parse"
 import type { Posting, Transaction } from "@/lib/types/beancount"
 
 import { COLS_BASE, COLS_FILTERED } from "./cols"
@@ -19,12 +20,15 @@ interface JournalEntryProps {
   accountFilter: string
   /** USD running balance through this transaction, if filter is active. */
   cumulativeUSD?: number | null
+  /** Click handler for tag/link badges — appends to the search filter. */
+  onAddToken?: (token: Token) => void
 }
 
 export function JournalEntry({
   txn,
   accountFilter,
   cumulativeUSD,
+  onAddToken,
 }: JournalEntryProps) {
   const filtered = !!accountFilter
   const colsClass = filtered ? COLS_FILTERED : COLS_BASE
@@ -72,17 +76,26 @@ export function JournalEntry({
             </span>
           )}
           {txn.tags.map((t) => (
-            <span key={t} className="truncate font-mono text-xs text-primary">
+            <button
+              key={t}
+              type="button"
+              onClick={() => onAddToken?.({ kind: "tag", value: t })}
+              title={`Filter by tag #${t}`}
+              className="truncate rounded font-mono text-xs text-primary hover:underline focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:outline-none"
+            >
               #{t}
-            </span>
+            </button>
           ))}
           {txn.links.map((l) => (
-            <span
+            <button
               key={l}
-              className="truncate font-mono text-xs text-sky-500 dark:text-sky-400"
+              type="button"
+              onClick={() => onAddToken?.({ kind: "link", value: l })}
+              title={`Filter by link ^${l}`}
+              className="truncate rounded font-mono text-xs text-sky-500 hover:underline focus-visible:ring-2 focus-visible:ring-sky-500/30 focus-visible:outline-none dark:text-sky-400"
             >
               ^{l}
-            </span>
+            </button>
           ))}
         </div>
         {/* Amount column on header is empty — postings sum to zero */}

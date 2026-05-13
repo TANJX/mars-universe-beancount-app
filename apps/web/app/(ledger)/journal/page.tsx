@@ -17,10 +17,14 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { useAccountOpeningBalance } from "@/hooks/use-opening-balance"
 import { accountSegment } from "@/lib/transform/classify"
 import {
+  addToken,
   applySearch,
+  hasToken,
   isQueryEmpty,
   parseSearch,
   pickPrimaryAccount,
+  stringifySearch,
+  type Token,
 } from "@/lib/search/parse"
 import { useSearchVocabulary } from "@/lib/search/vocabulary"
 import type { Posting } from "@/lib/types/beancount"
@@ -119,8 +123,19 @@ export default function JournalPage() {
   // Mirror fava's clamp() semantics for the cumulative column: Assets /
   // Liabilities / Equity get an opening-balance seed at period start so
   // the running total carries history; Income / Expenses start from zero
-  // (fava sweeps prior periods into retained earnings).
+  // (fava sweeps prior periods into retained earnings). Additionally,
+  // any narrowing filter (link/tag/payee/text/exclude/extra-account)
+  // collapses the seed to 0 — fava applies its `filter=` to the
+  // synthesized opening `Balance` entry too, which carries none of these
+  // tokens, so the opening drops out at the boundary.
   const openingSeed = useAccountOpeningBalance(accountFilter || undefined)
+  const hasNarrowingFilter =
+    parsed.links.length > 0 ||
+    parsed.tags.length > 0 ||
+    parsed.payees.length > 0 ||
+    parsed.text.length > 0 ||
+    parsed.excludeAccounts.length > 0 ||
+    parsed.accounts.length > 1
 
   // Cumulative USD running balance for matching postings, computed in
   // chronological order (oldest → newest), then mapped back per txn.id
@@ -130,7 +145,7 @@ export default function JournalPage() {
   const cumulative = React.useMemo(() => {
     if (!accountFilter) return new Map<string, number>()
     const m = new Map<string, number>()
-    let running = openingSeed
+    let running = hasNarrowingFilter ? 0 : openingSeed
     for (const t of filteredAsc) {
       const matching = t.postings.filter((p) =>
         p.account.startsWith(accountFilter)
@@ -140,11 +155,22 @@ export default function JournalPage() {
       m.set(t.id, running)
     }
     return m
-  }, [filteredAsc, accountFilter, openingSeed])
+  }, [filteredAsc, accountFilter, openingSeed, hasNarrowingFilter])
 
   function clearAccount() {
     setAccount("")
   }
+
+  // Click-to-filter from a journal entry's tag/link badge. No-op if the
+  // token is already in the filter (the chip remains visible in the
+  // search bar and can be removed there).
+  const handleAddToken = React.useCallback(
+    (token: Token) => {
+      if (hasToken(parsed, token)) return
+      setQ(stringifySearch(addToken(parsed, token)))
+    },
+    [parsed]
+  )
 
   const vocabulary = useSearchVocabulary(txns)
 
@@ -171,6 +197,7 @@ export default function JournalPage() {
             totalCount={txns?.length ?? 0}
             accountFilter={accountFilter || undefined}
             cumulative={accountFilter ? cumulative : undefined}
+            onAddToken={handleAddToken}
           />
         )}
       </>
@@ -288,6 +315,7 @@ export default function JournalPage() {
               cumulativeUSD={
                 accountFilter ? (cumulative.get(txn.id) ?? null) : null
               }
+              onAddToken={handleAddToken}
             />
           ))}
         </div>
