@@ -126,8 +126,8 @@ function LogoAvatar({
       <Image
         src={resolved.src}
         alt={resolved.alt}
-        width={size}
-        height={size}
+        fill
+        sizes={`${size}px`}
         unoptimized
         loading="lazy"
         onLoad={() => setLoaded(true)}
@@ -136,7 +136,6 @@ function LogoAvatar({
           "object-cover transition-opacity duration-150",
           loaded ? "opacity-100" : "opacity-0"
         )}
-        style={{ width: size, height: size }}
       />
     </span>
   )
