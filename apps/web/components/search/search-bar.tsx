@@ -19,7 +19,6 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
-import { accountSegment } from "@/lib/transform/classify"
 import {
   addToken,
   parseSearch,
@@ -627,29 +626,25 @@ const ChipPill = React.forwardRef<HTMLButtonElement, ChipPillProps>(
   function ChipPill({ chip, onClickRemove, onKeyDown }, ref) {
     const meta = PREFIX_META[chip.kind]
     const Icon = meta.icon
-    const display =
-      chip.pinned && chip.kind === "account"
-        ? accountSegment(chip.value)
-        : chip.value
+    // `pinned` (URL `?account=` provenance) still controls the × handler
+    // dispatch in `removeChipAt`, but no longer changes the chip's look:
+    // a single account filter is a single account filter regardless of
+    // which URL slot it lives in.
     return (
       <button
         ref={ref}
         type="button"
         onKeyDown={onKeyDown}
-        className={
-          chip.pinned
-            ? "group inline-flex h-5 items-center gap-1 rounded-md border border-transparent bg-primary/10 px-1.5 text-xs text-primary outline-none focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/30"
-            : "group inline-flex h-5 items-center gap-1 rounded-md border border-transparent bg-secondary px-1.5 text-xs text-secondary-foreground outline-none focus-visible:border-primary/50 focus-visible:bg-primary/10 focus-visible:ring-2 focus-visible:ring-primary/20"
-        }
+        className="group inline-flex h-5 items-center gap-1 rounded-md border border-transparent bg-secondary px-1.5 text-xs text-secondary-foreground outline-none focus-visible:border-primary/50 focus-visible:bg-primary/10 focus-visible:ring-2 focus-visible:ring-primary/20"
       >
         <Icon size={11} className="shrink-0 opacity-70" />
         {chip.kind === "text" ? (
-          <span className="truncate">{display}</span>
+          <span className="truncate">{chip.value}</span>
         ) : (
           <span className="truncate font-mono">
             <span className="opacity-70">{meta.syntax}</span>
             {meta.glyph && <span className="opacity-70">{meta.glyph}</span>}
-            <span>{display}</span>
+            <span>{chip.value}</span>
           </span>
         )}
         <span

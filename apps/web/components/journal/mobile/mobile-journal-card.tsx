@@ -104,6 +104,7 @@ export function MobileJournalCard({
             key={`${p.account}-${i}`}
             posting={p}
             accountFilter={accountFilter}
+            onAddToken={onAddToken}
           />
         ))}
       </div>
@@ -114,9 +115,11 @@ export function MobileJournalCard({
 function PostingLine({
   posting,
   accountFilter,
+  onAddToken,
 }: {
   posting: Posting
   accountFilter?: string
+  onAddToken?: (token: Token) => void
 }) {
   const matches =
     !!accountFilter && accountMatches(posting.account, accountFilter)
@@ -128,14 +131,18 @@ function PostingLine({
         dimmed && "opacity-60"
       )}
     >
-      <span
+      <button
+        type="button"
+        onClick={() =>
+          onAddToken?.({ kind: "account", value: posting.account })
+        }
         className={cn(
-          "min-w-0 truncate",
+          "min-w-0 truncate rounded text-left hover:underline focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:outline-none",
           matches ? "font-medium text-foreground" : "text-muted-foreground"
         )}
       >
         {posting.account}
-      </span>
+      </button>
       <span
         className={
           matches ? "font-medium text-foreground" : "text-muted-foreground"

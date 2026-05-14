@@ -126,6 +126,7 @@ export function JournalEntry({
           posting={p}
           accountFilter={accountFilter}
           colsClass={colsClass}
+          onAddToken={onAddToken}
         />
       ))}
     </div>
@@ -136,10 +137,12 @@ function PostingSubRow({
   posting,
   accountFilter,
   colsClass,
+  onAddToken,
 }: {
   posting: Posting
   accountFilter: string
   colsClass: string
+  onAddToken?: (token: Token) => void
 }) {
   const filtered = !!accountFilter
   const matches = filtered && accountMatches(posting.account, accountFilter)
@@ -163,14 +166,19 @@ function PostingSubRow({
       <span />
       <span />
       <div className="min-w-0 pl-1.5">
-        <span
+        <button
+          type="button"
+          onClick={() =>
+            onAddToken?.({ kind: "account", value: posting.account })
+          }
+          title={`Filter by account ${posting.account}`}
           className={cn(
-            "truncate font-mono text-xs",
+            "truncate rounded font-mono text-xs hover:underline focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:outline-none",
             matches ? "font-medium text-foreground" : "text-muted-foreground"
           )}
         >
           {posting.account}
-        </span>
+        </button>
       </div>
       <span
         className={cn(

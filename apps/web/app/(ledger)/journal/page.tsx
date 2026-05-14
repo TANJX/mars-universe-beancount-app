@@ -161,15 +161,22 @@ export default function JournalPage() {
     setAccount("")
   }
 
-  // Click-to-filter from a journal entry's tag/link badge. No-op if the
-  // token is already in the filter (the chip remains visible in the
-  // search bar and can be removed there).
+  // Click-to-filter from a journal entry's tag/link/account badge.
+  // Accounts route to the URL primary (`?account=`) to match fava's
+  // account-navigation semantics and the cmdK/sidebar entry points;
+  // tags/links/etc. append a chip via the standard SearchQuery path.
+  // No-op if the click would be a duplicate.
   const handleAddToken = React.useCallback(
     (token: Token) => {
+      if (token.kind === "account") {
+        if (account === token.value) return
+        setAccount(token.value)
+        return
+      }
       if (hasToken(parsed, token)) return
       setQ(stringifySearch(addToken(parsed, token)))
     },
-    [parsed]
+    [parsed, account]
   )
 
   const vocabulary = useSearchVocabulary(txns)
