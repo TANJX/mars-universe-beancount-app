@@ -158,6 +158,7 @@ export type PeriodPresetId =
   | "qtd"
   | "ytd"
   | "last-12"
+  | "all"
   | "custom"
 
 export interface Period {

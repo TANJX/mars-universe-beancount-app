@@ -65,6 +65,11 @@ export function getPreset(id: PeriodPresetId): Period {
         range: `${monthLabel(start)} – ${monthLabel(today)}`,
       }
     }
+    case "all":
+      // Mirrors fava with no `time=` filter: every entry from beginning of
+      // the ledger through today. Range is blank because there's no
+      // anchored span to display.
+      return { id, label: "All time", range: "" }
     case "custom":
       return { id, label: "Custom", range: "" }
   }
@@ -79,6 +84,7 @@ export function listPresets(): Period[] {
     getPreset("qtd"),
     getPreset("ytd"),
     getPreset("last-12"),
+    getPreset("all"),
     getPreset("custom"),
   ]
 }

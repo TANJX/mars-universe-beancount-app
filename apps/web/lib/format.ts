@@ -107,13 +107,18 @@ export function formatPercent(value: number, fractionDigits = 1): string {
   return `${value.toFixed(fractionDigits)}%`
 }
 
-// Format "2026-04-15" → "04-15". Prototype convention for dense tables.
-export function formatShortDate(iso: string): string {
+// Format "2026-04-15" → "04-15" for the current year, or full "2025-04-15"
+// for off-year rows so the year isn't lost. Prototype convention for dense
+// tables.
+export function formatShortDate(iso: string, today = new Date()): string {
+  const year = Number(iso.slice(0, 4))
+  if (year && year !== today.getFullYear()) return iso
   return iso.slice(5)
 }
 
-// Format "2026-04-15" → "Today" / "Yesterday" / "Apr 24" relative to today.
-// Mobile timeline rows want a friendlier date than the desktop "04-15".
+// Format "2026-04-15" → "Today" / "Yesterday" / "Apr 24" relative to today,
+// or "Apr 24, 2025" when the year differs from today's. Mobile timeline rows
+// want a friendlier date than the desktop "04-15".
 const REL_MONTHS = [
   "Jan",
   "Feb",
@@ -136,5 +141,6 @@ export function formatRelativeDate(iso: string, today = new Date()): string {
   const diffDays = Math.round((t.getTime() - that.getTime()) / 86_400_000)
   if (diffDays === 0) return "Today"
   if (diffDays === 1) return "Yesterday"
+  if (y !== today.getFullYear()) return `${REL_MONTHS[m - 1]} ${d}, ${y}`
   return `${REL_MONTHS[m - 1]} ${d}`
 }

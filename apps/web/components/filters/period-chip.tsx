@@ -47,6 +47,8 @@ export function shortPeriodLabel(period: Period): string {
       return period.range || period.label
     case "last-12":
       return "12M"
+    case "all":
+      return "All"
     case "custom":
       return period.range || "Custom"
   }

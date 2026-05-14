@@ -82,6 +82,7 @@ const VALID_PRESETS: PeriodPresetId[] = [
   "qtd",
   "ytd",
   "last-12",
+  "all",
   "custom",
 ]
 

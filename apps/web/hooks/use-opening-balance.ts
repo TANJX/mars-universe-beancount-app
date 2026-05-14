@@ -22,8 +22,12 @@ import type { BalanceTreeNode } from "@/lib/types/views"
 export function useAccountOpeningBalance(account: string | undefined): number {
   const { period } = useUIState()
   const root = account ? accountRoot(account) : null
+  // "all time" has no prior period — opening = 0 by definition. Skip the
+  // fetch so the cumulative column starts at 0 and runs up to the
+  // current balance, matching fava with no `time=` filter.
   const carries =
-    root === "Assets" || root === "Liabilities" || root === "Equity"
+    (root === "Assets" || root === "Liabilities" || root === "Equity") &&
+    period.id !== "all"
   const time = carries ? periodOpeningTime(period) : undefined
 
   const sheet = useBalanceSheet({

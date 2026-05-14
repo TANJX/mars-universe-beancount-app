@@ -41,6 +41,9 @@ export function periodToFavaTime(period: Period): string | undefined {
       start.setMonth(start.getMonth() - 11)
       return `${formatMonth(start)} - ${formatMonth(end)}`
     }
+    case "all":
+      // Omit `time=` entirely — fava treats no filter as "every entry".
+      return undefined
     case "custom": {
       if (period.from && period.to) {
         return `${period.from} - ${period.to}`
@@ -97,6 +100,11 @@ export function periodBounds(period: Period): PeriodBounds {
       start.setDate(1)
       return { start, end }
     }
+    case "all":
+      // Wide bounds anchored well before any plausible ledger start. Lets
+      // chart-bucketing fall through to "year" granularity without
+      // special-casing every consumer.
+      return { start: new Date(1900, 0, 1), end: today }
     case "custom": {
       if (period.from && period.to) {
         return { start: new Date(period.from), end: new Date(period.to) }
@@ -220,6 +228,8 @@ export function shiftPeriod(period: Period, dir: -1 | 1): Period | null {
       }
     }
     case "last-12":
+    case "all":
+      // Unbounded / sliding windows have no sensible prev/next step.
       return null
   }
 }

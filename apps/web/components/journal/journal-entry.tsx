@@ -52,7 +52,7 @@ export function JournalEntry({
           colsClass
         )}
       >
-        <span className="font-mono text-xs text-muted-foreground tabular-nums">
+        <span className="whitespace-nowrap font-mono text-xs text-muted-foreground tabular-nums">
           {formatShortDate(txn.date)}
         </span>
         <span
@@ -154,12 +154,6 @@ function PostingSubRow({
         "grid items-center gap-3 pr-7 pl-[1.625rem]",
         "h-7 group-data-[density=compact]/density:h-6",
         colsClass,
-        // Colored left rail on the matching posting; transparent border keeps
-        // alignment for non-matching siblings.
-        filtered &&
-          (matches
-            ? "border-l-2 border-primary"
-            : "border-l-2 border-transparent"),
         dimmed && "opacity-60"
       )}
     >

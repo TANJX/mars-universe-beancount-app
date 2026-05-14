@@ -12,7 +12,7 @@ import type { ExpenseRowData } from "@/lib/transform/expense-row"
 import { ExpenseDetailSheet } from "@/components/expenses/detail-sheet"
 
 const ROW_TEMPLATE =
-  "grid-cols-[4rem_1.75rem_minmax(11rem,1.6fr)_6.25rem_minmax(7rem,1fr)_6.875rem]"
+  "grid-cols-[5.25rem_1.75rem_minmax(11rem,1.6fr)_6.25rem_minmax(7rem,1fr)_6.875rem]"
 
 interface ExpensesTableProps {
   rows: ExpenseRowData[]
@@ -97,7 +97,7 @@ function ExpenseRow({
         ROW_TEMPLATE
       )}
     >
-      <span className="font-mono text-xs text-muted-foreground tabular-nums">
+      <span className="whitespace-nowrap font-mono text-xs text-muted-foreground tabular-nums">
         {formatShortDate(txn.date)}
       </span>
       <MerchantAvatar row={row} size="md" />
