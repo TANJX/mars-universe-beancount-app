@@ -43,7 +43,7 @@ class ChaseCheckingImporter(GeneralImporter):
                 meta=None,
             )
         )
-        other_account = "Expenses:FIXME"
+        other_account = "Equity:FIXME"
 
         if row["Description"].startswith("CARNEGIE MELLON  DIRECT DEP"):
             trans_desc = "Carnegie Mellon Direct Deposit"

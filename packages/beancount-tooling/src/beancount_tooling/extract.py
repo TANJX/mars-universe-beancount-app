@@ -83,8 +83,10 @@ def read_all_usd_accounts():
     # Sort accounts
     accounts = sorted(accounts)
 
-    # Add FIXME as a special option for uncertain categorization
-    accounts.append("FIXME")
+    # Add Equity:FIXME as the un-determined-leg placeholder. Picking this in
+    # the interactive prompt produces a valid beancount account (bare "FIXME"
+    # would fail to load) and matches the non-interactive fallback in helper.py.
+    accounts.append("Equity:FIXME")
 
     return accounts
 

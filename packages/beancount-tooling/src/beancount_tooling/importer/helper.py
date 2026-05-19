@@ -41,10 +41,13 @@ def prompt_user_select(trans_desc: str, info: list, all_accounts: list = []) -> 
     """
     cls()
 
-    # Non-interactive fallback: return Expenses:FIXME when stdin is not a terminal
+    # Non-interactive fallback: return Equity:FIXME when stdin is not a terminal.
+    # Equity:FIXME is the canonical un-determined-leg placeholder — neutral about
+    # the eventual category, so the reconciler resolves it on its own without
+    # being nudged toward "this should be an expense".
     if not sys.stdin.isatty():
-        print(f"[non-interactive] Defaulting to Expenses:FIXME for: {trans_desc}")
-        return "Expenses:FIXME"
+        print(f"[non-interactive] Defaulting to Equity:FIXME for: {trans_desc}")
+        return "Equity:FIXME"
 
     # Print beautiful transaction info box
     box_width = 80
@@ -67,7 +70,7 @@ def prompt_user_select(trans_desc: str, info: list, all_accounts: list = []) -> 
     # Sort accounts by category for better UX
     # Priority: Expenses, Income, Assets, Liabilities, then others
     def account_sort_key(account):
-        if account == "FIXME":
+        if account == "Equity:FIXME":
             return (5, account)  # FIXME at the end
         elif account.startswith("Expenses:"):
             return (0, account)
