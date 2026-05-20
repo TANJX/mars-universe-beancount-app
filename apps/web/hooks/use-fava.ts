@@ -165,6 +165,8 @@ interface UseJournalOptions {
   filter?: string
   /** Override the time= filter; bypasses the period from UIState. */
   timeOverride?: string
+  /** When false, suppress the request entirely (React Query `enabled`). */
+  enabled?: boolean
 }
 
 export function useJournal(opts: UseJournalOptions = {}) {
@@ -173,6 +175,7 @@ export function useJournal(opts: UseJournalOptions = {}) {
 
   return useQuery<Transaction[]>({
     queryKey: ["journal", time ?? "", opts.account ?? "", opts.filter ?? ""],
+    enabled: opts.enabled ?? true,
     queryFn: async () => {
       const res = await favaFetch(
         `journal${favaQuery({ time, account: opts.account, filter: opts.filter })}`,

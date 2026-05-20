@@ -4,6 +4,7 @@ import * as React from "react"
 import { usePathname, useSearchParams } from "next/navigation"
 import { AlertCircle } from "lucide-react"
 
+import { AllTimeFilterPrompt } from "@/components/journal/all-time-filter-prompt"
 import { COLS_BASE, COLS_FILTERED } from "@/components/journal/cols"
 import { JournalEntry } from "@/components/journal/journal-entry"
 import { MobileJournal } from "@/components/journal/mobile/mobile-journal"
@@ -16,6 +17,7 @@ import { useJournal } from "@/hooks/use-fava"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useAccountOpeningBalance } from "@/hooks/use-opening-balance"
 import { accountSegment } from "@/lib/transform/classify"
+import { toFavaFilter } from "@/lib/search/fava-filter"
 import {
   addToken,
   applySearch,
@@ -80,11 +82,12 @@ export default function JournalPage() {
     }
   }, [hydrated, pathname, account, q])
 
-  const { period } = useUIState()
+  const { period, setPeriod } = useUIState()
 
   // Combine URL `account=` with whatever account: terms are inside `q` so
   // they share one parse pipeline. The URL-level account is what we send to
-  // Fava (server-side hierarchical match); extra terms are client-filtered.
+  // Fava (server-side hierarchical match); extra terms also flow into
+  // Fava's filter= so the wire payload shrinks server-side.
   const parsed = React.useMemo(() => {
     const base = parseSearch(q)
     if (account && !base.accounts.includes(account)) {
@@ -94,13 +97,32 @@ export default function JournalPage() {
   }, [q, account])
 
   const primaryAccount = pickPrimaryAccount(parsed)
+  const favaFilter = React.useMemo(
+    () => toFavaFilter(parsed, primaryAccount),
+    [parsed, primaryAccount]
+  )
+
+  // "All time" with no narrowing token would pull the entire ledger. Gate
+  // the fetch and prompt the user to add a filter. `excludeAccounts`
+  // alone doesn't count — still needs the full payload to apply.
+  const hasAnyNarrowingFilter =
+    parsed.accounts.length > 0 ||
+    parsed.links.length > 0 ||
+    parsed.tags.length > 0 ||
+    parsed.payees.length > 0 ||
+    parsed.text.length > 0
+  const requiresFilter = period.id === "all" && !hasAnyNarrowingFilter
 
   const {
     data: txns,
     isPending,
     isError,
     error,
-  } = useJournal({ account: primaryAccount || undefined })
+  } = useJournal({
+    account: primaryAccount || undefined,
+    filter: favaFilter,
+    enabled: !requiresFilter,
+  })
 
   // Fava returns the journal in chronological ascending order, with
   // intra-day items in file order (oldest write first). Reversing gives
@@ -195,7 +217,9 @@ export default function JournalPage() {
             </div>
           </div>
         )}
-        {isPending ? (
+        {requiresFilter ? (
+          <AllTimeFilterPrompt onResetPeriod={() => setPeriod("mtd")} />
+        ) : isPending ? (
           <MobileJournalSkeleton />
         ) : (
           <MobileJournal
@@ -243,27 +267,31 @@ export default function JournalPage() {
         countLabel="txns"
       />
 
-      <div
-        className={cn(
-          "grid gap-3 px-7 text-xs font-medium tracking-wide text-muted-foreground uppercase",
-          colsClass
-        )}
-      >
-        <span>Date</span>
-        <span />
-        <span>Payee / Posting</span>
-        <span className="text-right">Amount</span>
-        {accountFilter && (
-          <>
-            <span className="text-right">
-              Δ {accountSegment(accountFilter)}
-            </span>
-            <span className="text-right">Σ USD</span>
-          </>
-        )}
-      </div>
+      {!requiresFilter && (
+        <div
+          className={cn(
+            "grid gap-3 px-7 text-xs font-medium tracking-wide text-muted-foreground uppercase",
+            colsClass
+          )}
+        >
+          <span>Date</span>
+          <span />
+          <span>Payee / Posting</span>
+          <span className="text-right">Amount</span>
+          {accountFilter && (
+            <>
+              <span className="text-right">
+                Δ {accountSegment(accountFilter)}
+              </span>
+              <span className="text-right">Σ USD</span>
+            </>
+          )}
+        </div>
+      )}
 
-      {isPending ? (
+      {requiresFilter ? (
+        <AllTimeFilterPrompt onResetPeriod={() => setPeriod("mtd")} />
+      ) : isPending ? (
         <div className="flex flex-col gap-2">
           {Array.from({ length: 6 }).map((_, i) => (
             <Card
