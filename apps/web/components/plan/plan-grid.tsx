@@ -744,6 +744,9 @@ function BankCells({
                         onSetState(entry, date, account, next)
                       }
                       onDeletePlan={() => onDeletePlan(entry.id)}
+                      onDeleteTransfer={() =>
+                        entry.transferId && onDeleteTransfer(entry.transferId)
+                      }
                       onMovePlan={() => onMovePlan(entry, date, account)}
                       onEditTransfer={() =>
                         entry.transferId && onEditTransfer(entry.transferId)
