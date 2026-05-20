@@ -17,6 +17,7 @@ dependencies = [
 extract = "beancount_tooling.__main__:run_extract"
 update-stock-price = "beancount_tooling.__main__:run_update_stock_price"
 generate-forecast = "beancount_tooling.__main__:run_generate_forecast"
+bean-format-compat = "beancount_tooling.format_compat:main"
 
 [build-system]
 requires = ["hatchling"]

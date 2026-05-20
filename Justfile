@@ -18,6 +18,12 @@ fava:
 # Extraction flow
 extract:
     uv run extract
+    just format
+
+# Re-align all .bean files in LEDGER_DIR (matches .vscode beancountFormatter prefixWidth=45).
+# Excludes auto-generated directories (tickers/ written by update-stock-price).
+format:
+    @find "${LEDGER_DIR:-./data}" -type d -name tickers -prune -o -name '*.bean' -print | xargs uv run bean-format-compat -i -w 45
 
 # Stock price updater
 prices:
@@ -26,6 +32,7 @@ prices:
 # Forecast generation
 forecast *args:
     uv run generate-forecast {{args}}
+    just format
 
 # Regenerate the demo ledger's transactions/ tree (deterministic).
 # Default points at a sibling checkout of mars-universe-beancount-demo.
