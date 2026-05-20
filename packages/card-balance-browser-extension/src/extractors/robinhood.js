@@ -158,7 +158,12 @@ export function extractRobinhood() {
       const symbol = entry.symbol;
       const description = `${entry.info}`;
       const { amount, price } = entry._parsed;
-      const cost = Math.round(amount * price * 100) / 100;
+      // Use Robinhood's displayed proceeds (entry.cost) rather than
+      // shares × shown_price. The shown price is rounded to 2 decimals,
+      // so multiplying it back drifts by a few cents on larger fills.
+      // entry.cost is already signed: positive for inflows (sells, +$),
+      // negative for outflows (buys shown as -$).
+      const signedCost = Number(entry.cost);
       const direction = entry.info.toLowerCase().endsWith("sell") ? "sell" : "buy";
 
       if (entry.ira) {
@@ -170,7 +175,7 @@ export function extractRobinhood() {
           // its own entry — keeps gain/loss attribution clean per symbol.
           results.push(`${entry.date} * "${entry.info}"`);
           results.push(`  ${sharesAcct}          -${amount} ${symbol} {} @ ${price} USD`);
-          results.push(`  ${usdAcct}          ${cost.toFixed(2)} USD`);
+          results.push(`  ${usdAcct}          ${signedCost.toFixed(2)} USD`);
           results.push(`  Income:Trading:Stock`);
           results.push("");
         } else {
@@ -192,10 +197,9 @@ export function extractRobinhood() {
           if (isLast) {
             let totalCost = 0;
             for (let j = i; j >= 0 && sameGroup(entries[j]); j--) {
-              const { amount: a, price: p } = entries[j]._parsed;
-              totalCost += Math.round(a * p * 100) / 100;
+              totalCost += Number(entries[j].cost);
             }
-            results.push(`  ${usdAcct}          -${totalCost.toFixed(2)} USD`);
+            results.push(`  ${usdAcct}          ${totalCost.toFixed(2)} USD`);
             results.push("");
           }
         }
@@ -203,10 +207,10 @@ export function extractRobinhood() {
         results.push(`${entry.date} * "${description} ${entry.amountInfo}"`);
         if (direction === "buy") {
           results.push(`  Assets:Investment:Robinhood:Brokerage:${symbol}          ${amount} ${symbol} {${price} USD}`);
-          results.push(`  Assets:Investment:Robinhood:Brokerage:USD          -${cost} USD`);
+          results.push(`  Assets:Investment:Robinhood:Brokerage:USD          ${signedCost.toFixed(2)} USD`);
         } else {
           results.push(`  Assets:Investment:Robinhood:Brokerage:${symbol}          -${amount} ${symbol} {} @ ??? USD`);
-          results.push(`  Assets:Investment:Robinhood:Brokerage:USD          ${cost} USD`);
+          results.push(`  Assets:Investment:Robinhood:Brokerage:USD          ${signedCost.toFixed(2)} USD`);
           results.push(`  Income:Trading:Stock`);
         }
         results.push("");
@@ -249,7 +253,7 @@ export function extractRobinhood() {
       results.push("");
     }
     // Dividend
-    else if (entry.info.startsWith("Dividend from")) {
+    else if (entry.info.startsWith("Dividend from") || entry.info.startsWith("Early Dividends from")) {
       results.push(`${entry.date} * "${entry.info}"`);
       if (entry.ira === "Roth" || accountType === "Roth IRA") {
         results.push(`  Assets:Investment:Robinhood:Roth-IRA:USD          ${entry.cost} USD`);
@@ -259,6 +263,13 @@ export function extractRobinhood() {
         results.push(`  Assets:Investment:Robinhood:Brokerage:USD           ${entry.cost} USD`);
       }
       results.push(`  Income:Trading:Dividend`);
+      results.push("");
+    }
+    // Robinhood credit card rebate transfer
+    else if (entry.info.startsWith("Transfer to individual from Robinhood credit card")) {
+      results.push(`${entry.date} * "${entry.info}"`);
+      results.push(`  Assets:Investment:Robinhood:Brokerage:USD           ${entry.cost} USD`);
+      results.push(`  Income:Rebate:Robinhood`);
       results.push("");
     }
     else if (entry.info.endsWith("Stock Lending Payment")) {
