@@ -31,8 +31,9 @@ from typing import Optional
 
 SETTLEMENT_GRACE_DAYS = 3
 """How many days after `cycle.end` a payment can post and still attribute
-to this cycle. One global knob — promote to per-card config only if a
-real card pushes past this. Used in two places:
+to this cycle, and the symmetric window `annotate_past_state` uses to
+match a past plan against a cleared txn. One global knob — promote to
+per-card config only if a real card pushes past this. Used in:
 
 - `cycle_payment_window` (this module) for `paidThisCycle` summation.
 - `annotate_past_state` / `auto_clear_pending` in `merge.py` for plan-vs-

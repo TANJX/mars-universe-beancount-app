@@ -4,7 +4,7 @@ Produces the day-by-day grid the planner page renders. Combines:
   - cleared (*) and scheduled (!) transactions from the .bean file (via Fava)
   - Plans and Transfers from plan/plans.jsonl + plan/transfers.jsonl
   - CC payment projections from plan/cc-cards.json
-  - Past-plan match status (realized / unrealized / superseded)
+  - Past-plan match status (realized / unrealized)
 
 This is mirrored on the client (lib/plan/merge.ts) for instant updates as the
 user types; the server response is the source of truth.
@@ -28,7 +28,7 @@ from .cc_cycle import (
 from .cc_projection import project_payments
 from .models import CCCardRecord, Plan, Transfer
 
-GridEntry = dict  # kind, id, amount, description, state?, transferId?, pastState?
+GridEntry = dict  # kind, id, amount, description, state?, transferId?, pastState?  (pastState: "realized" | "unrealized")
 DayRow = dict  # date, entries: dict[account, list[GridEntry]], balances, total
 Bank = dict  # account, displayName, startingBalance
 
@@ -367,7 +367,7 @@ def auto_clear_pending(
     ledger_file_path: str,
     plans: list[Plan],
     cleared_amounts_by_date_account: dict[tuple[str, str], list[Decimal]],
-    day_tolerance: int = 1,
+    day_tolerance: int = SETTLEMENT_GRACE_DAYS,
     amount_tolerance: Decimal = Decimal("0.50"),
 ) -> list[Plan]:
     """For each plan with state='pending' that matches a cleared txn within
@@ -424,20 +424,25 @@ def annotate_past_state(
     plans_for_account: list[Plan],
     cleared_amounts_by_date_account: dict[tuple[str, str], list[Decimal]],
     today: datetime.date,
-    day_tolerance: int = 1,
+    day_tolerance: int = SETTLEMENT_GRACE_DAYS,
     amount_tolerance: Decimal = Decimal("0.50"),
 ) -> tuple[dict[str, str], dict[str, tuple[tuple[str, str], Decimal]]]:
     """Match plans to cleared txns; return (status_map, claim_map).
 
-    `status_map[plan_id]` ∈ {"realized", "unrealized", "superseded"} for plans dated <= today.
+    `status_map[plan_id]` ∈ {"realized", "unrealized"} for plans dated <= today.
     `claim_map[plan_id] = ((date_iso, account), cleared_amount)` for plans
-    that matched a cleared txn (status realized OR superseded). Lets the
-    row-build step look up which cleared bean entry each plan claimed —
-    used to tag CC-payment cleared txns with their plan's card/cycle.
+    that matched a cleared txn (status realized). Lets the row-build step
+    look up which cleared bean entry each plan claimed — used to tag
+    CC-payment cleared txns with their plan's card/cycle.
 
-    Greedy match: each past plan claims the closest cleared amount within
-    tolerance. Cleared entries can only be claimed once per account per day
-    window. Today's plans are included so the row-build step can hide ones
+    Greedy match: each past plan claims the closest cleared amount that is
+    also within `amount_tolerance`. Cleared entries can only be claimed
+    once per account per day window. A plan with no in-tolerance amount
+    nearby stays `unrealized` — it does NOT claim a wildly-off cleared
+    txn (avoids e.g. a $354 Bilt plan claiming a $2909 paycheck just
+    because nothing else is within the window).
+
+    Today's plans are included so the row-build step can hide ones
     already realized by a same-day cleared bean txn.
     """
     status: dict[str, str] = {}
@@ -460,6 +465,8 @@ def annotate_past_state(
             key = (d, p.account)
             for amt in available.get(key, []):
                 diff = abs(amt - plan_amount)
+                if diff > amount_tolerance:
+                    continue
                 if best_diff is None or diff < best_diff:
                     best_diff = diff
                     best_key = (key, amt)
@@ -471,10 +478,7 @@ def annotate_past_state(
         (matched_key, matched_amt) = best_key
         available[matched_key].remove(matched_amt)
         claim[p.id] = (matched_key, matched_amt)
-        if best_diff is not None and best_diff <= amount_tolerance:
-            status[p.id] = "realized"
-        else:
-            status[p.id] = "superseded"
+        status[p.id] = "realized"
 
     return status, claim
 
@@ -745,8 +749,8 @@ def build_grid_response(
                 )
             )
 
-    # 6. Past-plan match status (realized / unrealized / superseded) +
-    # which cleared txn each plan claimed. We reverse the claim map for
+    # 6. Past-plan match status (realized / unrealized) + which cleared
+    # txn each plan claimed. We reverse the claim map for
     # CC-override plans to tag the matched cleared bean entry with the
     # card/cycle context — so the user sees "−$990.01 Inter-Entity Transfer
     # · Robinhood May 2026" rather than just the bare bank-side description.

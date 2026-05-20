@@ -815,7 +815,6 @@ function EntryView({
   const planTodo = isTodo && !ccTaggedPlan
   const planPending = isPending && !ccTaggedPlan
   const amount = parseAmount(entry.amount)
-  const superseded = entry.pastState === "superseded"
 
   // CC entries open the override dialog rather than the inline editor.
   // The dialog is the single edit surface for "this card's payment for this cycle."
@@ -888,7 +887,6 @@ function EntryView({
           "text-blue-600 dark:text-blue-400",
         planTodo && "font-semibold",
         planPending && "italic",
-        superseded && "line-through opacity-60",
         isFiltered && "opacity-25"
       )}
     >

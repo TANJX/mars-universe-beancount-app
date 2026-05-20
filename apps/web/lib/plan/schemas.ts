@@ -2,7 +2,7 @@ import { z } from "zod"
 
 export const StateFlag = z.enum(["todo", "pending"]).nullable().optional()
 
-export const PastState = z.enum(["realized", "unrealized", "superseded"])
+export const PastState = z.enum(["realized", "unrealized"])
 
 export const EntryKind = z.enum([
   "cleared",
