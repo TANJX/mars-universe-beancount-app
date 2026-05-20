@@ -915,6 +915,8 @@ def build_grid_response(
     for path in sorted(ledger.accounts.keys()):
         if not path.startswith("Liabilities:Credit:"):
             continue
+        if _is_closed(path):
+            continue
         rec = cc_records.get(path)
         is_configured = bool(
             rec and rec.paymentDueDay is not None and rec.fundingAccount
