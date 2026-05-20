@@ -19,14 +19,19 @@ Guidance for coding agents working in `mars-universe-beancount`.
 
 ## Run Commands (Build/Execution)
 
-- Extraction flow: `uv run extract` (or `just extract`)
-- Stock price updater: `uv run update-stock-price` (or `just prices`)
+**Always prefer `just <recipe>` over the underlying tool (npm/pnpm/webpack/uv/ruff/etc.).** The `Justfile` is the canonical entry point — recipes encode the correct workspace filter, env, and package list. Going around them risks running the wrong target or skipping setup. Before reaching for `npm run build` / `pnpm <script>` / `webpack` / `uv run …`, `grep -n` the `Justfile` for a matching recipe and use it. Only fall back to the underlying tool if no recipe exists.
+
+- Extraction flow: `just extract`
+- Stock price updater: `just prices`
 - Forecast generation:
-  - `uv run generate-forecast` (or `just forecast`)
-  - Dry run: `uv run generate-forecast --dry-run`
-  - One month: `uv run generate-forecast --month 2026-03`
-  - Verbose: `uv run generate-forecast -v`
-- Fava (local viewer): `uv run fava data/journal/journal.beancount` (or `just fava`)
+  - `just forecast`
+  - Dry run: `uv run generate-forecast --dry-run` (no just recipe)
+  - One month: `uv run generate-forecast --month 2026-03` (no just recipe)
+  - Verbose: `uv run generate-forecast -v` (no just recipe)
+- Fava (local viewer): `just fava`
+- Web dev server: `just web-dev`
+- Web build: `just web-build`
+- Chrome extension build: `just build-extension` (output: `packages/card-balance-browser-extension/build/`)
 
 ## Lint/Format Commands
 
