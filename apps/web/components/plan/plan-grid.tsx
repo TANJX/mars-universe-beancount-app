@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils"
 import { parseAmount } from "@/lib/plan/format"
 import {
   useDeletePlan,
+  useDeleteTransfer,
   useSaveCcOverride,
   useSavePlan,
   useSaveTransfer,
@@ -80,6 +81,7 @@ export function PlanGrid({
 
   const savePlan = useSavePlan()
   const deletePlan = useDeletePlan()
+  const deleteTransfer = useDeleteTransfer()
   const saveCcOverride = useSaveCcOverride()
   const saveTransfer = useSaveTransfer()
 
@@ -355,6 +357,15 @@ export function PlanGrid({
                   onNewTransfer={handleNewTransfer}
                   onSetState={setEntryState}
                   onDeletePlan={(id) => deletePlan.mutate(id)}
+                  onDeleteTransfer={(id) => {
+                    if (
+                      window.confirm(
+                        "Delete this transfer? This will remove both legs."
+                      )
+                    ) {
+                      deleteTransfer.mutate(id)
+                    }
+                  }}
                   onMovePlan={handleMovePlan}
                   onEditTransfer={handleEditTransfer}
                   stateFilter={stateFilter ?? null}
@@ -489,6 +500,7 @@ function Row({
   onNewTransfer,
   onSetState,
   onDeletePlan,
+  onDeleteTransfer,
   onMovePlan,
   onEditTransfer,
   stateFilter,
@@ -513,6 +525,7 @@ function Row({
     next: StateFlag
   ) => void
   onDeletePlan: (id: string) => void
+  onDeleteTransfer: (transferId: string) => void
   onMovePlan: (entry: GridEntry, date: string, account: string) => void
   onEditTransfer: (transferId: string) => void
   stateFilter: "todo" | "pending" | null
@@ -566,6 +579,7 @@ function Row({
           onNewTransfer={onNewTransfer}
           onSetState={onSetState}
           onDeletePlan={onDeletePlan}
+          onDeleteTransfer={onDeleteTransfer}
           onMovePlan={onMovePlan}
           onEditTransfer={onEditTransfer}
           stateFilter={stateFilter}
@@ -587,6 +601,7 @@ function BankCells({
   onNewTransfer,
   onSetState,
   onDeletePlan,
+  onDeleteTransfer,
   onMovePlan,
   onEditTransfer,
   stateFilter,
@@ -612,6 +627,7 @@ function BankCells({
     next: StateFlag
   ) => void
   onDeletePlan: (id: string) => void
+  onDeleteTransfer: (transferId: string) => void
   onMovePlan: (entry: GridEntry, date: string, account: string) => void
   onEditTransfer: (transferId: string) => void
   stateFilter: "todo" | "pending" | null
@@ -696,6 +712,9 @@ function BankCells({
                   onOpenCcDialog={() => onOpenCcDialog(entry, date)}
                   onSetState={(next) => onSetState(entry, date, account, next)}
                   onDeletePlan={() => onDeletePlan(entry.id)}
+                  onDeleteTransfer={() =>
+                    entry.transferId && onDeleteTransfer(entry.transferId)
+                  }
                   onMovePlan={() => onMovePlan(entry, date, account)}
                   onEditTransfer={() =>
                     entry.transferId && onEditTransfer(entry.transferId)
@@ -759,6 +778,7 @@ function EntryView({
   onOpenCcDialog,
   onSetState,
   onDeletePlan,
+  onDeleteTransfer,
   onMovePlan,
   onEditTransfer,
   onNewPlanHere,
@@ -771,6 +791,7 @@ function EntryView({
   onOpenCcDialog: () => void
   onSetState: (next: StateFlag) => void
   onDeletePlan: () => void
+  onDeleteTransfer: () => void
   onMovePlan: () => void
   onEditTransfer: () => void
   onNewPlanHere: () => void
@@ -815,11 +836,15 @@ function EntryView({
     entry.kind === "cc-forecast"
   const canDelete = entry.kind === "plan" && !entry.transferId
   const canEditTransfer = !!entry.transferId && !isPast
+  // Past transfer legs route through a standalone delete since the edit
+  // dialog is hidden for past dates — cleaning up stale transfers that
+  // never cleared parallels the plain-plan Delete option.
+  const canDeleteTransfer = entry.kind === "plan" && !!entry.transferId && isPast
   const currentState = (entry.state ?? null) as StateFlag
   // Past entries: deletable plans get a stripped-down menu (Delete only).
   // Editing/marking new state on the past doesn't make sense; cleaning up
   // stale plans that never cleared does.
-  const hasMenu = !isPast || canDelete
+  const hasMenu = !isPast || canDelete || canDeleteTransfer
 
   const [editing, setEditing] = React.useState<"amount" | "description" | null>(
     null
@@ -1025,6 +1050,11 @@ function EntryView({
         {canDelete && (
           <ContextMenuItem variant="destructive" onClick={onDeletePlan}>
             Delete
+          </ContextMenuItem>
+        )}
+        {canDeleteTransfer && (
+          <ContextMenuItem variant="destructive" onClick={onDeleteTransfer}>
+            Delete transfer
           </ContextMenuItem>
         )}
         {!isPast && (
