@@ -1,6 +1,5 @@
 from datetime import date
 
-# from beanprice.sources import coincap
 from beanquery import query
 from beancount import loader
 from decimal import Decimal
@@ -106,52 +105,110 @@ def get_stock_price(ticker: str) -> list[str]:
     return results
 
 
-# def get_crypto_price(ticker: str, symbol: str) -> list[str]:
-#     today = date.today().strftime(dateformat_str)
-#     results = coincap.get_latest_price(ticker)
-#     price = float(results[0])
-#     return [f"{today} price {symbol} {price:.2f} USD"]
+# CoinGecko coin ids keyed by the ledger's commodity symbol. Symbols are not
+# unique across CoinGecko (many coins share e.g. "BTC"), so map them explicitly.
+# Add a row here when you start holding a new coin.
+crypto_ids = {
+    "BTC": "bitcoin",
+    "ETH": "ethereum",
+    "SOL": "solana",
+    "DOGE": "dogecoin",
+    "XLM": "stellar",
+    "XRP": "ripple",
+}
 
 
-ticker_path = str(
-    get_journal_dir()
-    / "investment"
-    / "tickers"
-    / f"{date.today().strftime('%Y-%m')}.bean"
-)
+def get_crypto_prices(tickers: list[str]) -> list[str]:
+    """Fetch USD prices for several coins in a single CoinGecko request.
 
-s_date = date.today().strftime("%Y-%m-%d")
-# get_stock_price("AAPL")
+    Batching keeps us under the free-tier rate limit (one request for all
+    coins instead of one per coin, which hits HTTP 429).
+    """
+    id_to_ticker = {}
+    for ticker in tickers:
+        coin_id = crypto_ids.get(ticker)
+        if coin_id is None:
+            raise Exception(
+                f"No CoinGecko id for {ticker}; add it to crypto_ids in update_stock_price.py"
+            )
+        id_to_ticker[coin_id] = ticker
 
-# assets = coincap.get_asset_list()
+    response = requests.get(
+        "https://api.coingecko.com/api/v3/simple/price",
+        params={"ids": ",".join(id_to_ticker), "vs_currencies": "usd"},
+        timeout=30,
+    )
+    response.raise_for_status()
+    data = response.json(parse_float=Decimal)
 
-# get all stocks and print their prices
-results = []
-for ticker, info in get_all_stocks():
-    print(f"Getting price for {ticker} {info}")
-    max_retries = 3
-    retry_count = 0
-    while retry_count < max_retries:
-        retry_count += 1
-        try:
-            if info == "Crypto":
-                continue
-            results.extend(get_stock_price(ticker))
-            break
-        except Exception as e:
-            if retry_count == max_retries:
-                print(
-                    f"Error getting price for {ticker} after {max_retries} retries: {e}"
-                )
-            else:
-                print(
-                    f"Retry {retry_count}/{max_retries} for {ticker} after error: {e}"
-                )
+    today = date.today().strftime(dateformat_str)
+    results = []
+    for coin_id, ticker in id_to_ticker.items():
+        if coin_id not in data or "usd" not in data[coin_id]:
+            raise Exception(
+                f"No USD price for {ticker} ({coin_id}) from CoinGecko: {data}"
+            )
+        p = Decimal(data[coin_id]["usd"])
+        results.append(f"{today} price {ticker} {p:.2f} USD")
+    return results
 
-# sort the results
-results.sort()
 
-# append to the journal
-with open(ticker_path, "a") as f:
-    for r in results:
-        f.write(r + "\n")
+def main():
+    ticker_path = str(
+        get_journal_dir()
+        / "investment"
+        / "tickers"
+        / f"{date.today().strftime('%Y-%m')}.bean"
+    )
+
+    holdings = get_all_stocks()
+    results = []
+
+    # Crypto: one batched CoinGecko request for all coins at once.
+    crypto_tickers = sorted(t for t, info in holdings if info == "Crypto")
+    if crypto_tickers:
+        print(f"Getting prices for crypto: {', '.join(crypto_tickers)}")
+        max_retries = 3
+        for retry_count in range(1, max_retries + 1):
+            try:
+                results.extend(get_crypto_prices(crypto_tickers))
+                break
+            except Exception as e:
+                if retry_count == max_retries:
+                    print(f"Error getting crypto prices after {max_retries} retries: {e}")
+                else:
+                    print(f"Retry {retry_count}/{max_retries} for crypto after error: {e}")
+
+    # Stocks: one Yahoo request each.
+    for ticker, info in holdings:
+        if info == "Crypto":
+            continue
+        print(f"Getting price for {ticker} {info}")
+        max_retries = 3
+        retry_count = 0
+        while retry_count < max_retries:
+            retry_count += 1
+            try:
+                results.extend(get_stock_price(ticker))
+                break
+            except Exception as e:
+                if retry_count == max_retries:
+                    print(
+                        f"Error getting price for {ticker} after {max_retries} retries: {e}"
+                    )
+                else:
+                    print(
+                        f"Retry {retry_count}/{max_retries} for {ticker} after error: {e}"
+                    )
+
+    # sort the results
+    results.sort()
+
+    # append to the journal
+    with open(ticker_path, "a") as f:
+        for r in results:
+            f.write(r + "\n")
+
+
+if __name__ == "__main__":
+    main()
