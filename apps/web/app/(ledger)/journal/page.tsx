@@ -173,7 +173,9 @@ export default function JournalPage() {
         p.account.startsWith(accountFilter)
       )
       const usd = matching.reduce((s, p) => s + postingToUSD(p), 0)
-      running += usd
+      // Round to cents each step so float drift can't accumulate into a
+      // residual like -2e-13 — a zeroed-out account must read exactly 0.
+      running = Math.round((running + usd) * 100) / 100
       m.set(t.id, running)
     }
     return m

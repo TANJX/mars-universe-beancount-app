@@ -107,7 +107,14 @@ export function periodBounds(period: Period): PeriodBounds {
       return { start: new Date(1900, 0, 1), end: today }
     case "custom": {
       if (period.from && period.to) {
-        return { start: new Date(period.from), end: new Date(period.to) }
+        // parseLocalDate, not `new Date(iso)`: plain Date parsing reads
+        // YYYY-MM-DD as UTC midnight, which lands on the *previous* local
+        // day in negative-offset timezones and shifts the opening-balance
+        // boundary (periodOpeningTime) back by one day.
+        return {
+          start: parseLocalDate(period.from),
+          end: parseLocalDate(period.to),
+        }
       }
       return { start: today, end: today }
     }

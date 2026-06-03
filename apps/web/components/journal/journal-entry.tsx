@@ -112,7 +112,9 @@ export function JournalEntry({
             {formatSignedNet(contextual.number, contextual.currency)}
           </span>
         )}
-        {filtered && cumulativeUSD != null && (
+        {/* A zero balance renders as an empty cell — only show the running
+            total while the account actually carries one. */}
+        {filtered && cumulativeUSD != null && cumulativeUSD !== 0 && (
           <span className="text-right font-mono text-xs text-muted-foreground tabular-nums">
             {formatNativeAmount(cumulativeUSD, "USD")}
           </span>
