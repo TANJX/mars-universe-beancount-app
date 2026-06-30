@@ -161,10 +161,13 @@ export function extractRobinhood() {
       // Use Robinhood's displayed proceeds (entry.cost) rather than
       // shares × shown_price. The shown price is rounded to 2 decimals,
       // so multiplying it back drifts by a few cents on larger fills.
-      // entry.cost is already signed: positive for inflows (sells, +$),
-      // negative for outflows (buys shown as -$).
-      const signedCost = Number(entry.cost);
+      // The DISPLAYED sign is unreliable — IRA contributions render buys as
+      // a positive "$X" with no leading "-", which dropped the minus on the
+      // USD leg. So derive the USD-leg sign from the trade direction instead:
+      // a buy is a cash outflow (negative), a sell is proceeds (positive).
+      const costMagnitude = Math.abs(Number(entry.cost));
       const direction = entry.info.toLowerCase().endsWith("sell") ? "sell" : "buy";
+      const signedUsd = direction === "sell" ? costMagnitude : -costMagnitude;
 
       if (entry.ira) {
         const sharesAcct = `Assets:Investment:Robinhood:${entry.ira}-IRA:${symbol}`;
@@ -175,7 +178,7 @@ export function extractRobinhood() {
           // its own entry — keeps gain/loss attribution clean per symbol.
           results.push(`${entry.date} * "${entry.info}"`);
           results.push(`  ${sharesAcct}          -${amount} ${symbol} {} @ ${price} USD`);
-          results.push(`  ${usdAcct}          ${signedCost.toFixed(2)} USD`);
+          results.push(`  ${usdAcct}          ${signedUsd.toFixed(2)} USD`);
           results.push(`  Income:Trading:Stock`);
           results.push("");
         } else {
@@ -195,11 +198,14 @@ export function extractRobinhood() {
           results.push(`  ${sharesAcct}          ${amount} ${symbol} {${price} USD}`);
 
           if (isLast) {
+            // Sum the magnitudes of every fill in the same-day buy group, then
+            // emit as a negative USD leg — a contribution is a cash outflow,
+            // regardless of how Robinhood signed each displayed amount.
             let totalCost = 0;
             for (let j = i; j >= 0 && sameGroup(entries[j]); j--) {
-              totalCost += Number(entries[j].cost);
+              totalCost += Math.abs(Number(entries[j].cost));
             }
-            results.push(`  ${usdAcct}          ${totalCost.toFixed(2)} USD`);
+            results.push(`  ${usdAcct}          ${(-totalCost).toFixed(2)} USD`);
             results.push("");
           }
         }
@@ -207,10 +213,10 @@ export function extractRobinhood() {
         results.push(`${entry.date} * "${description} ${entry.amountInfo}"`);
         if (direction === "buy") {
           results.push(`  Assets:Investment:Robinhood:Brokerage:${symbol}          ${amount} ${symbol} {${price} USD}`);
-          results.push(`  Assets:Investment:Robinhood:Brokerage:USD          ${signedCost.toFixed(2)} USD`);
+          results.push(`  Assets:Investment:Robinhood:Brokerage:USD          ${signedUsd.toFixed(2)} USD`);
         } else {
           results.push(`  Assets:Investment:Robinhood:Brokerage:${symbol}          -${amount} ${symbol} {} @ ??? USD`);
-          results.push(`  Assets:Investment:Robinhood:Brokerage:USD          ${signedCost.toFixed(2)} USD`);
+          results.push(`  Assets:Investment:Robinhood:Brokerage:USD          ${signedUsd.toFixed(2)} USD`);
           results.push(`  Income:Trading:Stock`);
         }
         results.push("");
