@@ -1,5 +1,5 @@
-import type { Bookmark, SidebarConfig } from "./types"
 import type { UIConfigWire } from "./schema"
+import type { Bookmark, SidebarConfig } from "./types"
 
 export const SIDEBAR_DEFAULTS: SidebarConfig = {
   bookmarks: [],

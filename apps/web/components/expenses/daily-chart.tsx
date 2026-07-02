@@ -2,13 +2,12 @@
 
 import * as React from "react"
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
-
+import { MoneyTooltip } from "@/components/charts/chart-tooltip"
 import {
+  type ChartConfig,
   ChartContainer,
   ChartTooltip,
-  type ChartConfig,
 } from "@/components/ui/chart"
-import { MoneyTooltip } from "@/components/charts/chart-tooltip"
 import type { ExpenseRowData } from "@/lib/transform/expense-row"
 
 const CONFIG: ChartConfig = {

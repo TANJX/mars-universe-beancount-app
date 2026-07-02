@@ -2,9 +2,9 @@
 // Renames snake_case wire fields and precomputes the `segment` (last colon
 // segment) so renderers don't have to derive it.
 
-import type { BalanceTreeNode } from "@/lib/types/views"
-import { accountSegment } from "@/lib/transform/classify"
 import type { SerialisedTreeNode } from "@/lib/fava/schemas"
+import { accountSegment } from "@/lib/transform/classify"
+import type { BalanceTreeNode } from "@/lib/types/views"
 
 export function convertTreeNode(n: SerialisedTreeNode): BalanceTreeNode {
   return {

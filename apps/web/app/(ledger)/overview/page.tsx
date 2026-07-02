@@ -1,8 +1,7 @@
 "use client"
 
-import * as React from "react"
 import { AlertCircle } from "lucide-react"
-
+import { useUIState } from "@/components/layout/ui-state"
 import { AccountsSummary } from "@/components/overview/accounts-summary"
 import { CategoryBars } from "@/components/overview/category-bars"
 import { MobileOverview } from "@/components/overview/mobile/mobile-overview"
@@ -13,16 +12,15 @@ import {
   MobileOverviewSkeleton,
   OverviewSkeleton,
 } from "@/components/skeletons/overview-skeleton"
-import { useUIState } from "@/components/layout/ui-state"
-import { useIsMobile } from "@/hooks/use-mobile"
 import {
   useBalanceSheet,
   useIncomeStatement,
   useJournal,
   useNetWorthSeries,
 } from "@/hooks/use-fava"
-import { composeOverview } from "@/lib/transform/overview-stats"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { useResolvedUIConfig } from "@/lib/config"
+import { composeOverview } from "@/lib/transform/overview-stats"
 
 // Recent Activity is a "what happened lately" feed, NOT a slice of the
 // page's selected period. Always pulls the past 7 days so it stays useful

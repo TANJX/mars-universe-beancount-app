@@ -1,14 +1,14 @@
 "use client"
 
+import { MobilePeriodControl } from "@/components/filters/mobile-period-control"
+import { MarsLogo } from "@/components/layout/mars-logo"
 import { MobileAccountsSummary } from "@/components/overview/mobile/mobile-accounts-summary"
 import { MobileMiniStats } from "@/components/overview/mobile/mobile-mini-stats"
 import { MobileNetWorthHero } from "@/components/overview/mobile/mobile-net-worth-hero"
 import { MobileRecentActivity } from "@/components/overview/mobile/mobile-recent-activity"
-import { MobilePeriodControl } from "@/components/filters/mobile-period-control"
-import { useResolvedUIConfig, useUIConfig } from "@/lib/config"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useResolvedUIConfig, useUIConfig } from "@/lib/config"
 import type { JournalRow, OverviewStats } from "@/lib/types/views"
-import { MarsLogo } from "@/components/layout/mars-logo"
 
 interface MobileOverviewProps {
   stats: OverviewStats

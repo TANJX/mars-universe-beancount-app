@@ -9,10 +9,9 @@
 "use client"
 
 import * as React from "react"
-
-import type { AccountPath } from "@/lib/types/beancount"
 import { useResolvedUIConfig } from "@/lib/config"
 import { lookupColor, rollupKey as rollupKeyImpl } from "@/lib/config/accounts"
+import type { AccountPath } from "@/lib/types/beancount"
 
 /** Pure no-op — undefined unless a config-aware caller is used. */
 export function lookupCategoryColor(path: AccountPath): string | undefined {

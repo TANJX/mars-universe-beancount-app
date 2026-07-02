@@ -1,8 +1,8 @@
 "use client"
 
+import { SparkArea } from "@/components/charts/spark-area"
 import { DeltaPill } from "@/components/primitives/delta-pill"
 import { Money } from "@/components/primitives/money"
-import { SparkArea } from "@/components/charts/spark-area"
 import { MINUS } from "@/lib/format"
 import type { Period, SeriesPoint } from "@/lib/types/views"
 

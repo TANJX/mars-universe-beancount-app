@@ -1,5 +1,5 @@
 export function injectStyles() {
-  const style = document.createElement('style');
+  const style = document.createElement("style")
   style.textContent = `
     .credit-balance-dialog {
       position: fixed;
@@ -171,6 +171,6 @@ export function injectStyles() {
       box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
       transition: all 0.2s ease;
     }
-  `;
-  document.head.appendChild(style);
+  `
+  document.head.appendChild(style)
 }

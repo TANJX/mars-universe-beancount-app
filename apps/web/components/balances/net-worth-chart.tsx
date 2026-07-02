@@ -8,13 +8,12 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-
+import { MoneyTooltip } from "@/components/charts/chart-tooltip"
 import {
+  type ChartConfig,
   ChartContainer,
   ChartTooltip,
-  type ChartConfig,
 } from "@/components/ui/chart"
-import { MoneyTooltip } from "@/components/charts/chart-tooltip"
 
 const CONFIG: ChartConfig = {
   net: { label: "Net worth", color: "var(--primary)" },

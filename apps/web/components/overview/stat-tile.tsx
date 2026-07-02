@@ -1,7 +1,7 @@
 "use client"
 
-import { Money } from "@/components/primitives/money"
 import { SparkArea } from "@/components/charts/spark-area"
+import { Money } from "@/components/primitives/money"
 import { formatPercent } from "@/lib/format"
 import type { SeriesPoint } from "@/lib/types/views"
 

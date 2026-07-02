@@ -1,8 +1,5 @@
 "use client"
 
-import * as React from "react"
-import Link from "next/link"
-import { usePathname } from "next/navigation"
 import {
   BarChart3,
   BookOpen,
@@ -10,6 +7,9 @@ import {
   ListTree,
   Receipt,
 } from "lucide-react"
+import Link from "next/link"
+import { usePathname } from "next/navigation"
+import type * as React from "react"
 
 import { usePeriodHref } from "@/components/layout/ui-state"
 import { cn } from "@/lib/utils"

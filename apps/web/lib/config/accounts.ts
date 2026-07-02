@@ -7,8 +7,8 @@
 import type { AccountPath } from "@/lib/types/beancount"
 
 import { CATEGORY_ICON_DEFAULTS } from "./defaults/category-icons"
-import type { AccountsConfig } from "./types"
 import type { UIConfigWire } from "./schema"
+import type { AccountsConfig } from "./types"
 
 export const ACCOUNTS_DEFAULTS: AccountsConfig = {
   displayNames: {},
@@ -68,7 +68,7 @@ export function lookupColor(
 /** Map a leaf path to its rollup bucket prefix, or itself if no rollup. */
 export function rollupKey(cfg: AccountsConfig, path: AccountPath): AccountPath {
   for (const prefix of cfg.categoryRollup) {
-    if (path === prefix || path.startsWith(prefix + ":")) return prefix
+    if (path === prefix || path.startsWith(`${prefix}:`)) return prefix
   }
   return path
 }

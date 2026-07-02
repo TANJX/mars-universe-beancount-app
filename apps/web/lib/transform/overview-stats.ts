@@ -8,6 +8,7 @@
 //     sparkline curves, so even on "this month" the sparkline shows trend
 //     context instead of a single dot.
 
+import type { Bookmark } from "@/lib/config/types"
 import { classifyAll } from "@/lib/transform/classify"
 import type { Transaction } from "@/lib/types/beancount"
 import type {
@@ -22,7 +23,6 @@ import type {
   SeriesPoint,
   TrialBalance,
 } from "@/lib/types/views"
-import type { Bookmark } from "@/lib/config/types"
 
 const SERIES_LIMIT = 12
 const ZERO_THRESHOLD = 0.005

@@ -47,7 +47,7 @@ export function useAccountOpeningBalance(account: string | undefined): number {
 function findNode(tree: BalanceTreeNode, path: string): BalanceTreeNode | null {
   if (tree.account === path) return tree
   for (const child of tree.children ?? []) {
-    if (path === child.account || path.startsWith(child.account + ":")) {
+    if (path === child.account || path.startsWith(`${child.account}:`)) {
       const found = findNode(child, path)
       if (found) return found
     }

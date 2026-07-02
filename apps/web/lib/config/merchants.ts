@@ -3,8 +3,8 @@
 // override a bundled brand's domain or aliases without redefining everything.
 
 import { MERCHANT_DEFAULTS } from "./defaults/merchants"
-import type { MerchantEntry, MerchantRegistry } from "./types"
 import type { UIConfigWire } from "./schema"
+import type { MerchantEntry, MerchantRegistry } from "./types"
 
 export function resolveMerchants(
   user: UIConfigWire["merchants"]

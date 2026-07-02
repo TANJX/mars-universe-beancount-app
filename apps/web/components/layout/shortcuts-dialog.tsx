@@ -1,8 +1,6 @@
 "use client"
 
 import * as React from "react"
-
-import { useHydrated } from "@/hooks/use-hydrated"
 import {
   Dialog,
   DialogContent,
@@ -10,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { useHydrated } from "@/hooks/use-hydrated"
 
 interface Shortcut {
   keys: string[]

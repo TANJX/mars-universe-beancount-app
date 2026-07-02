@@ -1,16 +1,16 @@
 "use client"
 
-import * as React from "react"
 import Link from "next/link"
-import { Panel } from "@/components/overview/panel"
+import type * as React from "react"
 import { usePeriodHref } from "@/components/layout/ui-state"
+import { Panel } from "@/components/overview/panel"
 import { MerchantAvatar } from "@/components/primitives/merchant-avatar"
 import { Money } from "@/components/primitives/money"
 import { Tag } from "@/components/primitives/tag"
-import { cn } from "@/lib/utils"
 import { formatShortDate } from "@/lib/format"
 import { accountSegment, accountTail } from "@/lib/transform/classify"
 import type { JournalRow } from "@/lib/types/views"
+import { cn } from "@/lib/utils"
 
 interface RecentActivityProps {
   rows: JournalRow[]

@@ -1,27 +1,17 @@
 "use client"
 
 import * as React from "react"
-
-import { Money } from "@/components/primitives/money"
-import { cn } from "@/lib/utils"
-import { parseAmount } from "@/lib/plan/format"
-import {
-  useDeletePlan,
-  useDeleteTransfer,
-  useSaveCcOverride,
-  useSavePlan,
-  useSaveTransfer,
-} from "@/hooks/use-plan"
 import { mergeBankOrder } from "@/components/plan/bank-panel"
 import { CcOverrideDialog } from "@/components/plan/cc-override-dialog"
-import {
-  TransferDialog,
-  type TransferDialogSeed,
-} from "@/components/plan/transfer-dialog"
 import {
   MovePlanDialog,
   type MovePlanSeed,
 } from "@/components/plan/move-plan-dialog"
+import {
+  TransferDialog,
+  type TransferDialogSeed,
+} from "@/components/plan/transfer-dialog"
+import { Money } from "@/components/primitives/money"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -29,12 +19,21 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
+import {
+  useDeletePlan,
+  useDeleteTransfer,
+  useSaveCcOverride,
+  useSavePlan,
+  useSaveTransfer,
+} from "@/hooks/use-plan"
+import { parseAmount } from "@/lib/plan/format"
 import type {
   BankInfo,
   CCCard,
   GridEntry,
   PlanGridResponse,
 } from "@/lib/plan/schemas"
+import { cn } from "@/lib/utils"
 
 type StateFlag = "todo" | "pending" | null
 
@@ -457,7 +456,7 @@ function collapseQuietDays(
 }
 
 function addDays(iso: string, days: number): string {
-  const d = new Date(iso + "T00:00:00")
+  const d = new Date(`${iso}T00:00:00`)
   d.setDate(d.getDate() + days)
   return d.toISOString().slice(0, 10)
 }
@@ -532,7 +531,7 @@ function Row({
 }) {
   const isToday = row.date === today
   const isPast = row.date < today
-  const d = new Date(row.date + "T00:00:00")
+  const d = new Date(`${row.date}T00:00:00`)
   const isWeekend = d.getDay() === 0 || d.getDay() === 6
   const dayName = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()]
   const label = `${dayName} ${d.getMonth() + 1}/${d.getDate()}`
@@ -841,7 +840,8 @@ function EntryView({
   // Past transfer legs route through a standalone delete since the edit
   // dialog is hidden for past dates — cleaning up stale transfers that
   // never cleared parallels the plain-plan Delete option.
-  const canDeleteTransfer = entry.kind === "plan" && !!entry.transferId && isPast
+  const canDeleteTransfer =
+    entry.kind === "plan" && !!entry.transferId && isPast
   const currentState = (entry.state ?? null) as StateFlag
   // Past entries: deletable plans get a stripped-down menu (Delete only).
   // Editing/marking new state on the past doesn't make sense; cleaning up

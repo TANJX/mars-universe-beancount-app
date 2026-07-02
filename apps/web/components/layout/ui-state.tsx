@@ -1,10 +1,9 @@
 "use client"
 
-import * as React from "react"
 import { parseAsString, useQueryStates } from "nuqs"
-
-import { getPreset } from "@/lib/mock/periods"
+import * as React from "react"
 import { makeCustomPeriod, parseLocalDate } from "@/lib/fava/periods"
+import { getPreset } from "@/lib/mock/periods"
 import type {
   Conversion,
   Density,
@@ -188,7 +187,8 @@ export function useUIState(): UIState {
 export function usePeriodHref(): (href: string) => string {
   const { period } = useUIState()
 
-  return React.useCallback((href: string) => withPeriodHref(href, period), [
-    period,
-  ])
+  return React.useCallback(
+    (href: string) => withPeriodHref(href, period),
+    [period]
+  )
 }

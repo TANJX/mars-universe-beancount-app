@@ -17,6 +17,7 @@ export default function LedgerError({
       </div>
       <p className="max-w-md text-xs text-muted-foreground">{error.message}</p>
       <button
+        type="button"
         onClick={reset}
         className="inline-flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-sm hover:bg-accent/60"
       >

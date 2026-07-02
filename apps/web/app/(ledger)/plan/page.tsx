@@ -1,7 +1,7 @@
 "use client"
 
-import * as React from "react"
 import { AlertCircle } from "lucide-react"
+import * as React from "react"
 
 import { BankPanel } from "@/components/plan/bank-panel"
 import { CcStripA } from "@/components/plan/cc-strip-a"
@@ -143,7 +143,7 @@ function FilterChip({
 }
 
 function formatToday(iso: string): string {
-  const d = new Date(iso + "T00:00:00")
+  const d = new Date(`${iso}T00:00:00`)
   const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
   const months = [
     "Jan",

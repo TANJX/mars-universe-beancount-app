@@ -20,7 +20,7 @@ export interface ParsedAmount {
 }
 
 const NUM = String.raw`-?\d[\d_]*(?:\.\d+)?`
-const CCY = String.raw`[A-Z][A-Z0-9._-]*`
+const CCY = "[A-Z][A-Z0-9._-]*"
 
 const COST_RE = new RegExp(
   String.raw`\{\s*(${NUM})\s+(${CCY})(?:\s*,\s*(\d{4}-\d{2}-\d{2}))?(?:\s*,\s*"([^"]*)")?\s*\}`

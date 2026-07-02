@@ -1,9 +1,10 @@
 "use client"
 
-import * as React from "react"
 import { CalendarRange, ChevronLeft, ChevronRight } from "lucide-react"
+import * as React from "react"
 import type { DateRange } from "react-day-picker"
-
+import { useUIState } from "@/components/layout/ui-state"
+import { Calendar } from "@/components/ui/calendar"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,14 +20,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { Calendar } from "@/components/ui/calendar"
-import { useUIState } from "@/components/layout/ui-state"
-import { listPresets } from "@/lib/mock/periods"
 import {
   makeCustomPeriod,
   parseLocalDate,
   shiftPeriod,
 } from "@/lib/fava/periods"
+import { listPresets } from "@/lib/mock/periods"
 import type { PeriodPresetId } from "@/lib/types/views"
 import { cn } from "@/lib/utils"
 
@@ -109,6 +108,7 @@ export function PeriodCommand() {
   return (
     <div className="flex items-center gap-1">
       <button
+        type="button"
         onClick={() => shift(-1)}
         className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
         aria-label="Previous period"
@@ -191,6 +191,7 @@ export function PeriodCommand() {
               Custom range
             </span>
             <button
+              type="button"
               onClick={() => {
                 setCalendarOpen(false)
                 setOpen(true)
@@ -217,12 +218,14 @@ export function PeriodCommand() {
             </span>
             <div className="flex items-center gap-1.5">
               <button
+                type="button"
                 onClick={() => setCalendarOpen(false)}
                 className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={applyRange}
                 disabled={!pendingRange?.from || !pendingRange?.to}
                 className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
@@ -235,6 +238,7 @@ export function PeriodCommand() {
       </Popover>
 
       <button
+        type="button"
         onClick={() => shift(1)}
         className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
         aria-label="Next period"

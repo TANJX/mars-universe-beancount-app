@@ -1,7 +1,7 @@
 "use client"
 
-import * as React from "react"
 import Link from "next/link"
+import type * as React from "react"
 
 import { usePeriodHref } from "@/components/layout/ui-state"
 import { MerchantAvatar } from "@/components/primitives/merchant-avatar"

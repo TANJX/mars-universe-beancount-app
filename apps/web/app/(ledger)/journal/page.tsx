@@ -1,22 +1,21 @@
 "use client"
 
-import * as React from "react"
-import { usePathname, useSearchParams } from "next/navigation"
 import { AlertCircle } from "lucide-react"
+import { usePathname, useSearchParams } from "next/navigation"
+import * as React from "react"
 
 import { AllTimeFilterPrompt } from "@/components/journal/all-time-filter-prompt"
 import { COLS_BASE, COLS_FILTERED } from "@/components/journal/cols"
 import { JournalEntry } from "@/components/journal/journal-entry"
 import { MobileJournal } from "@/components/journal/mobile/mobile-journal"
+import { useUIState } from "@/components/layout/ui-state"
 import { SearchBar } from "@/components/search/search-bar"
 import { MobileJournalSkeleton } from "@/components/skeletons/journal-skeleton"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Card } from "@/components/ui/card"
-import { useUIState } from "@/components/layout/ui-state"
+import { Skeleton } from "@/components/ui/skeleton"
 import { useJournal } from "@/hooks/use-fava"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useAccountOpeningBalance } from "@/hooks/use-opening-balance"
-import { accountSegment } from "@/lib/transform/classify"
 import { toFavaFilter } from "@/lib/search/fava-filter"
 import {
   addToken,
@@ -29,6 +28,7 @@ import {
   type Token,
 } from "@/lib/search/parse"
 import { useSearchVocabulary } from "@/lib/search/vocabulary"
+import { accountSegment } from "@/lib/transform/classify"
 import type { Posting } from "@/lib/types/beancount"
 import { cn } from "@/lib/utils"
 

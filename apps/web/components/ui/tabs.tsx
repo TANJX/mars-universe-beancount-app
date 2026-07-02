@@ -1,6 +1,5 @@
 "use client"
 
-import * as React from "react"
 import { Tabs as TabsPrimitive } from "@base-ui/react/tabs"
 
 import { cn } from "@/lib/utils"
@@ -51,4 +50,4 @@ function TabsContent({ className, ...props }: TabsPrimitive.Panel.Props) {
   )
 }
 
-export { Tabs, TabsList, TabsTrigger, TabsContent }
+export { Tabs, TabsContent, TabsList, TabsTrigger }

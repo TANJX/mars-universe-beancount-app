@@ -1,16 +1,15 @@
 "use client"
 
-import * as React from "react"
-import Link from "next/link"
 import { ChevronRight } from "lucide-react"
-
-import { AccountDot } from "@/components/primitives/account-dot"
+import Link from "next/link"
+import * as React from "react"
 import { usePeriodHref } from "@/components/layout/ui-state"
+import { AccountDot } from "@/components/primitives/account-dot"
 import { Money } from "@/components/primitives/money"
-import { cn } from "@/lib/utils"
 import { formatPercent } from "@/lib/format"
 import { accountSegment } from "@/lib/transform/classify"
 import type { AccountRoot, BalanceTreeNode } from "@/lib/types/views"
+import { cn } from "@/lib/utils"
 
 // Sub-$1 USD subtree dust gets hidden — closed accounts, rounding noise.
 const DUST_USD = 1
@@ -147,6 +146,7 @@ function NodeRow({
         <div className="flex min-w-0 items-center gap-1.5">
           {hasChildren ? (
             <button
+              type="button"
               onClick={() => toggle(node.account)}
               className="-ml-1 flex size-4 items-center justify-center rounded text-muted-foreground hover:text-foreground"
               aria-label={isOpen ? "Collapse" : "Expand"}

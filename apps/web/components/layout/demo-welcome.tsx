@@ -1,9 +1,7 @@
 "use client"
 
-import * as React from "react"
 import Image from "next/image"
-
-import { useHydrated } from "@/hooks/use-hydrated"
+import * as React from "react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -12,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { useHydrated } from "@/hooks/use-hydrated"
 import { logoDevUrl } from "@/lib/merchants/logodev"
 
 const STORAGE_KEY = "demo-welcome-dismissed-v1"

@@ -6,8 +6,7 @@ const FAVA_INTERNAL_URL =
 // this value with the journal's `option "title"` in the deployed ledger.
 // Default `acme-demo` matches the public demo ledger; override via env for
 // other deployments.
-const FAVA_LEDGER_SLUG =
-  process.env.FAVA_LEDGER_SLUG ?? "acme-demo"
+const FAVA_LEDGER_SLUG = process.env.FAVA_LEDGER_SLUG ?? "acme-demo"
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {

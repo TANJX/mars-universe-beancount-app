@@ -1,10 +1,9 @@
 "use client"
 
-import * as React from "react"
 import { Command as CommandPrimitive } from "cmdk"
 import {
-  FolderTree,
   FolderMinus,
+  FolderTree,
   Hash,
   Link as LinkIcon,
   Search,
@@ -12,6 +11,7 @@ import {
   User,
   X,
 } from "lucide-react"
+import * as React from "react"
 
 import {
   CommandEmpty,
@@ -23,8 +23,8 @@ import {
   addToken,
   parseSearch,
   removeToken,
-  stringifySearch,
   type SearchQuery,
+  stringifySearch,
 } from "@/lib/search/parse"
 import type { SearchVocabulary } from "@/lib/search/vocabulary"
 
@@ -112,21 +112,21 @@ function parsedToChips(q: SearchQuery, pinnedAccount?: string): Chip[] {
     if (v === pinnedAccount) return
     out.push({ id: `a:${i}:${v}`, kind: "account", value: v })
   })
-  q.excludeAccounts.forEach((v, i) =>
+  q.excludeAccounts.forEach((v, i) => {
     out.push({ id: `xa:${i}:${v}`, kind: "exclude:account", value: v })
-  )
-  q.payees.forEach((v, i) =>
+  })
+  q.payees.forEach((v, i) => {
     out.push({ id: `p:${i}:${v}`, kind: "payee", value: v })
-  )
-  q.tags.forEach((v, i) =>
+  })
+  q.tags.forEach((v, i) => {
     out.push({ id: `t:${i}:${v}`, kind: "tag", value: v })
-  )
-  q.links.forEach((v, i) =>
+  })
+  q.links.forEach((v, i) => {
     out.push({ id: `l:${i}:${v}`, kind: "link", value: v })
-  )
-  q.text.forEach((v, i) =>
+  })
+  q.text.forEach((v, i) => {
     out.push({ id: `tx:${i}:${v}`, kind: "text", value: v })
-  )
+  })
   return out
 }
 
@@ -380,11 +380,19 @@ export function SearchBar({
               // the empty-draft gate.
               if (builder.state === "idle" && builder.draft === "") {
                 if (v.startsWith("^")) {
-                  setBuilder({ state: "value", prefix: "link", draft: v.slice(1) })
+                  setBuilder({
+                    state: "value",
+                    prefix: "link",
+                    draft: v.slice(1),
+                  })
                   return
                 }
                 if (v.startsWith("#")) {
-                  setBuilder({ state: "value", prefix: "tag", draft: v.slice(1) })
+                  setBuilder({
+                    state: "value",
+                    prefix: "tag",
+                    draft: v.slice(1),
+                  })
                   return
                 }
               }

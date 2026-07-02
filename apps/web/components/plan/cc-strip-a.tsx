@@ -1,11 +1,11 @@
 "use client"
 
-import * as React from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
+import * as React from "react"
 
 import { CcCardView } from "@/components/plan/cc-card"
-import { cn } from "@/lib/utils"
 import type { BankInfo, CCCard } from "@/lib/plan/schemas"
+import { cn } from "@/lib/utils"
 
 const CARDS_PER_PAGE = 5
 
@@ -92,8 +92,8 @@ function nextDueRank(card: CCCard, todayIso: string): number {
   const day =
     card.paymentDueDay === -1 ? lastDay : Math.min(card.paymentDueDay, lastDay)
   const dueIso = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`
-  const dueT = new Date(dueIso + "T00:00:00").getTime()
-  const todayT = new Date(todayIso + "T00:00:00").getTime()
+  const dueT = new Date(`${dueIso}T00:00:00`).getTime()
+  const todayT = new Date(`${todayIso}T00:00:00`).getTime()
   return Math.round((dueT - todayT) / 86_400_000)
 }
 

@@ -2,24 +2,23 @@
 
 import * as React from "react"
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
-
+import { formatChartDate } from "@/components/charts/chart-tooltip"
 import {
+  type ChartConfig,
   ChartContainer,
   ChartTooltip,
-  type ChartConfig,
   useChart,
 } from "@/components/ui/chart"
-import { formatChartDate } from "@/components/charts/chart-tooltip"
 import { useDisplayAccount } from "@/lib/accounts/display-names"
 import { useLookupCategoryColor, useRollupKey } from "@/lib/accounts/palette"
 import { formatMoney } from "@/lib/format"
-import { cn } from "@/lib/utils"
 import type { AccountPath } from "@/lib/types/beancount"
 import type {
   CategoryMonthlyEntry,
   Granularity,
   MonthlyEntry,
 } from "@/lib/types/views"
+import { cn } from "@/lib/utils"
 
 const TOP_N = 5
 

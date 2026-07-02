@@ -2,8 +2,8 @@
 // Pure function — takes the merged merchant registry as input so callers
 // (React components) can supply it from `useResolvedUIConfig()`.
 
-import type { MerchantEntry, MerchantRegistry } from "@/lib/config/types"
 import { buildLookupTable } from "@/lib/config/merchants"
+import type { MerchantEntry, MerchantRegistry } from "@/lib/config/types"
 
 import { matchPayeePattern } from "./patterns"
 

@@ -1,5 +1,5 @@
-import { cn } from "@/lib/utils"
 import type { AccountRoot } from "@/lib/types/views"
+import { cn } from "@/lib/utils"
 
 const ROOT_COLORS: Record<AccountRoot, string> = {
   Assets: "bg-emerald-500",

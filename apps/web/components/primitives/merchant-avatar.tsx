@@ -1,17 +1,17 @@
 "use client"
 
-import * as React from "react"
-import Image from "next/image"
 import { DynamicIcon, type IconName } from "lucide-react/dynamic"
+import Image from "next/image"
+import * as React from "react"
 
 import { useResolvedUIConfig } from "@/lib/config"
-import { resolveMerchant, type Resolved } from "@/lib/merchants/resolve"
 import {
-  deriveFallback,
   type AvatarFallback,
+  deriveFallback,
 } from "@/lib/merchants/avatar-fallback"
-import { cn } from "@/lib/utils"
+import { type Resolved, resolveMerchant } from "@/lib/merchants/resolve"
 import type { JournalRow } from "@/lib/types/views"
+import { cn } from "@/lib/utils"
 
 // One canonical size per surface so the avatar is consistent everywhere it
 // appears. Use the named `size` prop in call sites; only fall back to a
@@ -106,6 +106,7 @@ function LogoAvatar({
         height: size,
         borderRadius: size / 2,
       }}
+      role="img"
       aria-label={resolved.alt}
     >
       {/* Skeleton swatch / fallback initial visible until the logo loads */}
@@ -172,6 +173,7 @@ function GlyphAvatar({
         height: size,
         borderRadius: size / 2,
       }}
+      role="img"
       aria-label={resolved.alt}
       title={resolved.alt}
     >
@@ -210,6 +212,7 @@ function CategoryIconAvatar({
         height: size,
         borderRadius: size / 2,
       }}
+      role="img"
       aria-label={resolved.alt}
       title={resolved.alt}
     >
@@ -249,6 +252,7 @@ function InitialAvatar({
         fontSize: isLong ? size * 0.38 : size * 0.5,
         letterSpacing: "-0.02em",
       }}
+      role="img"
       aria-label={alt}
     >
       {entry.initial}

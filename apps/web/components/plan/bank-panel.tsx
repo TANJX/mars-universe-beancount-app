@@ -1,16 +1,16 @@
 "use client"
 
-import * as React from "react"
 import { GripVertical } from "lucide-react"
+import * as React from "react"
 
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { cn } from "@/lib/utils"
 import { useSavePlanSettings } from "@/hooks/use-plan"
 import type { BankInfo, PlanSettings } from "@/lib/plan/schemas"
+import { cn } from "@/lib/utils"
 
 export function mergeBankOrder(
   currentOrder: string[],

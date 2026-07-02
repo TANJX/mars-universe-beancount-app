@@ -1,12 +1,11 @@
 "use client"
 
-import * as React from "react"
 import { Check } from "lucide-react"
+import * as React from "react"
 import type { DateRange } from "react-day-picker"
-
+import { useUIState } from "@/components/layout/ui-state"
 import { Calendar } from "@/components/ui/calendar"
 import { Sheet, SheetContent } from "@/components/ui/sheet"
-import { useUIState } from "@/components/layout/ui-state"
 import { makeCustomPeriod, parseLocalDate } from "@/lib/fava/periods"
 import { listPresets } from "@/lib/mock/periods"
 import type { PeriodPresetId } from "@/lib/types/views"

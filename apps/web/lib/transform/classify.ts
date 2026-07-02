@@ -178,7 +178,6 @@ function pickPrimaryCategoryCounterparty(
       const lotLeg = postings.find((p) => p.cost !== undefined) ?? null
       return { primary: cashLeg, category: lotLeg, counterparty: null }
     }
-    case "complex":
     default: {
       const sorted = sortByAbs(postings)
       return { primary: sorted[0] ?? null, category: null, counterparty: null }

@@ -1,7 +1,5 @@
 "use client"
 
-import * as React from "react"
-import { useRouter } from "next/navigation"
 import {
   BarChart3,
   BookOpen,
@@ -12,7 +10,11 @@ import {
   Receipt,
   Search as SearchIcon,
 } from "lucide-react"
-
+import { useRouter } from "next/navigation"
+import * as React from "react"
+import { useShortcutsDialog } from "@/components/layout/shortcuts-dialog"
+import { usePeriodHref } from "@/components/layout/ui-state"
+import { ClientOnly } from "@/components/primitives/client-only"
 import {
   CommandDialog,
   CommandEmpty,
@@ -22,9 +24,6 @@ import {
   CommandList,
   CommandShortcut,
 } from "@/components/ui/command"
-import { ClientOnly } from "@/components/primitives/client-only"
-import { useShortcutsDialog } from "@/components/layout/shortcuts-dialog"
-import { usePeriodHref } from "@/components/layout/ui-state"
 import { useLedgerData } from "@/hooks/use-fava"
 
 interface NavItem {

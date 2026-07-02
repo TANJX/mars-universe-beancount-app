@@ -53,9 +53,9 @@ web-dev *args:
 web-build:
     pnpm --filter web build
 
-# Lint / format everything (Python + web)
-lint: lint-py lint-web
-fmt: fmt-py fmt-web
+# Lint / format everything (Python + JS/TS)
+lint: lint-py lint-js
+fmt: fmt-py fmt-js
 
 # Python (ruff fetched on-demand via uvx)
 fmt-py:
@@ -64,9 +64,13 @@ fmt-py:
 lint-py:
     uvx ruff check packages/beancount-tooling packages/ledger-data-api
 
-# Next.js web app (apps/web)
-fmt-web:
-    pnpm --filter web format
+# JS/TS via Biome (apps/web + browser extension), configured in biome.json
+fmt-js:
+    pnpm format
 
-lint-web:
-    pnpm --filter web lint
+lint-js:
+    pnpm lint
+
+# Auto-fix Biome lint issues when safe
+lint-js-fix:
+    pnpm lint:fix

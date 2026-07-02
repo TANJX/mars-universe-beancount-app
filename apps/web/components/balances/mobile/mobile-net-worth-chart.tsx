@@ -1,14 +1,13 @@
 "use client"
 
 import { Area, AreaChart, ReferenceLine, XAxis, YAxis } from "recharts"
-
+import type { NetWorthPoint } from "@/components/balances/net-worth-chart"
+import { MoneyTooltip } from "@/components/charts/chart-tooltip"
 import {
+  type ChartConfig,
   ChartContainer,
   ChartTooltip,
-  type ChartConfig,
 } from "@/components/ui/chart"
-import { MoneyTooltip } from "@/components/charts/chart-tooltip"
-import type { NetWorthPoint } from "@/components/balances/net-worth-chart"
 
 const CONFIG: ChartConfig = {
   net: { label: "Net worth", color: "var(--primary)" },

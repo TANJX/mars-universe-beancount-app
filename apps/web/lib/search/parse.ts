@@ -14,8 +14,8 @@
 // The parser is permissive: anything that doesn't fit a known prefix becomes
 // a bare term. Empty input → an empty SearchQuery (matches everything).
 
-import type { Transaction } from "@/lib/types/beancount"
 import { accountMatches, accountRoot } from "@/lib/transform/classify"
+import type { Transaction } from "@/lib/types/beancount"
 
 export interface SearchQuery {
   /** Hierarchical account filters. Multiple are AND'd. */
@@ -47,6 +47,7 @@ export function parseSearch(input: string): SearchQuery {
   const tokenRe =
     /(-?(?:exclude:account|account|payee|tag|link):[^\s]+)|"([^"]+)"|(\S+)/g
   let m: RegExpExecArray | null
+  // biome-ignore lint/suspicious/noAssignInExpressions: idiomatic regex exec loop
   while ((m = tokenRe.exec(input))) {
     const prefixed = m[1]
     const phrase = m[2]

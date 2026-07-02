@@ -35,19 +35,20 @@ Guidance for coding agents working in `mars-universe-beancount`.
 
 ## Lint/Format Commands
 
-Use the `just` recipes — they cover both the Python packages (`packages/beancount-tooling`, `packages/ledger-data-api`) and the Next.js web app (`apps/web`). Run from the repo root.
+Use the `just` recipes — they cover the Python packages (`packages/beancount-tooling`, `packages/ledger-data-api`) and the JS/TS side (`apps/web`, `packages/card-balance-browser-extension`, linted/formatted by Biome via the root `biome.json`). Run from the repo root.
 
-- Lint everything: `just lint` (= `just lint-py` + `just lint-web`)
-- Format everything: `just fmt` (= `just fmt-py` + `just fmt-web`)
+- Lint everything: `just lint` (= `just lint-py` + `just lint-js`)
+- Format everything: `just fmt` (= `just fmt-py` + `just fmt-js`)
 - Python only:
   - `just lint-py` → `uvx ruff check packages/beancount-tooling packages/ledger-data-api`
   - `just fmt-py`  → `uvx ruff format packages/beancount-tooling packages/ledger-data-api`
-- Web only:
-  - `just lint-web` → `pnpm --filter web lint`
-  - `just fmt-web`  → `pnpm --filter web format`
+- JS/TS only (Biome):
+  - `just lint-js` → `pnpm lint` (= `biome check .` from the repo root)
+  - `just fmt-js`  → `pnpm format` (= `biome format --write .`)
+  - Auto-fix safe Biome lint issues: `just lint-js-fix` (= `biome check --write .`)
 - Auto-fix Python lint issues when safe: `uvx ruff check packages/beancount-tooling packages/ledger-data-api --fix`
 
-After non-trivial edits, run the relevant subset (`lint-py`/`lint-web`) before reporting work as done. Don't invoke `ruff` directly with a different package list — keep the scope aligned with the `Justfile` so cached results stay consistent.
+After non-trivial edits, run the relevant subset (`lint-py`/`lint-js`) before reporting work as done. Don't invoke `ruff` or `biome` directly with a different scope — keep the scope aligned with the `Justfile` so cached results stay consistent.
 
 ## Test Commands
 

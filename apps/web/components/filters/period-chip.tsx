@@ -1,6 +1,5 @@
 "use client"
 
-import * as React from "react"
 import { ChevronDown } from "lucide-react"
 
 import { useUIState } from "@/components/layout/ui-state"

@@ -3,12 +3,11 @@
 // fields Fava adds in newer versions that we don't read.
 
 import { z } from "zod"
-
+import { parseAmount } from "@/lib/transform/parse-amount"
 import type {
   Posting as DomainPosting,
   Transaction as DomainTransaction,
 } from "@/lib/types/beancount"
-import { parseAmount } from "@/lib/transform/parse-amount"
 
 // ─── Wire shapes ──────────────────────────────────────────────────────────
 

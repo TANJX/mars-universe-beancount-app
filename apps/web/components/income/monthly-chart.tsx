@@ -1,15 +1,14 @@
 "use client"
 
 import { Bar, CartesianGrid, ComposedChart, Line, XAxis, YAxis } from "recharts"
-
+import { MoneyTooltip } from "@/components/charts/chart-tooltip"
 import {
+  type ChartConfig,
   ChartContainer,
   ChartLegend,
   ChartLegendContent,
   ChartTooltip,
-  type ChartConfig,
 } from "@/components/ui/chart"
-import { MoneyTooltip } from "@/components/charts/chart-tooltip"
 import type { Granularity, MonthlyEntry } from "@/lib/types/views"
 
 const CONFIG: ChartConfig = {

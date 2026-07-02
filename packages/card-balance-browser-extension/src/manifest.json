@@ -3,10 +3,7 @@
   "name": "Credit Card Balance Viewer",
   "version": "1.2.1",
   "description": "Shows credit card balances on banking websites",
-  "permissions": [
-    "activeTab",
-    "scripting"
-  ],
+  "permissions": ["activeTab", "scripting"],
   "host_permissions": [
     "http://127.0.0.1:5000/*",
     "*://*.americanexpress.com/*",
@@ -35,4 +32,4 @@
       "js": ["content.js"]
     }
   ]
-} 
+}

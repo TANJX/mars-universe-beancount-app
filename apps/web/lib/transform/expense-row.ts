@@ -4,9 +4,9 @@
 // receivables (Assets:Receivable:*:Expensify) are *not* expenses — they're
 // pending assets — and would double-count once the actual Expenses leg posts.
 
+import { accountRoot, accountSegment, classify } from "@/lib/transform/classify"
 import type { AccountPath, Posting, Transaction } from "@/lib/types/beancount"
 import type { JournalRow } from "@/lib/types/views"
-import { accountRoot, accountSegment, classify } from "@/lib/transform/classify"
 
 export interface ExpenseRowData {
   row: JournalRow

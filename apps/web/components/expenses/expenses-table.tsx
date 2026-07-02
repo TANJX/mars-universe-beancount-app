@@ -1,15 +1,14 @@
 "use client"
 
 import * as React from "react"
-
+import { ExpenseDetailSheet } from "@/components/expenses/detail-sheet"
 import { AccountDot } from "@/components/primitives/account-dot"
 import { MerchantAvatar } from "@/components/primitives/merchant-avatar"
 import { Tag } from "@/components/primitives/tag"
 import { useDisplayAccount } from "@/lib/accounts/display-names"
-import { cn } from "@/lib/utils"
 import { formatNativeAmount, formatShortDate } from "@/lib/format"
 import type { ExpenseRowData } from "@/lib/transform/expense-row"
-import { ExpenseDetailSheet } from "@/components/expenses/detail-sheet"
+import { cn } from "@/lib/utils"
 
 const ROW_TEMPLATE =
   "grid-cols-[5.25rem_1.75rem_minmax(11rem,1.6fr)_6.25rem_minmax(7rem,1fr)_6.875rem]"
@@ -87,6 +86,7 @@ function ExpenseRow({
 
   return (
     <button
+      type="button"
       onClick={onClick}
       className={cn(
         "grid w-full items-center gap-2.5 px-5 text-left",

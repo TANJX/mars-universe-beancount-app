@@ -1,5 +1,5 @@
-import type { Branding } from "./types"
 import type { UIConfigWire } from "./schema"
+import type { Branding } from "./types"
 
 export const BRANDING_DEFAULTS: Branding = {
   title: "Ledger",

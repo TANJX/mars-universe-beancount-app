@@ -8,11 +8,10 @@
 "use client"
 
 import * as React from "react"
-
-import type { AccountPath } from "@/lib/types/beancount"
 import { useResolvedUIConfig } from "@/lib/config"
 import { lookupDisplayName } from "@/lib/config/accounts"
 import { accountSegment } from "@/lib/transform/classify"
+import type { AccountPath } from "@/lib/types/beancount"
 
 /** Pure, config-free fallback. Returns the leaf segment of the path. */
 export function displayAccount(path: AccountPath): string {

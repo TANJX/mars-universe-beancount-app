@@ -1,6 +1,5 @@
 "use client"
 
-import * as React from "react"
 import NumberFlow from "@number-flow/react"
 
 import { cn } from "@/lib/utils"

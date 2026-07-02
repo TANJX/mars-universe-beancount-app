@@ -1,7 +1,7 @@
 "use client"
 
-import * as React from "react"
 import { AlertCircle } from "lucide-react"
+import * as React from "react"
 
 import { BalanceTree } from "@/components/balances/balance-tree"
 import { MobileBalances } from "@/components/balances/mobile/mobile-balances"
@@ -9,14 +9,14 @@ import {
   NetWorthChart,
   type NetWorthPoint,
 } from "@/components/balances/net-worth-chart"
+import { formatChartDate } from "@/components/charts/chart-tooltip"
+import { useUIState } from "@/components/layout/ui-state"
+import { AnimatedMoney } from "@/components/primitives/animated-money"
 import { SkeletonTreeRow } from "@/components/skeletons/atoms"
 import { MobileBalancesSkeleton } from "@/components/skeletons/balances-skeleton"
 import { Card } from "@/components/ui/card"
-import { AnimatedMoney } from "@/components/primitives/animated-money"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { formatChartDate } from "@/components/charts/chart-tooltip"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useUIState } from "@/components/layout/ui-state"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useBalanceSheet, useNetWorthSeries } from "@/hooks/use-fava"
 import { useIsMobile } from "@/hooks/use-mobile"
 import type { Conversion } from "@/lib/types/views"

@@ -1,7 +1,7 @@
 "use client"
 
-import * as React from "react"
 import { Plus, X } from "lucide-react"
+import * as React from "react"
 
 import { Money } from "@/components/primitives/money"
 import {
@@ -12,8 +12,8 @@ import {
 } from "@/components/ui/dialog"
 import { useSaveCcOverride } from "@/hooks/use-plan"
 import { parseAmount } from "@/lib/plan/format"
-import { cn } from "@/lib/utils"
 import type { BankInfo, CCCard, PlanGridResponse } from "@/lib/plan/schemas"
+import { cn } from "@/lib/utils"
 
 interface SplitDraft {
   id?: string
@@ -495,7 +495,7 @@ function formatCycleMonth(cycleMonth: string): string {
 }
 
 function formatShort(iso: string): string {
-  const d = new Date(iso + "T00:00:00")
+  const d = new Date(`${iso}T00:00:00`)
   if (Number.isNaN(d.getTime())) return iso
   const months = [
     "Jan",

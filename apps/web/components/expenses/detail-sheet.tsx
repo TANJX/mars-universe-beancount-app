@@ -3,8 +3,8 @@
 import { X } from "lucide-react"
 
 import { MerchantAvatar } from "@/components/primitives/merchant-avatar"
-import type { ExpenseRowData } from "@/lib/transform/expense-row"
 import { formatPostingAmount } from "@/lib/format"
+import type { ExpenseRowData } from "@/lib/transform/expense-row"
 import { cn } from "@/lib/utils"
 
 // In-page sheet, scoped to <main>. The sidebar stays interactive.

@@ -8,7 +8,7 @@ import { MobilePageHeader } from "@/components/layout/mobile-page-header"
 import { Money } from "@/components/primitives/money"
 import { formatRelativeDate } from "@/lib/format"
 import type { ExpenseRowData } from "@/lib/transform/expense-row"
-import { groupByDate, type DateGroup } from "@/lib/transform/group-by-date"
+import { type DateGroup, groupByDate } from "@/lib/transform/group-by-date"
 import type { Period } from "@/lib/types/views"
 
 interface MobileExpensesProps {

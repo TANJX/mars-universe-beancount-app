@@ -11,23 +11,22 @@
 //   4.5. Category icon (Expenses:Restaurants → utensils via accounts.categoryIcons)
 //   5.   Auto-derived letter mark (initial + hash color from payee/narration)
 
-import type { Posting } from "@/lib/types/beancount"
-import type { JournalRow } from "@/lib/types/views"
-import type {
-  AccountsConfig,
-  MerchantEntry,
-  MerchantRegistry,
-} from "@/lib/config/types"
 import {
   lookupAccountCategoryIcon,
   lookupAccountLogo,
   lookupDisplayName,
 } from "@/lib/config/accounts"
-
+import type {
+  AccountsConfig,
+  MerchantEntry,
+  MerchantRegistry,
+} from "@/lib/config/types"
+import type { Posting } from "@/lib/types/beancount"
+import type { JournalRow } from "@/lib/types/views"
+import { type AvatarFallback, deriveFallback } from "./avatar-fallback"
 import { GLYPHS, type GlyphSpec, type GlyphTone } from "./glyphs"
 import { logoDevUrl } from "./logodev"
 import { matchMerchant } from "./match"
-import { deriveFallback, type AvatarFallback } from "./avatar-fallback"
 
 export type Resolved =
   | { kind: "logo"; src: string; alt: string; fallback: AvatarFallback }

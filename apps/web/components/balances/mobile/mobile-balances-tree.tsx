@@ -1,7 +1,7 @@
 "use client"
 
-import * as React from "react"
 import { ChevronRight } from "lucide-react"
+import * as React from "react"
 
 import { AccountDot } from "@/components/primitives/account-dot"
 import { Money } from "@/components/primitives/money"

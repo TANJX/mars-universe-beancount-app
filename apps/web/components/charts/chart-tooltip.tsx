@@ -1,6 +1,6 @@
 "use client"
 
-import * as React from "react"
+import type * as React from "react"
 
 import { ChartTooltipContent, useChart } from "@/components/ui/chart"
 import { formatMoney } from "@/lib/format"

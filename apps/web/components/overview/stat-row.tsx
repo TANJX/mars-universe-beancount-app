@@ -1,5 +1,5 @@
-import { Card } from "@/components/ui/card"
 import { StatTile } from "@/components/overview/stat-tile"
+import { Card } from "@/components/ui/card"
 import type { SeriesPoint } from "@/lib/types/views"
 
 interface StatRowProps {

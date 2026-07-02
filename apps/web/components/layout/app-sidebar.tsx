@@ -1,8 +1,5 @@
 "use client"
 
-import * as React from "react"
-import Link from "next/link"
-import { usePathname, useSearchParams } from "next/navigation"
 import {
   BarChart3,
   BookOpen,
@@ -13,20 +10,15 @@ import {
   Search,
   Settings2,
 } from "lucide-react"
+import Link from "next/link"
+import { usePathname, useSearchParams } from "next/navigation"
 import { useTheme } from "next-themes"
-
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-} from "@/components/ui/sidebar"
+import type * as React from "react"
+import { useCommandPalette } from "@/components/layout/command-palette"
+import { useShortcutsDialog } from "@/components/layout/shortcuts-dialog"
+import { usePeriodHref, useUIState } from "@/components/layout/ui-state"
+import { AccountDot } from "@/components/primitives/account-dot"
+import { ClientOnly } from "@/components/primitives/client-only"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,11 +31,18 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { AccountDot } from "@/components/primitives/account-dot"
-import { ClientOnly } from "@/components/primitives/client-only"
-import { useCommandPalette } from "@/components/layout/command-palette"
-import { useShortcutsDialog } from "@/components/layout/shortcuts-dialog"
-import { usePeriodHref, useUIState } from "@/components/layout/ui-state"
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useResolvedUIConfig, useUIConfig } from "@/lib/config"
 import type { Density } from "@/lib/types/views"

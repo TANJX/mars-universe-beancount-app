@@ -7,7 +7,7 @@ import { MobileJournalCard } from "@/components/journal/mobile/mobile-journal-ca
 import { MobilePageHeader } from "@/components/layout/mobile-page-header"
 import { formatRelativeDate } from "@/lib/format"
 import type { Token } from "@/lib/search/parse"
-import { groupByDate, type DateGroup } from "@/lib/transform/group-by-date"
+import { type DateGroup, groupByDate } from "@/lib/transform/group-by-date"
 import type { Transaction } from "@/lib/types/beancount"
 import type { Period } from "@/lib/types/views"
 

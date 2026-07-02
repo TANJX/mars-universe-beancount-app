@@ -1,7 +1,7 @@
 "use client"
 
-import * as React from "react"
 import { Settings2 } from "lucide-react"
+import * as React from "react"
 
 import { Money } from "@/components/primitives/money"
 import {
@@ -9,16 +9,16 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { cn } from "@/lib/utils"
 import { useDeleteCcCard, useSaveCcCard } from "@/hooks/use-plan"
 import type { BankInfo, CCCard, CCCardRecord } from "@/lib/plan/schemas"
+import { cn } from "@/lib/utils"
 
 const TODAY_FALLBACK = new Date().toISOString().slice(0, 10)
 
 function daysSince(iso: string | null | undefined, today: string): number {
   if (!iso) return 9999
-  const a = new Date(iso + "T00:00:00").getTime()
-  const b = new Date(today + "T00:00:00").getTime()
+  const a = new Date(`${iso}T00:00:00`).getTime()
+  const b = new Date(`${today}T00:00:00`).getTime()
   return Math.max(0, Math.round((b - a) / 86_400_000))
 }
 
@@ -39,13 +39,13 @@ function nextDue(
     }
   }
   const date = `${year}-${String(month).padStart(2, "0")}-${String(c.paymentDueDay).padStart(2, "0")}`
-  const a = new Date(today + "T00:00:00").getTime()
-  const b = new Date(date + "T00:00:00").getTime()
+  const a = new Date(`${today}T00:00:00`).getTime()
+  const b = new Date(`${date}T00:00:00`).getTime()
   return { date, daysAway: Math.round((b - a) / 86_400_000) }
 }
 
 function formatShortDate(iso: string): string {
-  const d = new Date(iso + "T00:00:00")
+  const d = new Date(`${iso}T00:00:00`)
   const months = [
     "Jan",
     "Feb",
@@ -200,9 +200,9 @@ function CcCardEditor({
       accountPath: card.accountPath,
       fundingAccount: fundingAccount || undefined,
       statementCloseDay: statementCloseDay
-        ? parseInt(statementCloseDay)
+        ? parseInt(statementCloseDay, 10)
         : undefined,
-      paymentDueDay: paymentDueDay ? parseInt(paymentDueDay) : undefined,
+      paymentDueDay: paymentDueDay ? parseInt(paymentDueDay, 10) : undefined,
       statementBalance: stmt || undefined,
       lastClosedDate: closed || undefined,
       minimumPaymentOnly: minimumPaymentOnly || undefined,

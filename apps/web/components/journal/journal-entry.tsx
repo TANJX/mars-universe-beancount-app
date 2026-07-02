@@ -3,15 +3,15 @@
 import * as React from "react"
 
 import { MerchantAvatar } from "@/components/primitives/merchant-avatar"
-import { cn } from "@/lib/utils"
 import {
   formatNativeAmount,
   formatPostingAmount,
   formatShortDate,
 } from "@/lib/format"
-import { accountMatches, classify } from "@/lib/transform/classify"
 import type { Token } from "@/lib/search/parse"
+import { accountMatches, classify } from "@/lib/transform/classify"
 import type { Posting, Transaction } from "@/lib/types/beancount"
+import { cn } from "@/lib/utils"
 
 import { COLS_BASE, COLS_FILTERED } from "./cols"
 

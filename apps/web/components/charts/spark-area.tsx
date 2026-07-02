@@ -2,13 +2,12 @@
 
 import * as React from "react"
 import { Area, AreaChart, XAxis, YAxis } from "recharts"
-
+import { MoneyTooltip } from "@/components/charts/chart-tooltip"
 import {
+  type ChartConfig,
   ChartContainer,
   ChartTooltip,
-  type ChartConfig,
 } from "@/components/ui/chart"
-import { MoneyTooltip } from "@/components/charts/chart-tooltip"
 import type { SeriesPoint } from "@/lib/types/views"
 import { cn } from "@/lib/utils"
 
