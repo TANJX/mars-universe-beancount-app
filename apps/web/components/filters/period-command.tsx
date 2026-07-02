@@ -42,9 +42,17 @@ export function PeriodCommand() {
     []
   )
 
-  function toggle() {
+  const toggle = React.useCallback(() => {
     setOpen((o) => !o)
-  }
+  }, [])
+
+  const shift = React.useCallback(
+    (dir: -1 | 1) => {
+      const next = shiftPeriod(period, dir)
+      if (next) setPeriod(next)
+    },
+    [period, setPeriod]
+  )
 
   // When opened programmatically (⌘P / `m`), Base UI doesn't move focus
   // into the menu. Find the menu after it mounts and focus its first item
@@ -78,8 +86,7 @@ export function PeriodCommand() {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period])
+  }, [shift, toggle])
 
   function pick(id: PeriodPresetId) {
     setPeriod(id)
@@ -90,11 +97,6 @@ export function PeriodCommand() {
     if (!pendingRange?.from || !pendingRange?.to) return
     setPeriod(makeCustomPeriod(pendingRange.from, pendingRange.to))
     setCalendarOpen(false)
-  }
-
-  function shift(dir: -1 | 1) {
-    const next = shiftPeriod(period, dir)
-    if (next) setPeriod(next)
   }
 
   const customRange: DateRange | undefined =

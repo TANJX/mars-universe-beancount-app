@@ -175,9 +175,13 @@ def main():
                 break
             except Exception as e:
                 if retry_count == max_retries:
-                    print(f"Error getting crypto prices after {max_retries} retries: {e}")
+                    print(
+                        f"Error getting crypto prices after {max_retries} retries: {e}"
+                    )
                 else:
-                    print(f"Retry {retry_count}/{max_retries} for crypto after error: {e}")
+                    print(
+                        f"Retry {retry_count}/{max_retries} for crypto after error: {e}"
+                    )
 
     # Stocks: one Yahoo request each.
     for ticker, info in holdings:

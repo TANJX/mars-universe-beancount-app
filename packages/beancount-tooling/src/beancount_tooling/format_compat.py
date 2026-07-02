@@ -52,7 +52,7 @@ def _normalize_indent(pairs):
         if prefix is not None:
             m = ACCOUNT_RE.match(prefix)
             if m:
-                prefix = indent + prefix[m.start(2):]
+                prefix = indent + prefix[m.start(2) :]
         out.append((prefix, number, currency, rest, raw))
     return out
 

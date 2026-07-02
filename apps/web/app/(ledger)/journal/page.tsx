@@ -55,13 +55,13 @@ export default function JournalPage() {
   // URL → state. Runs on mount and on every searchParams change. Skips when
   // the URL matches what we just wrote ourselves (to avoid races).
   const spStr = searchParams.toString()
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `hydrated` is deliberately omitted — re-sync only when the URL itself changes
   React.useEffect(() => {
     if (hydrated && spStr === lastWrittenRef.current) return
     const u = readUrl()
     setAccount(u.account)
     setQ(u.q)
     setHydrated(true)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spStr])
 
   // State → URL. history.replaceState bypasses Next's router (which would
