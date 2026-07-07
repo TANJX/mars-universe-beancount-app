@@ -52,7 +52,7 @@ export function JournalEntry({
           colsClass
         )}
       >
-        <span className="whitespace-nowrap font-mono text-xs text-muted-foreground tabular-nums">
+        <span className="font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums">
           {formatShortDate(txn.date)}
         </span>
         <span

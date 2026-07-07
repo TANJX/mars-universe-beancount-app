@@ -97,7 +97,7 @@ function ExpenseRow({
         ROW_TEMPLATE
       )}
     >
-      <span className="whitespace-nowrap font-mono text-xs text-muted-foreground tabular-nums">
+      <span className="font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums">
         {formatShortDate(txn.date)}
       </span>
       <MerchantAvatar row={row} size="md" />
@@ -151,7 +151,12 @@ function ExpenseRow({
       <div className="flex flex-col items-end gap-0.5 text-right leading-tight">
         {hasFxPrice ? (
           <>
-            <span className="font-mono text-sm font-medium tabular-nums">
+            <span
+              className={cn(
+                "font-mono text-sm font-medium tabular-nums",
+                nativeAmount > 0 && "text-emerald-600 dark:text-emerald-400"
+              )}
+            >
               {formatNativeAmount(nativeAmount, fundingCurrency)}
             </span>
             <span className="font-mono text-xs text-muted-foreground tabular-nums group-data-[density=compact]/density:hidden">
@@ -159,7 +164,14 @@ function ExpenseRow({
             </span>
           </>
         ) : (
-          <span className="font-mono text-sm font-medium text-rose-600 tabular-nums dark:text-rose-400">
+          <span
+            className={cn(
+              "font-mono text-sm font-medium tabular-nums",
+              share < 0
+                ? "text-emerald-600 dark:text-emerald-400"
+                : "text-rose-600 dark:text-rose-400"
+            )}
+          >
             {formatNativeAmount(-share, "USD")}
           </span>
         )}

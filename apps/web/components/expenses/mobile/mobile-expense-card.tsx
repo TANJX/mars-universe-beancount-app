@@ -65,7 +65,12 @@ export function MobileExpenseCard({ data }: MobileExpenseCardProps) {
       <div className="flex flex-col items-end leading-tight">
         {hasFxPrice ? (
           <>
-            <span className="font-mono text-[14px] font-medium tabular-nums">
+            <span
+              className={cn(
+                "font-mono text-[14px] font-medium tabular-nums",
+                nativeAmount > 0 && "text-emerald-600 dark:text-emerald-400"
+              )}
+            >
               {formatNativeAmount(nativeAmount, fundingCurrency)}
             </span>
             <span className="font-mono text-[10px] text-muted-foreground tabular-nums">
@@ -73,7 +78,14 @@ export function MobileExpenseCard({ data }: MobileExpenseCardProps) {
             </span>
           </>
         ) : (
-          <span className="font-mono text-[14px] font-medium text-rose-600 tabular-nums dark:text-rose-400">
+          <span
+            className={cn(
+              "font-mono text-[14px] font-medium tabular-nums",
+              share < 0
+                ? "text-emerald-600 dark:text-emerald-400"
+                : "text-rose-600 dark:text-rose-400"
+            )}
+          >
             {formatNativeAmount(-share, "USD")}
           </span>
         )}
