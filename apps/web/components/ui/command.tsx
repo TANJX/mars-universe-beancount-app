@@ -1,8 +1,8 @@
 "use client"
 
-import { Command as CommandPrimitive } from "cmdk"
+import { Command as CommandPrimitive, useCommandState } from "cmdk"
 import { CheckIcon, SearchIcon } from "lucide-react"
-import type * as React from "react"
+import * as React from "react"
 import {
   Dialog,
   DialogContent,
@@ -12,6 +12,23 @@ import {
 } from "@/components/ui/dialog"
 import { InputGroup, InputGroupAddon } from "@/components/ui/input-group"
 import { cn } from "@/lib/utils"
+
+// Same guard cmdk uses internally — the list-scroll pin below has to run
+// before paint on the client without warning during SSR.
+const useIsomorphicLayoutEffect =
+  typeof window === "undefined" ? React.useEffect : React.useLayoutEffect
+
+// Keys that move cmdk's selection, and so are the user asking the list to
+// follow it. Mirrors cmdk's own keydown handling, vim bindings included.
+const NAV_KEYS = new Set([
+  "ArrowDown",
+  "ArrowUp",
+  "Home",
+  "End",
+  "PageDown",
+  "PageUp",
+])
+const VIM_NAV_KEYS = new Set(["n", "p", "j", "k"])
 
 function Command({
   className,
@@ -87,11 +104,56 @@ function CommandInput({
 
 function CommandList({
   className,
+  ref,
   ...props
 }: React.ComponentProps<typeof CommandPrimitive.List>) {
+  const listRef = React.useRef<HTMLDivElement | null>(null)
+  const search = useCommandState((state) => state.search)
+
+  // Typing while the list is scrolled used to leave it parked mid-list. cmdk
+  // re-scrolls its selected item into view while it is still unmounting and
+  // re-sorting items for the new query, so it can land on a stale selection
+  // and push the top match off-screen. A one-shot reset loses that race, so
+  // hold the list at the top for the whole query and release the moment the
+  // user deliberately moves the viewport themselves.
+  useIsomorphicLayoutEffect(() => {
+    const el = listRef.current
+    if (!el) return
+    let pinned = true
+    const release = () => {
+      pinned = false
+    }
+    const snapBack = () => {
+      if (pinned && el.scrollTop !== 0) el.scrollTop = 0
+    }
+    const releaseOnNavKey = (e: KeyboardEvent) => {
+      if (NAV_KEYS.has(e.key) || (e.ctrlKey && VIM_NAV_KEYS.has(e.key))) {
+        release()
+      }
+    }
+    el.scrollTop = 0
+    el.addEventListener("scroll", snapBack)
+    el.addEventListener("wheel", release, { passive: true })
+    el.addEventListener("touchmove", release, { passive: true })
+    // Capture phase: cmdk moves the selection and scrolls it into view from
+    // its own keydown handler, so the pin has to be gone before that runs.
+    document.addEventListener("keydown", releaseOnNavKey, true)
+    return () => {
+      el.removeEventListener("scroll", snapBack)
+      el.removeEventListener("wheel", release)
+      el.removeEventListener("touchmove", release)
+      document.removeEventListener("keydown", releaseOnNavKey, true)
+    }
+  }, [search])
+
   return (
     <CommandPrimitive.List
       data-slot="command-list"
+      ref={(node) => {
+        listRef.current = node
+        if (typeof ref === "function") ref(node)
+        else if (ref) ref.current = node
+      }}
       className={cn(
         "no-scrollbar max-h-72 scroll-py-1 overflow-x-hidden overflow-y-auto outline-none",
         className
