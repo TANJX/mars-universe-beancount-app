@@ -176,9 +176,18 @@ function transformPosting(
 
 // Fava synthesises pseudo-transactions with these flags when serving a
 // time-filtered journal: 'S' = opening-balance summarisation, 'C' = conversion
-// balancing leg, 'P' = pad. They are not real ledger entries — drop them so
-// they don't pollute Recent Activity, the Journal page, or date-range views.
-const FAVA_SYNTHETIC_FLAGS = new Set(["S", "C", "P"])
+// balancing leg. They are artifacts of the requested date range, not ledger
+// entries — drop them so they don't pollute Recent Activity, the Journal page,
+// or date-range views. (The opening balance is reconstructed separately from
+// the balance-sheet snapshot; see `useAccountOpeningBalance`.)
+//
+// Flag 'P' is deliberately NOT in this set: Beancount materialises it at load
+// time from a `pad` directive and it genuinely moves the account balance (e.g.
+// the -38,681.86 USD opening pad on Liabilities:Loan:Tesla). Dropping it made
+// the journal's running total disagree with fava's account balance. Inside a
+// time-filtered range the pad is folded into the 'S' entry above, so keeping it
+// here can't double-count.
+const FAVA_SYNTHETIC_FLAGS = new Set(["S", "C"])
 
 export function transformTransactions(
   entries: z.infer<typeof JournalResponseSchema>

@@ -24,11 +24,8 @@ export function periodToFavaTime(period: Period): string | undefined {
     case "this-month":
       // Full calendar month, including future-dated entries within it.
       return formatMonth(now())
-    case "last-month": {
-      const d = now()
-      d.setMonth(d.getMonth() - 1)
-      return formatMonth(d)
-    }
+    case "last-month":
+      return formatMonth(addMonths(now(), -1))
     case "qtd":
       return formatQuarter(now())
     case "ytd": {
@@ -37,9 +34,7 @@ export function periodToFavaTime(period: Period): string | undefined {
     }
     case "last-12": {
       const end = now()
-      const start = new Date(end)
-      start.setMonth(start.getMonth() - 11)
-      return `${formatMonth(start)} - ${formatMonth(end)}`
+      return `${formatMonth(addMonths(end, -11))} - ${formatMonth(end)}`
     }
     case "all":
       // Omit `time=` entirely — fava treats no filter as "every entry".
@@ -81,11 +76,8 @@ export function periodBounds(period: Period): PeriodBounds {
       return { start: monthFloor(today), end: today }
     case "this-month":
       return monthBounds(today)
-    case "last-month": {
-      const d = new Date(today)
-      d.setMonth(d.getMonth() - 1)
-      return monthBounds(d)
-    }
+    case "last-month":
+      return monthBounds(addMonths(today, -1))
     case "qtd":
       return quarterBounds(today)
     case "ytd":
@@ -93,13 +85,9 @@ export function periodBounds(period: Period): PeriodBounds {
         start: new Date(today.getFullYear(), 0, 1),
         end: new Date(today.getFullYear(), today.getMonth(), today.getDate()),
       }
-    case "last-12": {
-      const end = today
-      const start = new Date(end)
-      start.setMonth(start.getMonth() - 11)
-      start.setDate(1)
-      return { start, end }
-    }
+    case "last-12":
+      // addMonths lands on the 1st, which is the window start we want.
+      return { start: addMonths(today, -11), end: today }
     case "all":
       // Wide bounds anchored well before any plausible ledger start. Lets
       // chart-bucketing fall through to "year" granularity without
@@ -341,6 +329,11 @@ function now(): Date {
   return new Date()
 }
 
+/**
+ * Shift `d` by `n` calendar months, always landing on the 1st. The setDate(1)
+ * must come first: setMonth keeps the day-of-month and normalizes overflow, so
+ * Jul 31 minus one month would otherwise become Jul 1 (via "Jun 31").
+ */
 function addMonths(d: Date, n: number): Date {
   const out = new Date(d)
   out.setDate(1)

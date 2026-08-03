@@ -5,6 +5,7 @@ import {
   Hourglass,
   LineChart,
   type LucideIcon,
+  Scale,
 } from "lucide-react"
 
 export type GlyphTone = "neutral" | "muted" | "accent"
@@ -45,6 +46,11 @@ export const GLYPHS = {
     icon: CalendarClock,
     tone: "muted",
     label: "Forecast",
+  } satisfies GlyphSpec,
+  padding: {
+    icon: Scale,
+    tone: "muted",
+    label: "Padding",
   } satisfies GlyphSpec,
 } as const
 

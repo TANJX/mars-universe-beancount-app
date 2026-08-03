@@ -40,9 +40,9 @@ function pastWeekTime(): string {
 /** Build a Fava `time=` window covering the last 12 months ending today. */
 function trailing12mTime(): string {
   const today = new Date()
-  const start = new Date(today)
-  start.setMonth(start.getMonth() - 11)
-  start.setDate(1)
+  // Build from parts rather than setMonth: setMonth keeps the day-of-month and
+  // normalizes overflow, so Jul 31 minus 11 months would skip a month.
+  const start = new Date(today.getFullYear(), today.getMonth() - 11, 1)
   const fmt = (d: Date) =>
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
   return `${fmt(start)} - ${fmt(today)}`

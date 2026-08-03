@@ -4,7 +4,7 @@
 //   - initial: a derived letter mark (registry hit or generic fallback)
 //
 // Stage order — first match wins:
-//   1.   Class override (transfer/investment/rebate/pending/forecast)
+//   1.   Class override (padding/transfer/investment/rebate/pending/forecast)
 //   2.   Account override (Income:Salary:Acme → Acme via accounts.logos)
 //   3.   Payee patterns → registry (Tm *, ACH Des:…)
 //   4.   Cleaned payee → registry (exact then longest-substring on name|aliases)
@@ -74,6 +74,13 @@ export function resolveMerchant(ctx: ResolveContext): Resolved {
   // ── Stage 1: class glyphs ──────────────────────────────────────────────
   if (ctx.row) {
     const { row } = ctx
+    // Beancount's `pad` directive emits a `P`-flagged transaction whose
+    // narration is machine text ("(Padding inserted for Balance of …)").
+    // Deriving initials from that yields a garbage letter mark, so bail
+    // out before anything else looks at payee/narration.
+    if (row.txn.flag === "P") {
+      return { kind: "glyph", glyph: GLYPHS.padding, alt: "Padding" }
+    }
     if (row.isForecast) {
       return { kind: "glyph", glyph: GLYPHS.forecast, alt: "Forecast" }
     }

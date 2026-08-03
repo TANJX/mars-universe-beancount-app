@@ -224,21 +224,24 @@ function clampGranularity(g: Granularity): Granularity {
 function chartContextTime(g: Granularity): string {
   const now = new Date()
   const end = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
-  const start = new Date(now)
+  let monthsBack = 0
   switch (g) {
     case "day":
-      start.setMonth(start.getMonth() - 1)
+      monthsBack = 1
       break
     case "week":
-      start.setMonth(start.getMonth() - 3)
+      monthsBack = 3
       break
     case "month":
-      start.setMonth(start.getMonth() - 11)
+      monthsBack = 11
       break
     case "quarter":
-      start.setFullYear(start.getFullYear() - 2)
+      monthsBack = 24
       break
   }
+  // Build from parts rather than setMonth: setMonth keeps the day-of-month and
+  // normalizes overflow, so Jul 31 minus one month would land back in July.
+  const start = new Date(now.getFullYear(), now.getMonth() - monthsBack, 1)
   const startStr = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}`
   return `${startStr} - ${end}`
 }
