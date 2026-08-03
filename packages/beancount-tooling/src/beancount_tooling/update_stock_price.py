@@ -115,6 +115,7 @@ crypto_ids = {
     "DOGE": "dogecoin",
     "XLM": "stellar",
     "XRP": "ripple",
+    "ADA": "cardano",
 }
 
 
