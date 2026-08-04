@@ -13,6 +13,27 @@ function parseSharesAndPrice(text) {
   }
 }
 
+// Detail rows render the label and the value as two sibling spans with stable
+// css-* classes: <span class="css-v72tci">Event</span> … <span
+// class="css-y3z1hq">Will Spain win …</span>. Match the label exactly so
+// "Total" can't shadow "Total cost".
+function getCell(transaction, label) {
+  for (const el of transaction.querySelectorAll('[data-testid="cell-label"]')) {
+    const name = el.querySelector(".css-v72tci")?.textContent.trim()
+    if (name === label) {
+      return el.querySelector(".css-y3z1hq")?.textContent.trim()
+    }
+  }
+  return undefined
+}
+
+// "$0.28" / "-$11.68" / "+$19.00" / "1,402.43" -> Number; "Free" -> null.
+function parseMoney(text) {
+  if (!text) return null
+  const n = Number(text.replace(/[$,+\s]/g, ""))
+  return Number.isFinite(n) ? n : null
+}
+
 export function extractRobinhood() {
   // The account selector button uses dynamic downshift IDs (e.g. downshift-1,
   // downshift-7), so locate it by the recognized label text instead.
@@ -55,11 +76,32 @@ export function extractRobinhood() {
     entry.info = leftDiv.querySelector("h3")?.textContent
     if (!entry.info) continue
 
-    const infoLower = entry.info.toLowerCase()
+    // Event-contract (prediction market) rows. Detect them by the detail cells
+    // unique to a contract order/settlement, plus the "19 contracts @60¢"
+    // quantity string. Deliberately NOT keyed off an info suffix: a contract
+    // row reads "Spain Limit Buy" / "Spain Payout", and "payout" alone would
+    // hijack the unrelated "Gold deposit boost payout" row below.
+    const qtyHint = rightDiv.querySelector(":scope > span")?.textContent || ""
     if (
-      infoLower.endsWith("buy") ||
-      infoLower.endsWith("sell") ||
-      infoLower.endsWith("recurring investment")
+      getCell(transaction, "Event") !== undefined ||
+      getCell(transaction, "Settlement price") !== undefined ||
+      /\bcontracts?\s*@/i.test(qtyHint)
+    ) {
+      entry.contract = true
+      entry.fee = parseMoney(getCell(transaction, "Commission and fees"))
+      entry.quantity = getCell(transaction, "Quantity")
+      entry.settlementPrice = getCell(transaction, "Settlement price")
+    }
+
+    const infoLower = entry.info.toLowerCase()
+    // A contract row must never be flagged `transaction` — that path parses
+    // "N shares at $X", which contracts don't have, so the filter below would
+    // silently drop them.
+    if (
+      !entry.contract &&
+      (infoLower.endsWith("buy") ||
+        infoLower.endsWith("sell") ||
+        infoLower.endsWith("recurring investment"))
     ) {
       entry.transaction = true
     }
@@ -79,7 +121,15 @@ export function extractRobinhood() {
       ) {
         entry.ira = "Roth"
       }
-      dateStr = dateStr.split(" · ")[1]
+      const parts = dateStr.split(" · ")
+      // Contract rows prepend two extra segments: "Yes · ESP to win · Jul 19"
+      // (side · market · date) vs a stock row's "Individual · Jul 22".
+      if (entry.contract && parts.length >= 3) {
+        entry.side = parts[0].trim()
+        entry.market = parts.slice(1, -1).join(" · ").trim()
+      }
+      // Always take the LAST segment — the date is rightmost in every variant.
+      dateStr = parts[parts.length - 1]
     }
 
     // Check URL path for account type
@@ -150,12 +200,18 @@ export function extractRobinhood() {
 
   // Sort by date asc, then put all buys before sells within a day so that
   // same-direction transactions end up adjacent for grouping below.
+  // A contract settling the same day it was bought ranks last, so the buy that
+  // opened the position is emitted before the payout that closes it.
+  const dayRank = (e) => {
+    const info = e.info?.toLowerCase() || ""
+    if (e.contract && info.endsWith("payout")) return 2
+    if (info.endsWith("sell")) return 1
+    return 0
+  }
   entries.sort((a, b) => {
     if (a.date < b.date) return -1
     if (a.date > b.date) return 1
-    const aSell = a.info?.toLowerCase().endsWith("sell") ? 1 : 0
-    const bSell = b.info?.toLowerCase().endsWith("sell") ? 1 : 0
-    return aSell - bSell
+    return dayRank(a) - dayRank(b)
   })
 
   const results = []
@@ -259,6 +315,52 @@ export function extractRobinhood() {
         }
         results.push("")
       }
+    }
+    // Event contracts (prediction markets), e.g. "Spain Limit Buy" then
+    // "Spain Payout". Booked as pure P&L against Income:Trading:Stock: no
+    // position is carried between buy and settlement, so the elided income leg
+    // absorbs the stake going in and the proceeds coming out.
+    else if (entry.contract) {
+      const isPayout = entry.info.toLowerCase().endsWith("payout")
+      // The header amount is fee-inclusive (it equals the "Total cost" cell).
+      let costNum = parseMoney(entry.cost)
+      if (costNum === null && isPayout) {
+        // A worthless settlement can render a blank header — rebuild it from
+        // the settlement cells so the entry still balances.
+        const q = parseMoney(entry.quantity)
+        const p = parseMoney(entry.settlementPrice)
+        if (q !== null && p !== null) costNum = q * p
+      }
+
+      const detail = [entry.side, entry.market].filter(Boolean).join(" · ")
+      const size = isPayout
+        ? entry.quantity && entry.settlementPrice
+          ? `${entry.quantity} @ ${entry.settlementPrice}`
+          : null
+        : entry.amountInfo?.trim()
+      const narration = [size, detail].filter(Boolean).join(" · ")
+
+      const flag = costNum === null ? "!" : "*"
+      results.push(
+        narration
+          ? `${entry.date} ${flag} "${entry.info}" "${narration}"`
+          : `${entry.date} ${flag} "${entry.info}"`
+      )
+      const posting = (account, amount) =>
+        `  ${account.padEnd(41)}          ${amount} USD`
+      results.push(
+        posting(
+          "Assets:Investment:Robinhood:Brokerage:USD",
+          costNum === null ? "" : costNum.toFixed(2)
+        )
+      )
+      // Break the commission out so the inferred income leg is the bare stake,
+      // matching Robinhood's own pre-fee "Realized profit" figure.
+      if (entry.fee) {
+        results.push(posting("Expenses:Fee", entry.fee.toFixed(2)))
+      }
+      results.push(`  Income:Trading:Stock`)
+      results.push("")
     }
     // Withdrawal from individual account to Adv Plus Banking - 0213,Individual · Jul 25, 2024
     // -$3,000.00,-$3,000.00,-1% boost,
