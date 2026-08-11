@@ -25,10 +25,15 @@ ARG NEXT_PUBLIC_DEMO_MODE=
 # logo.dev publishable key (`pk_…`). Without it, merchant + repo-link logos
 # render as letter / placeholder marks. Inlined into the client bundle.
 ARG NEXT_PUBLIC_LOGO_DEV_TOKEN=
+# Browser-tab title. SSR can't read the per-request /ui-config payload, so the
+# page-title metadata bakes this in. Keep it in sync with `branding.title` in
+# the ledger's config/ui.yaml. Empty falls back to "Ledger".
+ARG NEXT_PUBLIC_APP_TITLE=
 ENV FAVA_INTERNAL_URL=${FAVA_INTERNAL_URL}
 ENV FAVA_LEDGER_SLUG=${FAVA_LEDGER_SLUG}
 ENV NEXT_PUBLIC_DEMO_MODE=${NEXT_PUBLIC_DEMO_MODE}
 ENV NEXT_PUBLIC_LOGO_DEV_TOKEN=${NEXT_PUBLIC_LOGO_DEV_TOKEN}
+ENV NEXT_PUBLIC_APP_TITLE=${NEXT_PUBLIC_APP_TITLE}
 RUN pnpm --filter web build
 
 FROM node:22-alpine AS runner

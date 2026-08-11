@@ -46,6 +46,7 @@ services:
         FAVA_LEDGER_SLUG: ${FAVA_LEDGER_SLUG:-ledger}
         NEXT_PUBLIC_DEMO_MODE: ${NEXT_PUBLIC_DEMO_MODE:-}
         NEXT_PUBLIC_LOGO_DEV_TOKEN: ${NEXT_PUBLIC_LOGO_DEV_TOKEN:-}
+        NEXT_PUBLIC_APP_TITLE: ${NEXT_PUBLIC_APP_TITLE:-}
     ports:
       - "${WEB_BIND:-3000}:3000"
     depends_on:

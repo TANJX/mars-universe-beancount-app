@@ -9,7 +9,9 @@ import { cn } from "@/lib/utils"
 // SSR can't read the per-request `/ui-config` payload, so the page-title
 // metadata bakes a build-time env var. Coordinate with the deployer's
 // `branding.title` in `<LEDGER_DIR>/config/ui.yaml`.
-const APP_TITLE = process.env.NEXT_PUBLIC_APP_TITLE ?? "Ledger"
+// `||`, not `??`: the docker build arg defaults to an empty string, which Next
+// inlines as "" — that has to fall back too, not just an unset var.
+const APP_TITLE = process.env.NEXT_PUBLIC_APP_TITLE || "Ledger"
 
 export const metadata: Metadata = {
   title: {

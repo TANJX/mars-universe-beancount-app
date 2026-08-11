@@ -8,14 +8,31 @@ Guidance for coding agents working in `mars-universe-beancount`.
 - Beancount tooling for extraction, stock prices, and forecast generation.
 - Primary code: `packages/beancount-tooling/src/beancount_tooling/` (`extract.py`, `update_stock_price.py`, `generate_forecast.py`).
 - Forecast internals: `packages/beancount-tooling/src/beancount_tooling/forecast/`; importers: `packages/beancount-tooling/src/beancount_tooling/importer/`.
-- Ledger data: `data/journal/`. Bank CSV exports (input): `data/statements/`.
-- Plans live under `docs/plans/` (ISO-date prefixed); reference notes under `docs/notes/`.
+- Web app: `apps/web/` (Next.js viewer); Fava extension: `packages/ledger-data-api/`; Chrome MV3 extension: `packages/card-balance-browser-extension/`.
+- Docker Compose stack (gitsync + fava + web): `deploy/`.
+- Reference notes under `docs/notes/`. (`docs/plans/` is referenced by older notes but does not currently exist; create it if you add a dated plan.)
+- **Ledger data lives outside this repo**, in a working copy pointed at by `LEDGER_DIR`: `<LEDGER_DIR>/journal/` (the ledger), `<LEDGER_DIR>/config/` (`extract.yaml`, `forecast.yaml`, `ui.yaml`), `<LEDGER_DIR>/statements/` (bank CSV exports, input to `just extract`). There is no `data/` directory in a fresh clone; `beancount_tooling.paths` only falls back to `<repo>/data` for the pre-split layout.
 
 ## Environment Setup
 
-- Install dependencies: `uv sync`
+- Install dependencies: `uv sync` (or `just install` for uv + pnpm)
 - Optional editable install for entry points: `uv pip install -e .`
 - Verify Python version: `uv run python --version`
+
+### Env files
+
+Two layers, and confusing them is the single most common failure here:
+
+- **Root `.env`** (see `.env.example`) — loaded by the `Justfile` via `set dotenv-load` and exported into every recipe. Home for anything more than one workspace needs: `LEDGER_DIR`, `FAVA_LEDGER_SLUG`, `FAVA_INTERNAL_URL`.
+- **`apps/web/.env`** (see `apps/web/.env.example`) — web-app-only `NEXT_PUBLIC_*` values, inlined into the client bundle.
+
+Only `just` loads the root `.env`. Running the underlying tool directly (`pnpm --filter web dev`, `pnpm --filter card-balance-browser-extension build`) skips it and silently falls back to the in-code `acme-demo` demo defaults. This is a further reason to prefer the recipes.
+
+`FAVA_LEDGER_SLUG` is Fava's slugification of the journal's `option "title"` and forms its URL prefix. Both consumers bake it in at build time — `apps/web/next.config.mjs` when the config is evaluated at server start, and the extension's `build.js` via webpack `DefinePlugin`. Consequences worth remembering:
+
+- Editing `.env` while `next dev` runs is not enough. The dev server logs `Reload env` but does not re-evaluate `rewrites()`; restart it.
+- A wrong or stale slug surfaces as a 404 **served by Fava** (`Server: Cheroot` header), not by Next. Diagnose by comparing against `curl -sI http://127.0.0.1:5000/ | grep -i location`.
+- Docker passes these as build args, not runtime env, so changes need `docker compose build web`.
 
 ## Run Commands (Build/Execution)
 
@@ -146,7 +163,8 @@ If any of these files are added later, treat them as higher-priority agent instr
 
 ### Config and Templates
 
-- Keep `packages/beancount-tooling/src/beancount_tooling/config.yaml` and `.../templates.yaml` backward compatible.
+- User config is read from `<LEDGER_DIR>/config/` (`extract.yaml`, `forecast.yaml`, `ui.yaml`) and is not in this repo. Keep the schemas backward compatible — an existing ledger's config must keep working.
+- The committed templates are the schema documentation: `packages/beancount-tooling/src/beancount_tooling/{extract,forecast}.example.yaml` and `apps/web/lib/config/ui.example.yaml`. Update the matching template in the same change as any new or renamed key.
 - Validate required fields before processing.
 - When adding template features, document expected keys and fallback behavior.
 

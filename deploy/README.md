@@ -77,8 +77,13 @@ Specific instructions for the production target — Synology DSM 7.2, Intel J402
    GIT_BRANCH=main
    GIT_PAT=<fine-grained PAT, contents:read>
    GIT_PULL_INTERVAL=300
-   WEB_BIND=172.30.40.192:3000   # ZeroTier IP — restricts listener to the overlay
+   FAVA_LEDGER_SLUG=ledger        # slugified `option "title"` of the journal — a
+                                  # mismatch here 404s every API call from `web`
+   NEXT_PUBLIC_APP_TITLE=         # browser-tab title; blank falls back to "Ledger"
+   WEB_BIND=172.30.40.192:3000    # ZeroTier IP — restricts listener to the overlay
    ```
+
+   `FAVA_LEDGER_SLUG`, `NEXT_PUBLIC_APP_TITLE`, `NEXT_PUBLIC_DEMO_MODE`, and `NEXT_PUBLIC_LOGO_DEV_TOKEN` are build args for the `web` image, not runtime env — changing any of them requires `docker compose build web`. See `.env.example` for the full annotated set.
 
 ### Per-deploy: build on laptop, ship to NAS
 
