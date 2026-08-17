@@ -5,8 +5,8 @@ import * as React from "react"
 import { useUIState } from "@/components/layout/ui-state"
 import { useBalanceSheet } from "@/hooks/use-fava"
 import { periodOpeningTime } from "@/lib/fava/periods"
+import { findTreeNode } from "@/lib/fava/tree"
 import { accountRoot } from "@/lib/transform/classify"
-import type { BalanceTreeNode } from "@/lib/types/views"
 
 /**
  * USD opening balance for `account` at the start of the current period.
@@ -39,18 +39,7 @@ export function useAccountOpeningBalance(account: string | undefined): number {
     if (!carries || !sheet.data || !account || !root) return 0
     const tree = sheet.data.trees[root]
     if (!tree) return 0
-    const node = findNode(tree, account)
+    const node = findTreeNode(tree, account)
     return node?.balanceChildren.USD ?? 0
   }, [carries, sheet.data, account, root])
-}
-
-function findNode(tree: BalanceTreeNode, path: string): BalanceTreeNode | null {
-  if (tree.account === path) return tree
-  for (const child of tree.children ?? []) {
-    if (path === child.account || path.startsWith(`${child.account}:`)) {
-      const found = findNode(child, path)
-      if (found) return found
-    }
-  }
-  return null
 }

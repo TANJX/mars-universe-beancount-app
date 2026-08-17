@@ -62,6 +62,21 @@ export function periodOpeningTime(period: Period): string {
   return `1900 - ${formatDay(dayBefore)}`
 }
 
+/** The period's last day, inclusive, as ISO `YYYY-MM-DD`. */
+export function periodEndDay(period: Period): string {
+  return formatDay(periodBounds(period).end)
+}
+
+/**
+ * Mirror of `periodOpeningTime`: a fava `time=` covering everything up to and
+ * including the period's last day — `1900 - {period.end}`. Yields a closing
+ * snapshot for Assets/Liabilities/Equity and an all-time-through-end total for
+ * Income/Expenses.
+ */
+export function periodClosingTime(period: Period): string {
+  return `1900 - ${periodEndDay(period)}`
+}
+
 // ─── Resolve a period to absolute date bounds ─────────────────────────────
 
 export interface PeriodBounds {
@@ -227,6 +242,35 @@ export function shiftPeriod(period: Period, dir: -1 | 1): Period | null {
       // Unbounded / sliding windows have no sensible prev/next step.
       return null
   }
+}
+
+// ─── Widen ────────────────────────────────────────────────────────────────
+
+/**
+ * Widen `period` by one more calendar month of history, holding its end date
+ * fixed. Backs the journal's "Show more" button: the journal fetch is
+ * period-driven, so widening re-queries fava over a longer `time=` range
+ * rather than paginating client-side.
+ *
+ * Returns null for "all time", which already spans every entry.
+ */
+export function expandPeriodByMonth(period: Period): Period | null {
+  if (period.id === "all") return null
+  const { start, end } = periodBounds(period)
+  return makeCustomPeriod(subtractOneMonth(start), end)
+}
+
+/**
+ * One calendar month earlier, keeping the day-of-month where the target month
+ * is long enough (Mar 31 → Feb 28). Unlike `addMonths` this does *not* snap to
+ * the 1st, so widening a mid-month range adds exactly one month instead of up
+ * to two.
+ */
+function subtractOneMonth(d: Date): Date {
+  const out = new Date(d.getFullYear(), d.getMonth() - 1, 1)
+  const lastDay = new Date(out.getFullYear(), out.getMonth() + 1, 0).getDate()
+  out.setDate(Math.min(d.getDate(), lastDay))
+  return out
 }
 
 // ─── Custom-range builder ─────────────────────────────────────────────────

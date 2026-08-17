@@ -3,7 +3,9 @@
 import * as React from "react"
 
 import { MobilePeriodControl } from "@/components/filters/mobile-period-control"
+import { AccountBalanceCard } from "@/components/journal/account-balance-card"
 import { MobileJournalCard } from "@/components/journal/mobile/mobile-journal-card"
+import { ShowMorePeriod } from "@/components/journal/show-more-period"
 import { MobilePageHeader } from "@/components/layout/mobile-page-header"
 import { formatRelativeDate } from "@/lib/format"
 import type { Token } from "@/lib/search/parse"
@@ -16,6 +18,8 @@ interface MobileJournalProps {
   rows: Transaction[]
   totalCount: number
   accountFilter?: string
+  /** True when tokens beyond the account are also narrowing the rows. */
+  hasOtherFilters?: boolean
   /** Map of txn.id → cumulative USD running balance (when filtered). */
   cumulative?: Map<string, number>
   /** Click handler for tag/link badges — appends to the search filter. */
@@ -27,6 +31,7 @@ export function MobileJournal({
   rows,
   totalCount,
   accountFilter,
+  hasOtherFilters = false,
   cumulative,
   onAddToken,
 }: MobileJournalProps) {
@@ -46,26 +51,43 @@ export function MobileJournal({
       />
 
       {rows.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
-          <div className="text-sm text-muted-foreground">
-            No transactions in this period.
-          </div>
-          <div className="text-xs text-muted-foreground/70">
-            Try widening the period via the chip above.
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-col">
-          {groups.map((g) => (
-            <DateGroupSection
-              key={g.date}
-              group={g}
-              accountFilter={accountFilter}
-              cumulative={cumulative}
-              onAddToken={onAddToken}
+        accountFilter ? (
+          <div className="px-3 pt-2">
+            <AccountBalanceCard
+              account={accountFilter}
+              hasOtherFilters={hasOtherFilters}
             />
-          ))}
-        </div>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+            <div className="flex flex-col gap-1">
+              <div className="text-sm text-muted-foreground">
+                No transactions in this period.
+              </div>
+              <div className="text-xs text-muted-foreground/70">
+                Widen the period below, or via the chip above.
+              </div>
+            </div>
+            <ShowMorePeriod />
+          </div>
+        )
+      ) : (
+        <>
+          <div className="flex flex-col">
+            {groups.map((g) => (
+              <DateGroupSection
+                key={g.date}
+                group={g}
+                accountFilter={accountFilter}
+                cumulative={cumulative}
+                onAddToken={onAddToken}
+              />
+            ))}
+          </div>
+          <div className="flex justify-center px-3 pt-4">
+            <ShowMorePeriod />
+          </div>
+        </>
       )}
     </div>
   )

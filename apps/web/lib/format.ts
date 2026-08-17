@@ -144,3 +144,11 @@ export function formatRelativeDate(iso: string, today = new Date()): string {
   if (y !== today.getFullYear()) return `${REL_MONTHS[m - 1]} ${d}, ${y}`
   return `${REL_MONTHS[m - 1]} ${d}`
 }
+
+// Format "2026-04-15" → "Apr 15, 2026". Always carries the year — for captions
+// where a bare "Apr 15" would be ambiguous against the selected period.
+export function formatLongDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number)
+  if (!y || !m || !d) return iso
+  return `${REL_MONTHS[m - 1]} ${d}, ${y}`
+}

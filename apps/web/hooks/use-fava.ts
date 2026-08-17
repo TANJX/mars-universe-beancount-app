@@ -135,6 +135,8 @@ interface UseIncomeStatementOptions {
   interval?: "day" | "week" | "month" | "quarter" | "year"
   /** Override the time= filter; bypasses the period from UIState. */
   timeOverride?: string
+  /** Skip the request when false. */
+  enabled?: boolean
 }
 
 export function useIncomeStatement(opts: UseIncomeStatementOptions = {}) {
@@ -145,6 +147,7 @@ export function useIncomeStatement(opts: UseIncomeStatementOptions = {}) {
 
   return useQuery({
     queryKey: ["income_statement", time ?? "", conversion, interval],
+    enabled: opts.enabled ?? true,
     queryFn: async () => {
       const res = await favaFetch(
         `income_statement${favaQuery({ time, conversion, interval })}`,

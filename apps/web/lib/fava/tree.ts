@@ -18,3 +18,22 @@ export function convertTreeNode(n: SerialisedTreeNode): BalanceTreeNode {
     children: (n.children ?? []).map(convertTreeNode),
   }
 }
+
+/**
+ * Locate the node for a full account path inside a root tree. Descends only
+ * into the branch that prefixes `path`, so it's O(depth) rather than a full
+ * walk. Returns null when the account has no node (never posted to).
+ */
+export function findTreeNode(
+  tree: BalanceTreeNode,
+  path: string
+): BalanceTreeNode | null {
+  if (tree.account === path) return tree
+  for (const child of tree.children ?? []) {
+    if (path === child.account || path.startsWith(`${child.account}:`)) {
+      const found = findTreeNode(child, path)
+      if (found) return found
+    }
+  }
+  return null
+}

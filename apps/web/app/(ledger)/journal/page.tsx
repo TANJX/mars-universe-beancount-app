@@ -4,10 +4,12 @@ import { AlertCircle } from "lucide-react"
 import { usePathname, useSearchParams } from "next/navigation"
 import * as React from "react"
 
+import { AccountBalanceCard } from "@/components/journal/account-balance-card"
 import { AllTimeFilterPrompt } from "@/components/journal/all-time-filter-prompt"
 import { COLS_BASE, COLS_FILTERED } from "@/components/journal/cols"
 import { JournalEntry } from "@/components/journal/journal-entry"
 import { MobileJournal } from "@/components/journal/mobile/mobile-journal"
+import { ShowMorePeriod } from "@/components/journal/show-more-period"
 import { useUIState } from "@/components/layout/ui-state"
 import { SearchBar } from "@/components/search/search-bar"
 import { MobileJournalSkeleton } from "@/components/skeletons/journal-skeleton"
@@ -229,6 +231,7 @@ export default function JournalPage() {
             rows={filteredAndSorted}
             totalCount={txns?.length ?? 0}
             accountFilter={accountFilter || undefined}
+            hasOtherFilters={hasNarrowingFilter}
             cumulative={accountFilter ? cumulative : undefined}
             onAddToken={handleAddToken}
           />
@@ -269,7 +272,9 @@ export default function JournalPage() {
         countLabel="txns"
       />
 
-      {!requiresFilter && (
+      {/* Column headers belong over rows or their skeletons — not over the
+          empty state or the account balance card, which have their own shape. */}
+      {!requiresFilter && (isPending || filteredAndSorted.length > 0) && (
         <div
           className={cn(
             "grid gap-3 px-7 text-xs font-medium tracking-wide text-muted-foreground uppercase",
@@ -341,21 +346,33 @@ export default function JournalPage() {
           ))}
         </div>
       ) : filteredAndSorted.length === 0 ? (
-        <EmptyState hasFilter={!isQueryEmpty(parsed)} />
+        accountFilter ? (
+          <AccountBalanceCard
+            account={accountFilter}
+            hasOtherFilters={hasNarrowingFilter}
+          />
+        ) : (
+          <EmptyState hasFilter={!isQueryEmpty(parsed)} />
+        )
       ) : (
-        <div className="flex flex-col gap-2">
-          {filteredAndSorted.map((txn) => (
-            <JournalEntry
-              key={txn.id}
-              txn={txn}
-              accountFilter={accountFilter}
-              cumulativeUSD={
-                accountFilter ? (cumulative.get(txn.id) ?? null) : null
-              }
-              onAddToken={handleAddToken}
-            />
-          ))}
-        </div>
+        <>
+          <div className="flex flex-col gap-2">
+            {filteredAndSorted.map((txn) => (
+              <JournalEntry
+                key={txn.id}
+                txn={txn}
+                accountFilter={accountFilter}
+                cumulativeUSD={
+                  accountFilter ? (cumulative.get(txn.id) ?? null) : null
+                }
+                onAddToken={handleAddToken}
+              />
+            ))}
+          </div>
+          <div className="flex justify-center">
+            <ShowMorePeriod />
+          </div>
+        </>
       )}
     </div>
   )
@@ -363,15 +380,18 @@ export default function JournalPage() {
 
 function EmptyState({ hasFilter }: { hasFilter: boolean }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
-      <div className="text-sm text-muted-foreground">
-        {hasFilter
-          ? "No transactions match this filter."
-          : "No transactions in this period."}
+    <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+      <div className="flex flex-col gap-1">
+        <div className="text-sm text-muted-foreground">
+          {hasFilter
+            ? "No transactions match this filter."
+            : "No transactions in this period."}
+        </div>
+        <div className="text-xs text-muted-foreground/70">
+          Widen the period below (or ⌘P) or adjust the search.
+        </div>
       </div>
-      <div className="text-xs text-muted-foreground/70">
-        Try widening the period (⌘P) or adjusting the search.
-      </div>
+      <ShowMorePeriod />
     </div>
   )
 }
