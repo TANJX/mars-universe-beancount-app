@@ -1,0 +1,133 @@
+/* PROTOTYPE — delete with the rest of app/(ledger)/proto/.
+ *
+ * Two blocks:
+ *   1. the picker chrome, copied verbatim from the prototype skill spec
+ *   2. a 7-step sequential ramp for the allocation views
+ *
+ * The ramp exists because this design system has no categorical palette:
+ * --chart-1..5 is a near-monochrome warm-neutral sequence and it does not
+ * flip between themes. Rather than import a foreign rainbow, the ramp
+ * extends the system's own hue (~40) to 7 steps and flips for dark mode, so
+ * the largest slice always carries the most weight against its surface.
+ * Identity is carried by text labels; the ramp only reinforces rank. */
+
+/* ── allocation ramp ─────────────────────────────────────────────────── */
+
+.proto-scope {
+  --alloc-1: oklch(0.32 0.02 40);
+  --alloc-2: oklch(0.41 0.019 40);
+  --alloc-3: oklch(0.5 0.018 40);
+  --alloc-4: oklch(0.59 0.016 40);
+  --alloc-5: oklch(0.68 0.013 40);
+  --alloc-6: oklch(0.77 0.01 40);
+  --alloc-7: oklch(0.86 0.007 40);
+}
+
+.dark .proto-scope {
+  --alloc-1: oklch(0.9 0.014 40);
+  --alloc-2: oklch(0.82 0.014 40);
+  --alloc-3: oklch(0.74 0.014 40);
+  --alloc-4: oklch(0.66 0.014 40);
+  --alloc-5: oklch(0.57 0.014 40);
+  --alloc-6: oklch(0.48 0.013 40);
+  --alloc-7: oklch(0.39 0.012 40);
+}
+
+/* ── picker chrome — verbatim, do not restyle ────────────────────────── */
+
+.proto-picker {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(10, 10, 10, 0.82);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  backdrop-filter: blur(12px) saturate(1.4);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset,
+    0 8px 24px rgba(0, 0, 0, 0.24),
+    0 2px 6px rgba(0, 0, 0, 0.12);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  line-height: 1;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.proto-picker-highlight {
+  position: absolute;
+  top: 4px;
+  left: 0;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  will-change: transform;
+}
+
+.proto-picker[data-ready] .proto-picker-highlight {
+  transition:
+    transform 250ms cubic-bezier(0.23, 1, 0.32, 1),
+    width 250ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .proto-picker[data-ready] .proto-picker-highlight {
+    transition: none;
+  }
+}
+
+.proto-picker-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  font: inherit;
+  cursor: pointer;
+  transition: color 150ms ease-out;
+}
+
+.proto-picker-item:hover {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.proto-picker-item:active {
+  transform: scale(0.97);
+}
+
+.proto-picker-item:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.4);
+  outline-offset: 2px;
+}
+
+.proto-picker-item[data-active] {
+  color: #fff;
+}
+
+.proto-picker-divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.proto-picker-replay {
+  padding: 0 10px;
+  font-size: 14px;
+}
+
+.proto-picker[data-position="top"] {
+  bottom: auto;
+  top: 24px;
+}
