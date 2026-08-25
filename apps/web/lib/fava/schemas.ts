@@ -3,7 +3,7 @@
 // fields Fava adds in newer versions that we don't read.
 
 import { z } from "zod"
-import { parseAmount } from "@/lib/transform/parse-amount"
+import { parseAmount, postingToUSD } from "@/lib/transform/parse-amount"
 import type {
   Posting as DomainPosting,
   Transaction as DomainTransaction,
@@ -178,8 +178,9 @@ function transformPosting(
 // time-filtered journal: 'S' = opening-balance summarisation, 'C' = conversion
 // balancing leg. They are artifacts of the requested date range, not ledger
 // entries — drop them so they don't pollute Recent Activity, the Journal page,
-// or date-range views. (The opening balance is reconstructed separately from
-// the balance-sheet snapshot; see `useAccountOpeningBalance`.)
+// or date-range views. (Their amounts are still read, separately, by
+// `extractOpeningBalances` below — dropping them from the row list is not the
+// same as discarding the opening balance they carry.)
 //
 // Flag 'P' is deliberately NOT in this set: Beancount materialises it at load
 // time from a `pad` directive and it genuinely moves the account balance (e.g.
@@ -213,6 +214,40 @@ export function transformTransactions(
       meta: tx.meta,
       postings,
     })
+  }
+  return out
+}
+
+/**
+ * USD opening balance per account, read off the flag-'S' summarisation
+ * entries Fava prepends to a time-filtered journal.
+ *
+ * Fava applies `filter=` *before* summarising, so these amounts are the
+ * pre-period balance of the **filtered** entry set. That makes them the only
+ * filter-aware opening balance on offer: `/api/balance_sheet` accepts no
+ * `filter=`, so a link/tag/payee narrowing can't be expressed there at all.
+ *
+ * Two properties worth knowing before consuming this:
+ *   - Accounts Fava sweeps into retained earnings at the boundary (Income,
+ *     Expenses) get no 'S' entry, so they're simply absent → seed 0.
+ *   - Lot postings ("2.654 MINJX {45.44 USD, 2025-11-07}") carry a cost but
+ *     no price, so they value at *cost basis*, not market value. Prefer the
+ *     balance-sheet snapshot when an at-value figure matters and no filter
+ *     is in play.
+ */
+export function extractOpeningBalances(
+  entries: z.infer<typeof JournalResponseSchema>
+): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const e of entries) {
+    if (e.t !== "Transaction") continue
+    const tx = WireTransactionSchema.parse(e)
+    if (tx.flag !== "S") continue
+    for (const wp of tx.postings) {
+      const p = transformPosting(wp)
+      if (!p) continue
+      out[p.account] = (out[p.account] ?? 0) + postingToUSD(p)
+    }
   }
   return out
 }

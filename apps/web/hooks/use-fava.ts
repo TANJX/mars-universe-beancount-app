@@ -13,6 +13,7 @@ import {
   BalanceChartPointSchema,
   BalanceSheetSchema,
   CommoditiesSchema,
+  extractOpeningBalances,
   IncomeStatementSchema,
   IntervalChartPointSchema,
   JournalResponseSchema,
@@ -171,20 +172,57 @@ interface UseJournalOptions {
   enabled?: boolean
 }
 
-export function useJournal(opts: UseJournalOptions = {}) {
-  const { period } = useUIState()
-  const time = opts.timeOverride ?? periodToFavaTime(period)
+/**
+ * One journal response, two readings: the transaction rows, and the
+ * opening balances Fava folded into the flag-'S' entries at the period
+ * boundary. They have to come from the same fetch — the openings are only
+ * correct for the `filter=` that produced them.
+ */
+interface JournalPayload {
+  txns: Transaction[]
+  /** Account → USD opening balance. See `extractOpeningBalances`. */
+  openings: Record<string, number>
+}
 
-  return useQuery<Transaction[]>({
+function journalQuery(opts: UseJournalOptions, time: string | undefined) {
+  return {
     queryKey: ["journal", time ?? "", opts.account ?? "", opts.filter ?? ""],
     enabled: opts.enabled ?? true,
-    queryFn: async () => {
+    queryFn: async (): Promise<JournalPayload> => {
       const res = await favaFetch(
         `journal${favaQuery({ time, account: opts.account, filter: opts.filter })}`,
         JournalResponseSchema
       )
-      return transformTransactions(res.data)
+      return {
+        txns: transformTransactions(res.data),
+        openings: extractOpeningBalances(res.data),
+      }
     },
+  }
+}
+
+export function useJournal(opts: UseJournalOptions = {}) {
+  const { period } = useUIState()
+  const time = opts.timeOverride ?? periodToFavaTime(period)
+
+  return useQuery<JournalPayload, Error, Transaction[]>({
+    ...journalQuery(opts, time),
+    select: (r) => r.txns,
+  })
+}
+
+/**
+ * Filter-aware opening balances for the same query `useJournal` runs. Shares
+ * the query key, so calling both in one component is two views of a single
+ * request, not a second round trip.
+ */
+export function useJournalOpenings(opts: UseJournalOptions = {}) {
+  const { period } = useUIState()
+  const time = opts.timeOverride ?? periodToFavaTime(period)
+
+  return useQuery<JournalPayload, Error, Record<string, number>>({
+    ...journalQuery(opts, time),
+    select: (r) => r.openings,
   })
 }
 
