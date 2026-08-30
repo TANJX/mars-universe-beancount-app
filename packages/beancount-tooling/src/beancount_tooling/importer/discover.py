@@ -6,6 +6,7 @@ from beancount.core import data
 from titlecase import titlecase
 from datetime import datetime
 
+from beancount_tooling.importer.helper import match_merchant_patterns
 from beancount_tooling.importer.helper import prompt_user_select
 from beancount_tooling.importer.general_importer import GeneralImporter
 
@@ -17,12 +18,14 @@ class DiscoverImporter(GeneralImporter):
         existing_refs=[],
         payment_account="Assets:FIXME",
         merchant_map=dict(),
+        merchant_patterns=[],
         all_accounts=[],
     ):
         super().__init__("Discover", card_name, existing_refs)
 
         self.payment_account = payment_account
         self.merchant_map = merchant_map
+        self.merchant_patterns = merchant_patterns
         self.all_accounts = all_accounts
 
     def identify(self, f):
@@ -106,7 +109,12 @@ class DiscoverImporter(GeneralImporter):
             flag = flags.FLAG_WARNING
 
         else:
-            if trans_desc in self.merchant_map:
+            pattern_account = match_merchant_patterns(
+                self.merchant_patterns, [row["Description"], trans_desc]
+            )
+            if pattern_account:
+                account_name = pattern_account
+            elif trans_desc in self.merchant_map:
                 account_name = self.merchant_map[trans_desc]
             elif "Restaurant" in trans_cat:
                 account_name = "Expenses:Restaurants"

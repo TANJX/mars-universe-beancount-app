@@ -6,6 +6,7 @@ from beancount.core import data
 from titlecase import titlecase
 from datetime import datetime
 
+from beancount_tooling.importer.helper import match_merchant_patterns
 from beancount_tooling.importer.helper import prompt_user_select
 from beancount_tooling.importer.general_importer import GeneralImporter
 
@@ -18,6 +19,7 @@ class AppleImporter(GeneralImporter):
         payment_account="Assets:FIXME",
         expense_categories=[],
         merchant_map=dict(),
+        merchant_patterns=[],
         all_accounts=[],
     ):
         super().__init__("Apple", card_name, existing_refs)
@@ -25,6 +27,7 @@ class AppleImporter(GeneralImporter):
         self.payment_account = payment_account
         self.expense_categories = expense_categories
         self.merchant_map = merchant_map
+        self.merchant_patterns = merchant_patterns
         self.all_accounts = all_accounts
 
     def identify(self, f):
@@ -70,7 +73,12 @@ class AppleImporter(GeneralImporter):
             flag = flags.FLAG_WARNING
 
         else:
-            if trans_merchant in self.merchant_map:
+            pattern_account = match_merchant_patterns(
+                self.merchant_patterns, [row["Merchant"], trans_merchant]
+            )
+            if pattern_account:
+                account_name = pattern_account
+            elif trans_merchant in self.merchant_map:
                 account_name = self.merchant_map[trans_merchant]
             elif trans_merchant == "Uber":
                 account_name = "Expenses:Transportation:Cab"

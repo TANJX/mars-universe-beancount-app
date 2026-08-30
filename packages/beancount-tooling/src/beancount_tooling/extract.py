@@ -143,6 +143,9 @@ def build_importer(
     if account_type == "credit":
         kwargs["payment_account"] = payment_account
         kwargs["merchant_map"] = merchant_map
+        kwargs["merchant_patterns"] = (
+            CONFIG["categorization"].get("merchant_patterns") or []
+        )
         kwargs["all_accounts"] = all_accounts
 
     # First positional argument is card_name

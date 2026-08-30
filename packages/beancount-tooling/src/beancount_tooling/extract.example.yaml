@@ -36,6 +36,8 @@ categorization:
   payment_account: Assets:Pending-Transfer
 
   # Optional: merchant -> account mapping by regex on description/payee.
+  # Checked before the merchant map learned from existing ledger entries, so
+  # use these to pin a route the learned map would get wrong.
   merchant_patterns:
     - pattern: "^Lyft"
       account: Expenses:Transportation:Cab

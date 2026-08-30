@@ -6,6 +6,7 @@ from datetime import datetime
 import os
 from beancount_tooling.importer.helper import hash_string
 
+from beancount_tooling.importer.helper import match_merchant_patterns
 from beancount_tooling.importer.helper import prompt_user_select
 from beancount_tooling.importer.general_importer import GeneralImporter
 
@@ -18,6 +19,7 @@ class RobinhoodImporter(GeneralImporter):
         type="credit",
         payment_account="Assets:FIXME",
         merchant_map=dict(),
+        merchant_patterns=[],
         all_accounts=[],
     ):
         super().__init__("Robinhood", card_name, existing_refs)
@@ -25,6 +27,7 @@ class RobinhoodImporter(GeneralImporter):
         self.type = type
         self.payment_account = payment_account
         self.merchant_map = merchant_map
+        self.merchant_patterns = merchant_patterns
         self.all_accounts = all_accounts
 
     def identify(self, f):
@@ -88,7 +91,12 @@ class RobinhoodImporter(GeneralImporter):
             # flag = flags.FLAG_WARNING
 
         else:
-            if trans_desc in self.merchant_map:
+            pattern_account = match_merchant_patterns(
+                self.merchant_patterns, [row.get("Description"), trans_desc]
+            )
+            if pattern_account:
+                expense_account = pattern_account
+            elif trans_desc in self.merchant_map:
                 expense_account = self.merchant_map[trans_desc]
             else:
                 # prompt user in the terminal to choose an account

@@ -1,7 +1,22 @@
+import re
 import sys
 import time
 import questionary
 from questionary import Style
+
+
+def match_merchant_patterns(patterns, texts):
+    """Return the account of the first config pattern matching any text, else None.
+
+    Patterns come from extract.yaml `categorization.merchant_patterns` and take
+    precedence over the ledger-learned merchant map, so one payee (e.g. "Tesla")
+    can route differently by description (supercharger vs subscription).
+    """
+    for entry in patterns:
+        for text in texts:
+            if text and re.search(entry["pattern"], text):
+                return entry["account"]
+    return None
 
 
 def cls():
