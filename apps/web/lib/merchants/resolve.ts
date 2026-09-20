@@ -4,16 +4,20 @@
 //   - initial: a derived letter mark (registry hit or generic fallback)
 //
 // Stage order — first match wins:
-//   1.   Class override (padding/transfer/investment/rebate/pending/forecast)
-//   2.   Account override (Income:Salary:Acme → Acme via accounts.logos)
+//   1.   Class override (padding/transfer/investment/rebate/pending/forecast).
+//        Transfers first try the counterparty institution's brand.
+//   2.   Account override (Income:Salary:Acme → Acme via accounts.logos),
+//        skipped when the payee itself resolves
 //   3.   Payee patterns → registry (Tm *, ACH Des:…)
 //   4.   Cleaned payee → registry (exact then longest-substring on name|aliases)
-//   4.5. Category icon (Expenses:Restaurants → utensils via accounts.categoryIcons)
+//   4.5. Category icon (Expenses:Restaurants → utensils via
+//        accounts.categoryIcons), tinted by accounts.colors
 //   5.   Auto-derived letter mark (initial + hash color from payee/narration)
 
 import {
   lookupAccountCategoryIcon,
   lookupAccountLogo,
+  lookupColor,
   lookupDisplayName,
 } from "@/lib/config/accounts"
 import type {
@@ -31,7 +35,15 @@ import { matchMerchant } from "./match"
 export type Resolved =
   | { kind: "logo"; src: string; alt: string; fallback: AvatarFallback }
   | { kind: "glyph"; glyph: GlyphSpec; alt: string }
-  | { kind: "category-icon"; name: string; tone: GlyphTone; alt: string }
+  | {
+      kind: "category-icon"
+      name: string
+      tone: GlyphTone
+      alt: string
+      /** Hand-picked account color from `accounts.colors`, if the category
+       * (or an ancestor) has one. The avatar tints itself with it. */
+      color?: string
+    }
   | { kind: "initial"; entry: AvatarFallback; alt: string }
 
 export interface ResolveContext {
@@ -60,10 +72,12 @@ export interface ResolveContext {
  * the hourglass would mis-fire. */
 function isPendingPrimary(primary: Posting | null): boolean {
   if (!primary) return false
-  return (
-    primary.account.startsWith("Assets:Pending-Transfer") ||
-    primary.account.startsWith("Assets:Transit")
-  )
+  // `Assets:Transit` used to be here, which put an hourglass on every Suica
+  // tap. A stored-value card is a settled asset, not money in flight: the
+  // tap already happened and the fare is already spent. Those rows want
+  // their category icon (Transportation:Public -> bus) like any other
+  // transit expense.
+  return primary.account.startsWith("Assets:Pending-Transfer")
 }
 
 export function resolveMerchant(ctx: ResolveContext): Resolved {
@@ -85,6 +99,24 @@ export function resolveMerchant(ctx: ResolveContext): Resolved {
       return { kind: "glyph", glyph: GLYPHS.forecast, alt: "Forecast" }
     }
     if (row.class === "transfer") {
+      // A transfer is the single most repeated row in the ledger, and the
+      // generic arrows throw away the one thing that distinguishes them:
+      // where the money went. Three sources, in priority:
+      //
+      //   1. the payee, when it names a brand. Most transfer payees are bank
+      //      boilerplate, but not all — a gift-card reload
+      //      (Liabilities:Credit:Discover → Assets:Gift-Card:Starbucks) has
+      //      two A/L legs and no expense, so it classifies here while its
+      //      payee still says Starbucks.
+      //   2. the counterparty account, then the primary.
+      //   3. the arrows.
+      const transferPayee = matchMerchant(payee || null, registry)
+      if (transferPayee) return renderEntry(transferPayee, size)
+      const institution = resolveInstitution(ctx, [
+        row.counterparty,
+        row.primary,
+      ])
+      if (institution) return institution
       return { kind: "glyph", glyph: GLYPHS.transfer, alt: "Transfer" }
     }
     if (row.class === "investment") {
@@ -108,9 +140,24 @@ export function resolveMerchant(ctx: ResolveContext): Resolved {
   if (ctx.row) {
     const isIncome = ctx.row.class === "income"
     if (isIncome) {
-      for (const p of ctx.row.txn.postings) {
-        const name = lookupAccountLogo(accounts, p.account)
-        if (name && registry[name]) return renderEntry(registry[name], size)
+      // Same guard the non-income branch has always had: an explicit payee
+      // that resolves is better evidence than the account. Without it, a row
+      // whose payee names a real brand but whose income account is mapped to
+      // a different one rendered the account's logo and hid the payee's.
+      const payeeHit = matchMerchant(payee || null, registry)
+      if (!payeeHit) {
+        // Category (the Income leg) first, then the rest. Scanning postings
+        // in file order would let the funding account win — a payroll
+        // deposit lists `Assets:Checking:TD` before `Income:Salary:Acme`, so
+        // once banks have logos the salary row would render the bank.
+        const cat = ctx.row.category
+        const ordered = cat
+          ? [cat, ...ctx.row.txn.postings.filter((p) => p !== cat)]
+          : ctx.row.txn.postings
+        for (const p of ordered) {
+          const name = lookupAccountLogo(accounts, p.account)
+          if (name && registry[name]) return renderEntry(registry[name], size)
+        }
       }
     } else if (ctx.row.category) {
       const name = lookupAccountLogo(accounts, ctx.row.category.account)
@@ -151,6 +198,7 @@ export function resolveMerchant(ctx: ResolveContext): Resolved {
         name: iconName,
         tone: "muted",
         alt: label,
+        color: lookupColor(accounts, p.account),
       }
     }
   }
@@ -161,6 +209,25 @@ export function resolveMerchant(ctx: ResolveContext): Resolved {
     entry: deriveFallback(payee || ctx.row?.txn.narration || null),
     alt: payee || "Transaction",
   }
+}
+
+/** Resolve the first posting whose account maps to a registry merchant via
+ * `accounts.logos`. Used by the transfer branch, where the "payee" is bank
+ * boilerplate ("Internal Transfer to Personal Savings") and the account is
+ * the only thing carrying brand identity. */
+function resolveInstitution(
+  ctx: ResolveContext,
+  postings: (Posting | null)[]
+): Resolved | null {
+  const size = ctx.size ?? 28
+  for (const p of postings) {
+    if (!p) continue
+    const name = lookupAccountLogo(ctx.accounts, p.account)
+    if (name && ctx.registry[name]) {
+      return renderEntry(ctx.registry[name], size)
+    }
+  }
+  return null
 }
 
 function leafSegment(account: string): string {

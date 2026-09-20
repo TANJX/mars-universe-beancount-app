@@ -24,6 +24,30 @@ export const AVATAR_SIZES = {
 
 export type AvatarSize = keyof typeof AVATAR_SIZES
 
+/** Shared plate behind every brand logo, in both themes. Slightly off-white
+ * so a pure-white mark still reads as a mark and not as the plate. */
+const LOGO_PLATE = "#f4f4f5"
+
+/**
+ * Disc + icon colors for a tinted avatar, derived from one hue.
+ *
+ * The icon can't just BE the hue: a dark hue on a dark surface disappears.
+ * `--primary` is a dark red, and `text-primary` on a `primary/15` disc
+ * measured 1.94:1 against the row — under the 3:1 floor for non-text. The
+ * same happens to any `accounts.colors` entry picked for a chart, where the
+ * backdrop is light.
+ *
+ * Mixing toward `--foreground` fixes both directions at once: it lifts a
+ * dark hue in dark mode and deepens a light one in light mode, because
+ * `--foreground` flips with the theme. One expression, no per-theme table.
+ */
+function tintStyle(color: string): React.CSSProperties {
+  return {
+    background: `color-mix(in oklab, ${color} 16%, transparent)`,
+    color: `color-mix(in oklab, ${color} 70%, var(--foreground))`,
+  }
+}
+
 export interface MerchantAvatarProps {
   /** Preferred — provides class + account context for the resolver. */
   row?: JournalRow
@@ -95,16 +119,26 @@ function LogoAvatar({
     )
   }
 
+  // The plate is deliberately NOT theme-aware. Brand marks are drawn for
+  // light backgrounds: measured across the 47 brands in this ledger, a white
+  // plate leaves 5 marks under 3:1 while the dark card leaves 4 — but the
+  // dark card only works while the app is dark, and in light mode 26 of them
+  // wash out. A mid grey is the worst of both (12 failures), so don't split
+  // the difference. The ring carries the 5 near-white marks, whose problem is
+  // edge definition rather than glyph contrast.
+  const inset = Math.max(2, Math.round(size * 0.14))
+
   return (
     <span
       className={cn(
-        "relative inline-flex shrink-0 items-center justify-center overflow-hidden border bg-card",
+        "relative inline-flex shrink-0 items-center justify-center overflow-hidden ring-1 ring-black/10 dark:ring-white/15",
         className
       )}
       style={{
         width: size,
         height: size,
         borderRadius: size / 2,
+        background: LOGO_PLATE,
       }}
       role="img"
       aria-label={resolved.alt}
@@ -133,10 +167,13 @@ function LogoAvatar({
         loading="lazy"
         onLoad={() => setLoaded(true)}
         onError={() => setErrored(true)}
+        // `contain`, not `cover`: wide wordmarks (Cathay Pacific, Bilt) were
+        // being centre-cropped into an unreadable strip.
         className={cn(
-          "object-cover transition-opacity duration-150",
+          "object-contain transition-opacity duration-150",
           loaded ? "opacity-100" : "opacity-0"
         )}
+        style={{ padding: inset }}
       />
     </span>
   )
@@ -158,7 +195,7 @@ function GlyphAvatar({
     tone === "muted"
       ? "bg-muted text-muted-foreground"
       : tone === "accent"
-        ? "bg-primary/15 text-primary"
+        ? ""
         : "bg-card border text-foreground"
 
   return (
@@ -172,6 +209,7 @@ function GlyphAvatar({
         width: size,
         height: size,
         borderRadius: size / 2,
+        ...(tone === "accent" ? tintStyle("var(--primary)") : {}),
       }}
       role="img"
       aria-label={resolved.alt}
@@ -192,25 +230,27 @@ function CategoryIconAvatar({
   size: number
   className?: string
 }) {
-  const tone = resolved.tone
-  const toneClass =
-    tone === "muted"
-      ? "bg-muted text-muted-foreground"
-      : tone === "accent"
-        ? "bg-primary/15 text-primary"
-        : "bg-card border text-foreground"
+  // This is the single most common non-brand avatar in the ledger, and
+  // `bg-muted` on `bg-card` gave it almost no separation from the row — a
+  // wall of identical grey discs. `accounts.colors` already carries a
+  // hand-picked hue per category for the charts; reuse it so Restaurants and
+  // Groceries are distinguishable at a glance. Falls back to the old muted
+  // treatment for categories with no color configured.
+  const { color } = resolved
+  const tinted = Boolean(color)
 
   return (
     <span
       className={cn(
         "inline-flex shrink-0 items-center justify-center",
-        toneClass,
+        !tinted && "bg-muted text-muted-foreground",
         className
       )}
       style={{
         width: size,
         height: size,
         borderRadius: size / 2,
+        ...(tinted ? tintStyle(color as string) : {}),
       }}
       role="img"
       aria-label={resolved.alt}
