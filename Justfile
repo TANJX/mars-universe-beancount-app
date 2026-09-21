@@ -29,6 +29,10 @@ format:
 prices:
     uv run update-stock-price
 
+# Backfill historical prices so every held commodity has one price per ISO week
+backfill-prices *args:
+    uv run backfill-prices {{args}}
+
 # Forecast generation
 forecast *args:
     uv run generate-forecast {{args}}

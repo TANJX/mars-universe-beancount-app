@@ -18,3 +18,9 @@ def run_generate_forecast():
     from beancount_tooling.generate_forecast import main
 
     main()
+
+
+def run_backfill_prices():
+    from beancount_tooling.backfill_prices import main
+
+    raise SystemExit(main())
