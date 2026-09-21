@@ -5,6 +5,7 @@
 // pending assets — and would double-count once the actual Expenses leg posts.
 
 import { accountRoot, accountSegment, classify } from "@/lib/transform/classify"
+import { postingToUSD } from "@/lib/transform/parse-amount"
 import type { AccountPath, Posting, Transaction } from "@/lib/types/beancount"
 import type { JournalRow } from "@/lib/types/views"
 
@@ -32,13 +33,6 @@ export interface ExpenseRowData {
   isComplex: boolean
   /** Root for the AccountDot before the funding label. */
   fundingRoot: "Assets" | "Liabilities" | "Equity" | "Income" | "Expenses"
-}
-
-function postingToUSD(p: Posting): number {
-  if (p.amount.currency === "USD") return p.amount.number
-  if (p.price?.currency === "USD") return p.amount.number * p.price.number
-  if (p.cost?.currency === "USD") return p.amount.number * p.cost.number
-  return 0
 }
 
 export function deriveExpenseRow(txn: Transaction): ExpenseRowData | null {

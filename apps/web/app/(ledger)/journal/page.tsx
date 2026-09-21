@@ -15,7 +15,7 @@ import { SearchBar } from "@/components/search/search-bar"
 import { MobileJournalSkeleton } from "@/components/skeletons/journal-skeleton"
 import { Card } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useJournal } from "@/hooks/use-fava"
+import { useJournal, useJournalOpenings } from "@/hooks/use-fava"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useAccountOpeningBalance } from "@/hooks/use-opening-balance"
 import { toFavaFilter } from "@/lib/search/fava-filter"
@@ -30,8 +30,8 @@ import {
   type Token,
 } from "@/lib/search/parse"
 import { useSearchVocabulary } from "@/lib/search/vocabulary"
-import { accountSegment } from "@/lib/transform/classify"
-import type { Posting } from "@/lib/types/beancount"
+import { accountMatches, accountSegment } from "@/lib/transform/classify"
+import { postingToUSD } from "@/lib/transform/parse-amount"
 import { cn } from "@/lib/utils"
 
 function readUrl(): { account: string; q: string } {
@@ -115,16 +115,16 @@ export default function JournalPage() {
     parsed.text.length > 0
   const requiresFilter = period.id === "all" && !hasAnyNarrowingFilter
 
-  const {
-    data: txns,
-    isPending,
-    isError,
-    error,
-  } = useJournal({
+  const journalOpts = {
     account: primaryAccount || undefined,
     filter: favaFilter,
     enabled: !requiresFilter,
-  })
+  }
+  const { data: txns, isPending, isError, error } = useJournal(journalOpts)
+  // Same query key as above — a second view of one request, not a second
+  // fetch. Carries the period-boundary opening balances Fava computed
+  // *after* applying our `filter=`.
+  const { data: openings } = useJournalOpenings(journalOpts)
 
   // Fava returns the journal in chronological ascending order, with
   // intra-day items in file order (oldest write first). Reversing gives
@@ -147,12 +147,7 @@ export default function JournalPage() {
   // Mirror fava's clamp() semantics for the cumulative column: Assets /
   // Liabilities / Equity get an opening-balance seed at period start so
   // the running total carries history; Income / Expenses start from zero
-  // (fava sweeps prior periods into retained earnings). Additionally,
-  // any narrowing filter (link/tag/payee/text/exclude/extra-account)
-  // collapses the seed to 0 — fava applies its `filter=` to the
-  // synthesized opening `Balance` entry too, which carries none of these
-  // tokens, so the opening drops out at the boundary.
-  const openingSeed = useAccountOpeningBalance(accountFilter || undefined)
+  // (fava sweeps prior periods into retained earnings).
   const hasNarrowingFilter =
     parsed.links.length > 0 ||
     parsed.tags.length > 0 ||
@@ -160,6 +155,31 @@ export default function JournalPage() {
     parsed.text.length > 0 ||
     parsed.excludeAccounts.length > 0 ||
     parsed.accounts.length > 1
+
+  // Two sources for that seed, because neither covers both cases:
+  //
+  //   unfiltered → the balance-sheet snapshot, which honours the at_value
+  //     conversion (so investment lots seed at market value, matching the
+  //     rest of the app) but accepts no `filter=`.
+  //   filtered → the flag-'S' summarisation entries that came back with
+  //     this very journal response. Fava applies `filter=` before
+  //     summarising, so they are the pre-period balance of exactly the
+  //     rows on screen. Without this the seed was hard-zeroed and the
+  //     column silently dropped every pre-period posting the filter
+  //     matched — e.g. `link:expensify-2026-08` under an August period
+  //     lost the report's July-dated entries.
+  const snapshotSeed = useAccountOpeningBalance(
+    hasNarrowingFilter ? undefined : accountFilter || undefined
+  )
+  const filteredSeed = React.useMemo(() => {
+    if (!accountFilter || !openings) return 0
+    let sum = 0
+    for (const [acct, usd] of Object.entries(openings)) {
+      if (accountMatches(acct, accountFilter)) sum += usd
+    }
+    return sum
+  }, [openings, accountFilter])
+  const openingSeed = hasNarrowingFilter ? filteredSeed : snapshotSeed
 
   // Cumulative USD running balance for matching postings, computed in
   // chronological order (oldest → newest), then mapped back per txn.id
@@ -169,10 +189,10 @@ export default function JournalPage() {
   const cumulative = React.useMemo(() => {
     if (!accountFilter) return new Map<string, number>()
     const m = new Map<string, number>()
-    let running = hasNarrowingFilter ? 0 : openingSeed
+    let running = openingSeed
     for (const t of filteredAsc) {
       const matching = t.postings.filter((p) =>
-        p.account.startsWith(accountFilter)
+        accountMatches(p.account, accountFilter)
       )
       const usd = matching.reduce((s, p) => s + postingToUSD(p), 0)
       // Round to cents each step so float drift can't accumulate into a
@@ -181,7 +201,7 @@ export default function JournalPage() {
       m.set(t.id, running)
     }
     return m
-  }, [filteredAsc, accountFilter, openingSeed, hasNarrowingFilter])
+  }, [filteredAsc, accountFilter, openingSeed])
 
   function clearAccount() {
     setAccount("")
@@ -394,11 +414,4 @@ function EmptyState({ hasFilter }: { hasFilter: boolean }) {
       <ShowMorePeriod />
     </div>
   )
-}
-
-function postingToUSD(p: Posting): number {
-  if (p.amount.currency === "USD") return p.amount.number
-  if (p.price?.currency === "USD") return p.amount.number * p.price.number
-  if (p.cost?.currency === "USD") return p.amount.number * p.cost.number
-  return 0
 }

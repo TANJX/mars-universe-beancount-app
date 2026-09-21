@@ -10,6 +10,7 @@ import * as React from "react"
 
 import { resolveAccounts } from "./accounts"
 import { resolveBranding } from "./branding"
+import { resolveInvestments } from "./investments"
 import { resolveMerchants } from "./merchants"
 import { resolveSidebar } from "./sidebar"
 import type { ResolvedUI } from "./types"
@@ -20,6 +21,7 @@ export const RESOLVED_DEFAULTS: ResolvedUI = {
   accounts: resolveAccounts(undefined),
   merchants: resolveMerchants(undefined),
   sidebar: resolveSidebar(undefined),
+  investments: resolveInvestments(undefined),
 }
 
 /** Merged user config + bundled defaults. Returns defaults until the
@@ -33,19 +35,33 @@ export function useResolvedUIConfig(): ResolvedUI {
       accounts: resolveAccounts(data.accounts),
       merchants: resolveMerchants(data.merchants),
       sidebar: resolveSidebar(data.sidebar),
+      investments: resolveInvestments(data.investments),
     }
   }, [data])
 }
 
+export {
+  assetClassLabel,
+  asTaxTreatment,
+  lookupCadence,
+  lookupContributionLimit,
+  lookupSleeveAnnotation,
+} from "./investments"
 export type {
   AccountsConfig,
   Bookmark,
   Branding,
+  ContributionCadence,
+  InvestmentsConfig,
   MerchantEntry,
   MerchantRegistry,
+  RealizedAccounts,
   ResolvedUI,
   SidebarConfig,
+  SleeveAnnotation,
+  TaxTreatment,
 } from "./types"
+export { TAX_TREATMENTS } from "./types"
 // Re-export the underlying hook so consumers can read loading state without
 // duplicating import paths. React Query dedupes by queryKey, so calling both
 // `useResolvedUIConfig()` and `useUIConfig()` in the same component is cheap.

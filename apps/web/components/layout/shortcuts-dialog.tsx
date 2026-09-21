@@ -30,6 +30,7 @@ const SHORTCUTS: ShortcutGroup[] = [
       { keys: ["g", "o"], description: "Go to Overview" },
       { keys: ["g", "p"], description: "Go to Plan" },
       { keys: ["g", "b"], description: "Go to Balances" },
+      { keys: ["g", "f"], description: "Go to Portfolio" },
       { keys: ["g", "i"], description: "Go to Income" },
       { keys: ["g", "e"], description: "Go to Expenses" },
       { keys: ["g", "j"], description: "Go to Journal" },

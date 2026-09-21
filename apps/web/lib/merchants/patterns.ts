@@ -22,6 +22,37 @@ export interface PatternResult {
   token?: string
 }
 
+/**
+ * Payment *rails* — a `<rail>*<merchant>` payee where the text AFTER the
+ * separator is the real brand. Stripped by `cleanPayee` so the residual can
+ * match; deliberately excluded from the generic prefix-is-merchant rule
+ * below, which would otherwise resolve every Toast restaurant to Toast and
+ * every PayPal checkout to PayPal.
+ *
+ * `Tm *` is NOT a rail — a Ticketmaster order really is a Ticketmaster
+ * purchase, and the residual is an event name. It has its own rule below.
+ */
+export const RAIL_PREFIXES = [
+  "Sq *",
+  "Sq*",
+  "Tst*",
+  "Pp*",
+  "Py *",
+  "Dd *",
+  "Paypal *",
+  "Paddle.Net*",
+  "Paddle.Net *",
+  "Apple Pay - ",
+  "Google Pay - ",
+  "ACH \u2014 ",
+  "ACH - ",
+]
+
+function startsWithRail(payee: string): boolean {
+  const lower = payee.toLowerCase()
+  return RAIL_PREFIXES.some((p) => lower.startsWith(p.toLowerCase()))
+}
+
 interface PayeePattern {
   re: RegExp
   resolve: PatternResult | ((m: RegExpMatchArray) => PatternResult | null)
@@ -31,6 +62,27 @@ const PATTERNS: PayeePattern[] = [
   // Ticketmaster — `Tm *<event>` prefix. The merchant is always TM, never
   // what follows.
   { re: /^Tm \*/i, resolve: { name: "Ticketmaster" } },
+
+  // Generic `<brand>*<detail>` — for everything that is NOT a rail, the
+  // text before the star is the brand and the residual is a store, event or
+  // order reference. Without this, longest-substring matching can pick a
+  // brand name out of the *detail* and win on length alone:
+  // `axs.com*microsoft Th` (AXS ticket to the Microsoft Theater) resolved to
+  // Microsoft, because "microsoft" is longer than "axs". Returning the
+  // prefix as a token keeps the registry the single source of truth — an
+  // unknown prefix simply misses and falls through to stage 4.
+  {
+    re: /^([A-Za-z][A-Za-z0-9.&'-]{1,})\s?\*/,
+    resolve: (m) => {
+      const raw = m[0]
+      if (startsWithRail(raw)) return null
+      const token = m[1]
+        ?.toLowerCase()
+        .replace(/\.(com|net|org|us|co)$/i, "")
+        .trim()
+      return token ? { token } : null
+    },
+  },
 
   // ACH wire — `Des:<merchant>` segment between `Des:` and `Id:` / `Indn:`.
   {

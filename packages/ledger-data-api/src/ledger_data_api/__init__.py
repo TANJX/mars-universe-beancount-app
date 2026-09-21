@@ -11,7 +11,7 @@ from fava.ext import FavaExtensionBase, extension_endpoint
 from fava.helpers import FavaAPIError
 from flask import request
 
-from . import store
+from . import portfolio, store
 from .merge import (
     _credit_balance_on,
     build_grid_response,
@@ -19,20 +19,51 @@ from .merge import (
 )
 from .models import CCCardRecord, Plan, PlanSettings, Transfer
 
+#: Account buckets the card-balance overlay scans when `card_balance.accounts`
+#: is absent from ui.yaml. Universal beancount taxonomy only — anything
+#: ledger-specific (an investment sleeve's cash leaf, say) is configured, not
+#: shipped.
+DEFAULT_BALANCE_ACCOUNTS = ["Assets:Checking", "Assets:Saving", "Liabilities:Credit"]
+
 
 class LedgerDataApi(FavaExtensionBase):
     """Endpoints-only Fava extension. No report page (Mars Dashboard SPA retired)."""
 
-    excluded_accounts = [
-        "Assets:Checking:Future",
-        "Assets:Checking:Optum",
-        "Assets:Checking:Amy-PrimePay",
-    ]
+    def _ui_config(self) -> dict:
+        return store.read_ui_config(self._ledger_path())
+
+    def _config_list(self, section: str, key: str, default: list[str]) -> list[str]:
+        """Read a list of account paths from ui.yaml, falling back to `default`."""
+        block = self._ui_config().get(section)
+        if not isinstance(block, dict):
+            return list(default)
+        values = block.get(key)
+        if not isinstance(values, list):
+            return list(default)
+        cleaned = [v for v in values if isinstance(v, str) and v]
+        return cleaned or list(default)
+
+    def excluded_accounts(self) -> list[str]:
+        """Accounts the planner hides. Configured in ui.yaml under `planner`."""
+        return self._config_list("planner", "excluded_accounts", [])
 
     @extension_endpoint
     def get_balance(self):
         account = request.args.get("account")
-        query = """SELECT account WHERE (account ~ "Assets:Checking" OR account ~ "Assets:Saving" OR account ~ "Liabilities:Credit" OR account ~ "Assets:Investment:Robinhood:Brokerage:USD" OR account ~ "Assets:Investment:Robinhood:Traditional-IRA:USD" OR account ~ "Assets:Investment:Robinhood:Roth-IRA:USD") AND NOT close_date(account) GROUP BY account"""
+        patterns = self._config_list(
+            "card_balance", "accounts", DEFAULT_BALANCE_ACCOUNTS
+        )
+        # Patterns are interpolated into BQL, so anything that could close the
+        # string literal is dropped rather than escaped.
+        matches = " OR ".join(
+            f'account ~ "{p}"' for p in patterns if '"' not in p and "\\" not in p
+        )
+        if not matches:
+            return json.dumps({})
+        query = (
+            f"SELECT account WHERE ({matches}) "
+            "AND NOT close_date(account) GROUP BY account"
+        )
         _, rrows = self.exec_query(query)
         # get all accounts that match the query
         accounts = [row.account for row in rrows if account in row.account.lower()]
@@ -105,7 +136,7 @@ class LedgerDataApi(FavaExtensionBase):
             conversion=g.conversion,
             fava_options=g.ledger.fava_options,
             exec_query=self.exec_query,
-            excluded_accounts=set(self.excluded_accounts),
+            excluded_accounts=set(self.excluded_accounts()),
             plans=plans,
             transfers=transfers,
             cc_records=cc_records,
@@ -295,4 +326,30 @@ class LedgerDataApi(FavaExtensionBase):
 
     @extension_endpoint
     def get_ui_config(self):
-        return json.dumps(store.read_ui_config(self._ledger_path()))
+        return json.dumps(self._ui_config())
+
+    @extension_endpoint
+    def portfolio(self):
+        """Holdings, value-vs-cost series, contribution room and realized P/L.
+
+        `asof` (default today) bounds every figure: the ledger carries
+        future-dated forecast transactions, including investment buys, so an
+        unbounded walk reports trades that have not happened yet.
+        """
+        raw_asof = request.args.get("asof")
+        try:
+            asof = (
+                datetime.date.fromisoformat(raw_asof)
+                if raw_asof
+                else datetime.date.today()
+            )
+        except ValueError as ex:
+            raise FavaAPIError(f"invalid asof date {raw_asof!r}") from ex
+
+        payload = portfolio.build_portfolio(
+            ledger=g.ledger,
+            entries=g.ledger.all_entries,
+            ui_config=self._ui_config(),
+            asof=asof,
+        )
+        return json.dumps(payload)

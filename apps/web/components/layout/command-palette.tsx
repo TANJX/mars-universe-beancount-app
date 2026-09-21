@@ -7,6 +7,7 @@ import {
   Hash,
   LayoutGrid,
   ListTree,
+  PieChart,
   Receipt,
   Search as SearchIcon,
 } from "lucide-react"
@@ -40,6 +41,13 @@ const NAV: NavItem[] = [
   { href: "/overview", label: "Overview", icon: LayoutGrid, leaderKey: "o" },
   { href: "/plan", label: "Plan", icon: CalendarClock, leaderKey: "p" },
   { href: "/balances", label: "Balances", icon: ListTree, leaderKey: "b" },
+  {
+    href: "/portfolio",
+    label: "Portfolio",
+    icon: PieChart,
+    // `p` belongs to Plan, so Portfolio takes the next letter in its own name.
+    leaderKey: "f",
+  },
   { href: "/income", label: "Income", icon: BarChart3, leaderKey: "i" },
   { href: "/expenses", label: "Expenses", icon: Receipt, leaderKey: "e" },
   { href: "/journal", label: "Journal", icon: BookOpen, leaderKey: "j" },

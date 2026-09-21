@@ -133,3 +133,133 @@ sidebar:
     #   label: "Receivable"
     #   root: "Assets"
     #   accountPath: "Assets:Receivable:Others"
+
+# ============================================================================
+# Investments — annotations for the Portfolio page.
+#
+# Sleeves are DISCOVERED by walking `Assets:Investment:*`; this block only
+# annotates them. Every key is optional: with no `investments:` block the page
+# still renders holdings, allocation and the value-vs-cost series — it just
+# loses the tax chips, the contribution meters and the margin note.
+#
+# Security names and asset classes are NOT configured here. They come from
+# `commodity` directives in the journal, which is where facts about an
+# instrument belong:
+#
+#   2023-11-01 commodity TICKER
+#     name: "Placeholder Index ETF"
+#     asset-class: "us-large"
+#
+# `sleeves`
+#   `account`              — full path of the sleeve. Lookup walks ancestors,
+#                            so an entry covers the sleeve's `:USD` cash leaf
+#                            and any sub-accounts.
+#   `tax`                  — one of roth / traditional / hsa / taxable /
+#                            401k / roth-401k.
+#                            Drives the chip on the sleeve row. Unknown values
+#                            are ignored rather than rejected.
+#   `limit_key`            — contribution bucket this sleeve counts against.
+#                            Sleeves sharing a key share one meter, which is
+#                            how a Roth and a Traditional IRA sum against a
+#                            single annual ceiling.
+#   `margin_free_tranche`  — interest-free margin allowance the broker grants,
+#                            in USD. Cash down to minus this figure renders
+#                            neutral with a tooltip instead of in the
+#                            liability tone; past it, it is real debt.
+#
+# `limits`
+#   Year → limit key → annual ceiling. Keyed by year because statutory limits
+#   change annually and past years must keep reconciling against their own.
+#   A contribution counts toward the `tax-year:` metadata on the transaction
+#   when present, otherwise the calendar year of its date.
+#
+# `cadence`
+#   Limit key → recurring funding, for the "maxes out by …" projection.
+#   `per` is one of day / week / month / quarter / year.
+#
+# `realized`
+#   Income accounts the realized panel reads. Both are negative in Beancount
+#   convention and get flipped for display.
+#
+# `asset_class_labels`
+#   Asset-class slug (from the commodity directives above) → display label.
+#   Unlisted slugs are de-slugified; a commodity with no `asset-class:` groups
+#   under "Unclassified".
+# ============================================================================
+investments:
+  sleeves:
+    # - account: "Assets:Investment:Broker:Roth-IRA"
+    #   tax: roth
+    #   limit_key: ira
+    # - account: "Assets:Investment:Broker:Traditional-IRA"
+    #   tax: traditional
+    #   limit_key: ira
+    # - account: "Assets:Investment:Hsa-Provider:HSA"
+    #   tax: hsa
+    #   limit_key: hsa
+    # - account: "Assets:Investment:Broker:Brokerage"
+    #   tax: taxable
+    #   margin_free_tranche: 1000
+    # - account: "Assets:Investment:Retirement-Plan:Roth-401k"
+    #   tax: 401k
+
+  limits:
+    # 2025: { ira: 7000, hsa: 4300 }
+    # 2026: { ira: 7500, hsa: 4400 }
+
+  cadence:
+    # ira: { amount: 160, per: week }
+    # hsa: { amount: 367, per: month }
+
+  realized:
+    # gains: "Income:Trading:Gains"
+    # dividends: "Income:Trading:Dividends"
+
+  asset_class_labels:
+    # us-large: "US large-cap core"
+    # us-small: "US small-cap"
+    # intl-dev: "Developed intl"
+    # emerging: "Emerging markets"
+    # single-stock: "Single stocks"
+    # crypto: "Crypto"
+    # cash-short: "Cash & short-term"
+
+  # `contributions.payroll_prefixes`
+  #   Income subtrees whose negative leg funds a contribution (pre-tax payroll
+  #   deferrals). Defaults to ["Income:Salary"]. Only used when a transaction
+  #   carries no `contribution:` metadata: every other income leg, including a
+  #   broker match, is ignored by construction so it never counts against an
+  #   IRS limit.
+  contributions:
+    # payroll_prefixes: ["Income:Salary"]
+
+# ============================================================================
+# Planner — the plan grid served by ledger-data-api's `plan_grid` endpoint.
+#
+# `excluded_accounts`
+#   Accounts the grid never shows a row for. Intended for holding / clearing /
+#   forecast-scratchpad accounts whose running balance is noise rather than a
+#   number to act on. Exact paths, no subtree walk. Omit the key to exclude
+#   nothing.
+# ============================================================================
+planner:
+  excluded_accounts:
+    # - "Assets:Checking:Scratch"
+    # - "Assets:Checking:Held-For-Someone-Else"
+
+# ============================================================================
+# Card balance — the `get_balance` endpoint behind the Chrome overlay
+# (packages/card-balance-browser-extension), which passes a lowercase
+# substring like `mybank` and gets back every matching account's balance.
+#
+# `accounts`
+#   Regex fragments matched against the account path. Omit the key and the
+#   endpoint scans the universal buckets below; list it to ADD paths (a
+#   brokerage cash leaf, say), and keep the universal three or they drop out.
+# ============================================================================
+card_balance:
+  accounts:
+    # - "Assets:Checking"
+    # - "Assets:Saving"
+    # - "Liabilities:Credit"
+    # - "Assets:Investment:Broker:Brokerage:USD"

@@ -11,7 +11,7 @@
 //
 // Unrecognized input throws so we surface schema drift loudly during integration.
 
-import type { Amount, Cost, Price } from "@/lib/types/beancount"
+import type { Amount, Cost, Posting, Price } from "@/lib/types/beancount"
 
 export interface ParsedAmount {
   amount: Amount
@@ -86,4 +86,17 @@ export function parseAmount(input: string): ParsedAmount | null {
 function parseNumber(s: string): number {
   // Beancount allows underscores as digit grouping; strip before parseFloat.
   return parseFloat(s.replace(/_/g, ""))
+}
+
+/**
+ * A posting's USD value. Plain USD passes through; other currencies convert
+ * via an explicit `@ USD` price or a `{... USD}` cost basis. A posting we
+ * can't value in USD from its own amount string contributes 0 — note this
+ * means lot postings value at *cost*, not market price.
+ */
+export function postingToUSD(p: Posting): number {
+  if (p.amount.currency === "USD") return p.amount.number
+  if (p.price?.currency === "USD") return p.amount.number * p.price.number
+  if (p.cost?.currency === "USD") return p.amount.number * p.cost.number
+  return 0
 }
