@@ -35,12 +35,9 @@ categorization:
   # Default payment account for credit card payments.
   payment_account: Assets:Pending-Transfer
 
-  # Optional: merchant -> account mapping by regex on description/payee.
-  merchant_patterns:
-    - pattern: "^Lyft"
-      account: Expenses:Transportation:Cab
-
-  # Optional: regexes that mark a transaction as a credit card payment.
-  payment_patterns:
-    - "PAYMENT - THANK YOU"
-    - "AUTOPAY PAYMENT"
+  # `payment_account` is the only key `categorization` supports. Merchant -> account
+  # routing is NOT config-driven: it comes from the merchant map learned off the
+  # existing ledger (extract.py `read_merchant_map`) plus each importer's own rules.
+  # `merchant_patterns` / `payment_patterns` keys were documented here but never
+  # read; they were removed on 2026-09-21. Don't reintroduce them without wiring
+  # a reader in extract.py first.

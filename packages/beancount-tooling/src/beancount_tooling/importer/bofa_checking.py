@@ -21,9 +21,16 @@ class BofACheckingImporter(GeneralImporter):
 
     def get_lines(self, f):
         lines = open(f).readlines()
+        # When BofA has no posted transactions for the requested range it returns a
+        # one-line placeholder ("The time period you have requested to download has
+        # no posted transactions.") instead of an empty table. That file has no blank
+        # separator line, and letting the ValueError escape aborts the entire extract
+        # run, including every other bank.
+        if "\n" not in lines:
+            print(f"[BofA] no transaction table in {f}; treating as no transactions")
+            return []
         split_index = lines.index("\n")
-        lines = lines[split_index + 1 :]
-        return lines
+        return lines[split_index + 1 :]
 
     def handle_transaction(self, row, line):
         trans_desc = titlecase(row["Description"].lower())
@@ -84,8 +91,9 @@ class BofACheckingImporter(GeneralImporter):
         ):
             other_account = "Assets:Pending-Transfer"
 
-        else:
-            flag = flags.FLAG_WARNING
+        # No `else` clause setting FLAG_WARNING here on purpose: the flag answers
+        # "is this posted at the bank?", and BofA's stmt.csv only exports posted rows.
+        # An un-determined second leg is signalled by Equity:FIXME alone.
 
         postings.append(
             data.Posting(
