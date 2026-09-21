@@ -3,6 +3,7 @@
 // fields Fava adds in newer versions that we don't read.
 
 import { z } from "zod"
+import { asTaxTreatment } from "@/lib/config/investments"
 import { parseAmount, postingToUSD } from "@/lib/transform/parse-amount"
 import type {
   Posting as DomainPosting,
@@ -152,6 +153,149 @@ export const LedgerDataSchema = z
   .loose()
 
 export const CommoditiesSchema = z.array(z.unknown()) // shape varies; we don't validate inner
+
+// ─── Portfolio (LedgerDataApi `portfolio` endpoint) ───────────────────────
+// GET /api/ext/portfolio?asof=YYYY-MM-DD. One round trip instead of six BQL
+// calls: the value-over-time series needs the server-side price map anyway.
+//
+// Holdings are always as-of the requested date; the global period scopes only
+// `series` and `realized`. Allocation is derived client-side from
+// `sleeves[].holdings` — the endpoint deliberately does not send it.
+//
+// Nullable fields are the ones that genuinely have no answer: a commodity with
+// no `asset-class:` metadata, a sleeve with no configured tax treatment or
+// margin allowance, a ledger with no price directives yet.
+
+const NullableNumber = z
+  .number()
+  .nullable()
+  .optional()
+  .transform((v) => v ?? null)
+
+const NullableString = z
+  .string()
+  .nullable()
+  .optional()
+  .transform((v) => v ?? null)
+
+/** Tax treatment as configured in ui.yaml; unknown values degrade to null
+ * rather than failing the payload. */
+const TaxTreatmentSchema = z
+  .string()
+  .nullable()
+  .optional()
+  .transform((v) => asTaxTreatment(v))
+
+const PortfolioHoldingSchema = z
+  .object({
+    ticker: z.string(),
+    /** Commodity `name:` metadata; falls back to the ticker server-side. */
+    name: z.string(),
+    /** Commodity `asset-class:` metadata; null groups under "Unclassified". */
+    assetClass: NullableString,
+    units: z.number(),
+    price: z.number(),
+    cost: z.number(),
+    value: z.number(),
+  })
+  .loose()
+
+/** A position held down to zero. Kept visible behind a disclosure: a sold-off
+ * overlap is a decision, not noise. */
+const PortfolioClosedPositionSchema = z
+  .object({
+    ticker: z.string(),
+    name: z.string(),
+    assetClass: NullableString,
+  })
+  .loose()
+
+const PortfolioSleeveSchema = z
+  .object({
+    /** Slug of the account path; stable row key. */
+    id: z.string(),
+    account: z.string(),
+    label: z.string(),
+    tax: TaxTreatmentSchema,
+    limitKey: NullableString,
+    /** The sleeve's `:USD` leaf. Negative means margin drawn. */
+    cash: z.number(),
+    marginFreeTranche: NullableNumber,
+    securitiesCost: z.number(),
+    securitiesValue: z.number(),
+    cost: z.number(),
+    value: z.number(),
+    holdings: z.array(PortfolioHoldingSchema).default([]),
+    closed: z.array(PortfolioClosedPositionSchema).default([]),
+  })
+  .loose()
+
+const PortfolioTotalsSchema = z
+  .object({
+    cost: z.number(),
+    value: z.number(),
+    cash: z.number(),
+    securitiesValue: z.number(),
+    /** Count of open positions across every sleeve. */
+    positions: z.number(),
+  })
+  .loose()
+
+const PortfolioSeriesPointSchema = z
+  .object({
+    /** Month end, ISO. */
+    date: z.string(),
+    cost: z.number(),
+    value: z.number(),
+  })
+  .loose()
+
+/** Sign-flipped server-side to reader convention: gains read positive. */
+const PortfolioRealizedYearSchema = z
+  .object({
+    year: z.number(),
+    gains: z.number(),
+    dividends: z.number(),
+  })
+  .loose()
+
+const PortfolioContributionSchema = z
+  .object({
+    /** Limit key from ui.yaml; sleeves sharing it share this meter. */
+    key: z.string(),
+    label: z.string(),
+    used: z.number(),
+    limit: z.number(),
+    /** Human-readable funding cadence, e.g. "$160 / week". */
+    cadence: NullableString,
+  })
+  .loose()
+
+export const PortfolioSchema = z
+  .object({
+    asof: z.string(),
+    /** Newest price directive covering held commodities. Market value is only
+     * as fresh as this: show the date rather than implying live quotes. */
+    priceAsof: NullableString,
+    staleDays: NullableNumber,
+    totals: PortfolioTotalsSchema,
+    sleeves: z.array(PortfolioSleeveSchema).default([]),
+    series: z.array(PortfolioSeriesPointSchema).default([]),
+    realized: z.array(PortfolioRealizedYearSchema).default([]),
+    contributions: z.array(PortfolioContributionSchema).default([]),
+  })
+  .loose()
+
+export type Portfolio = z.infer<typeof PortfolioSchema>
+export type PortfolioTotals = z.infer<typeof PortfolioTotalsSchema>
+export type PortfolioSleeve = z.infer<typeof PortfolioSleeveSchema>
+export type PortfolioHolding = z.infer<typeof PortfolioHoldingSchema>
+export type PortfolioClosedPosition = z.infer<
+  typeof PortfolioClosedPositionSchema
+>
+export type PortfolioSeriesPoint = z.infer<typeof PortfolioSeriesPointSchema>
+export type PortfolioRealizedYear = z.infer<typeof PortfolioRealizedYearSchema>
+export type PortfolioContribution = z.infer<typeof PortfolioContributionSchema>
 
 // ─── Wire → Domain transformers ───────────────────────────────────────────
 

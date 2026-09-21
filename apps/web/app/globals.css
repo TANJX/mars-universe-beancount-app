@@ -80,6 +80,21 @@
   --sidebar-accent-foreground: oklch(0.214 0.009 43.1);
   --sidebar-border: oklch(0.922 0.005 34.3);
   --sidebar-ring: oklch(0.714 0.014 41.2);
+
+  /* Allocation ramp — a 7-step sequential scale for the portfolio's stacked
+   * share bar. This design system has no categorical palette: --chart-1..5 is
+   * a near-monochrome warm-neutral sequence that does not flip between
+   * themes. Rather than import a foreign rainbow, the ramp extends the
+   * system's own hue (~40) to 7 steps and flips for dark mode, so the largest
+   * slice always carries the most weight against its surface. Identity is
+   * carried by the legend's text; the ramp only reinforces rank. */
+  --alloc-1: oklch(0.32 0.02 40);
+  --alloc-2: oklch(0.41 0.019 40);
+  --alloc-3: oklch(0.5 0.018 40);
+  --alloc-4: oklch(0.59 0.016 40);
+  --alloc-5: oklch(0.68 0.013 40);
+  --alloc-6: oklch(0.77 0.01 40);
+  --alloc-7: oklch(0.86 0.007 40);
 }
 
 .dark {
@@ -114,6 +129,15 @@
   --sidebar-accent-foreground: oklch(0.986 0.002 67.8);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.547 0.021 43.1);
+
+  /* Ramp inverted: light-on-dark, so rank still reads as weight. */
+  --alloc-1: oklch(0.9 0.014 40);
+  --alloc-2: oklch(0.82 0.014 40);
+  --alloc-3: oklch(0.74 0.014 40);
+  --alloc-4: oklch(0.66 0.014 40);
+  --alloc-5: oklch(0.57 0.014 40);
+  --alloc-6: oklch(0.48 0.013 40);
+  --alloc-7: oklch(0.39 0.012 40);
 }
 
 @layer base {

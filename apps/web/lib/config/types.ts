@@ -56,10 +56,73 @@ export interface SidebarConfig {
   bookmarks: Bookmark[]
 }
 
+// ── Investments ──────────────────────────────────────────────────────────
+/**
+ * Tax treatment of a sleeve. A closed vocabulary because the page renders one
+ * chip per value; the *accounts* carrying each treatment are user config, so
+ * no ledger-specific path ever needs to appear here.
+ */
+export const TAX_TREATMENTS = [
+  "roth",
+  "traditional",
+  "hsa",
+  "taxable",
+  "401k",
+  "roth-401k",
+] as const
+
+export type TaxTreatment = (typeof TAX_TREATMENTS)[number]
+
+/**
+ * Annotation for one investment sleeve. Sleeves are *discovered* server-side
+ * by walking `Assets:Investment:*` — this only decorates them, so a sleeve
+ * missing from config still renders, just without a tax chip or a meter.
+ */
+export interface SleeveAnnotation {
+  account: AccountPath
+  /** Null when unset or when the configured value is not a known treatment. */
+  tax: TaxTreatment | null
+  /** Contribution bucket this sleeve counts against (e.g. two IRAs sharing
+   * one annual ceiling). Keys the `limits` and `cadence` maps below. */
+  limitKey: string | null
+  /** Interest-free margin allowance the broker grants, in USD. A cash balance
+   * down to −`marginFreeTranche` is the allowance in use, not debt. */
+  marginFreeTranche: number | null
+}
+
+/** Recurring funding, used for the "maxes out by …" projection. */
+export interface ContributionCadence {
+  amount: number
+  /** Cadence unit as written in config ("week", "month", …). */
+  per: string
+}
+
+/** Ledger-specific income accounts the realized panel reads. */
+export interface RealizedAccounts {
+  gains: AccountPath | null
+  dividends: AccountPath | null
+}
+
+export interface InvestmentsConfig {
+  /** Account path → annotation. Lookup walks ancestors, so an entry on a
+   * parent covers its whole subtree. */
+  sleeves: Record<AccountPath, SleeveAnnotation>
+  /** Calendar year (as a string) → limit key → annual ceiling. Keyed by year
+   * because contribution limits change annually and history must stay right. */
+  limits: Record<string, Record<string, number>>
+  /** Limit key → funding cadence. */
+  cadence: Record<string, ContributionCadence>
+  realized: RealizedAccounts
+  /** Asset-class slug → display label. The slugs come from the ledger's
+   * `commodity` directives, so the vocabulary is not fixed in app code. */
+  assetClassLabels: Record<string, string>
+}
+
 // ── Resolved (merged user + defaults) ────────────────────────────────────
 export interface ResolvedUI {
   branding: Branding
   accounts: AccountsConfig
   merchants: MerchantRegistry
   sidebar: SidebarConfig
+  investments: InvestmentsConfig
 }
