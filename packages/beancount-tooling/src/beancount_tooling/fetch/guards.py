@@ -29,6 +29,8 @@ from beancount_tooling.fetch.config import AccountConfig
 BOFA_PLACEHOLDER_TEXT = "has no posted transactions"
 DATE_COLUMNS = ("Posted Date", "Date")
 DATE_FORMAT = "%m/%d/%Y"
+# TD exports ISO dates (confirmed 2026-10-02).
+DATE_FORMATS = (DATE_FORMAT, "%Y-%m-%d")
 # Rows that are statement furniture rather than transactions. Their date tracks
 # the requested range, so they legitimately change between exports.
 IGNORED_ROW_PREFIXES = ("Beginning balance as of",)
@@ -113,10 +115,12 @@ class Table:
 
 
 def _parse_date(value: str) -> date | None:
-    try:
-        return datetime.strptime(value.strip(), DATE_FORMAT).date()  # noqa: DTZ007 (date only)
-    except ValueError:
-        return None
+    for fmt in DATE_FORMATS:
+        try:
+            return datetime.strptime(value.strip(), fmt).date()  # noqa: DTZ007 (date only)
+        except ValueError:
+            continue
+    return None
 
 
 def parse_table(text: str) -> Table:

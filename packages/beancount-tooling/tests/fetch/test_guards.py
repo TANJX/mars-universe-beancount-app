@@ -276,3 +276,17 @@ def test_sanity_latest_date(fixture_text):
     assert not bad.ok and "before" in bad.message
     assert guards.check_latest_date(guards.Table(), t).ok
     assert not guards.check_latest_date(t, guards.Table()).ok
+
+
+def test_parse_table_reads_iso_dates():
+    # TD exports ISO dates, newest first.
+    text = (
+        "Date,Description,Debit,Credit,Account Running Balance\n"
+        "2030-09-30,DEMO PAYROLL,,10.00,30.00\n"
+        "2030-09-01,DEMO SHOP,5.00,,20.00\n"
+    )
+    table = guards.parse_table(text)
+    assert len(table.rows) == 2
+    assert (
+        str(table.first_date) == "2030-09-01" and str(table.last_date) == "2030-09-30"
+    )

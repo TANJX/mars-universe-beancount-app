@@ -299,7 +299,11 @@ def run_bank(
     except PasswordRejected:
         return _bank_failure(bank, "password rejected (not retried)")
     except LoginTimeout:
-        return _bank_failure(bank, "login timeout")
+        outcomes = _bank_failure(bank, "login timeout")
+        shot = failure_screenshot(page, run_dir / f"{bank.key}-login-timeout.png")
+        if shot and outcomes:
+            outcomes[0].notes = [f"screenshot: {shot}"]
+        return outcomes
     except CredentialError as e:
         return _bank_failure(bank, f"credentials: {e}")
     except NotImplementedError:
