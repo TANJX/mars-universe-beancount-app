@@ -79,7 +79,6 @@ class AppleImporter(GeneralImporter):
                 account_name = prompt_user_select(
                     trans_merchant,
                     info=[row["Transaction Date"], trans_merchant, trans_amt],
-                    categories=self.expense_categories,
                     all_accounts=self.all_accounts,
                 )
                 self.merchant_map[trans_merchant] = account_name
