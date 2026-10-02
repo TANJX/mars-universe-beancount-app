@@ -24,3 +24,9 @@ def run_backfill_prices():
     from beancount_tooling.backfill_prices import main
 
     raise SystemExit(main())
+
+
+def run_fetch():
+    from beancount_tooling.fetch.cli import main
+
+    raise SystemExit(main())

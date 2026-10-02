@@ -20,6 +20,10 @@ extract:
     uv run extract
     just format
 
+# Download bank statement CSVs into statements/ (config: $LEDGER_DIR/config/fetch.yaml)
+fetch *args:
+    uv run fetch {{args}}
+
 # Re-align all .bean files in LEDGER_DIR (matches .vscode beancountFormatter prefixWidth=45).
 # Excludes auto-generated directories (tickers/ written by update-stock-price).
 format:

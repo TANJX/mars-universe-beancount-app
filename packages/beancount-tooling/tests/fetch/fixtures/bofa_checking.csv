@@ -1,0 +1,11 @@
+Description,,Summary Amt.
+Beginning balance as of 09/01/2030,,"1,000.00"
+Total credits,,"2,500.00"
+Total debits,,"-300.00"
+Ending balance as of 09/20/2030,,"3,200.00"
+
+Date,Description,Amount,Running Bal.
+09/01/2030,Beginning balance as of 09/01/2030,,"1,000.00"
+09/03/2030,"EXAMPLE PAYROLL DES:PAYROLL ID:000000 INDN:A SAMPLE CO ID:0000000000 PPD","2,500.00","3,500.00"
+09/10/2030,"Zelle payment to Sample Person Conf# abc123","-100.00","3,400.00"
+09/20/2030,"DEMO UTILITY CO DES:BILL ID:0000 WEB","-200.00","3,200.00"
