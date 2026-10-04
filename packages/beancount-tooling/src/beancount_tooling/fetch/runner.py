@@ -315,6 +315,10 @@ def run_bank(
         # constant to tune). Other exceptions may echo page or call details, so
         # only their type is shown.
         notes = [str(e)] if isinstance(e, SiteStepError) else []
+        if type(e).__name__ == "TimeoutError":
+            # Playwright's first line names the action ("Page.goto: Timeout
+            # 30000ms exceeded."); call-log lines and typed values are dropped.
+            notes = [str(e).splitlines()[0][:200]]
         if shot:
             notes.append(f"screenshot: {shot}")
         if notes and outcomes:

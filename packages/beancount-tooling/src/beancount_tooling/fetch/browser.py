@@ -32,6 +32,11 @@ if TYPE_CHECKING:
     from beancount_tooling.fetch.credentials import CredentialSource
 
 TIMEZONE = "America/New_York"
+# Bank pages load slowly through the proxy (BofA's sign-in took 16 s on
+# 2026-10-05 and a run failed on Playwright's 30 s default), so the context
+# defaults are raised. Site steps keep their own shorter timeouts.
+NAVIGATION_TIMEOUT_MS = 90_000
+ACTION_TIMEOUT_MS = 45_000
 STAGING_ROOT_NAME = "bank-fetch"
 # Every field a person can type into: usernames, passcodes (including one a
 # "show passcode" toggle switched to type=text), one-time codes.
@@ -159,6 +164,8 @@ def open_context(profile_dir: Path, **overrides: Any) -> Iterator[BrowserContext
     clear_download_history(profile_dir)
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(str(profile_dir), **options)
+        context.set_default_navigation_timeout(NAVIGATION_TIMEOUT_MS)
+        context.set_default_timeout(ACTION_TIMEOUT_MS)
         if os.environ.get("FETCH_DEBUG"):
             attach_debug_log(context, Path(os.environ["FETCH_DEBUG"]))
         try:
@@ -374,7 +381,7 @@ def login(
        MFA -> announce once, notify, keep polling.
     4. Deadline (timeout_minutes) -> LoginTimeout.
     """
-    page.goto(spec.overview_url)
+    page.goto(spec.overview_url, wait_until="domcontentloaded")
     if _check(spec.is_logged_in, page):
         return
 

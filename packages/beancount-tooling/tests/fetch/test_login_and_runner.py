@@ -40,7 +40,7 @@ class FakePage:
         self.submitted = 0
         self.urls = []
 
-    def goto(self, url):
+    def goto(self, url, **kw):
         self.urls.append(url)
 
     def advance(self):
@@ -157,7 +157,16 @@ class _FakeChromium:
 
     def launch_persistent_context(self, user_data_dir, **options):
         self.calls.append((user_data_dir, options))
-        return type("Ctx", (), {"close": lambda self: None, "pages": []})()
+        return type(
+            "Ctx",
+            (),
+            {
+                "close": lambda self: None,
+                "pages": [],
+                "set_default_navigation_timeout": lambda self, ms: None,
+                "set_default_timeout": lambda self, ms: None,
+            },
+        )()
 
 
 class _FakePlaywright:
