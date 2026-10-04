@@ -91,6 +91,14 @@ def _mutate(raw, fn):
             "month",
         ),
         (lambda f: f["banks"]["bofa"]["accounts"][0].update(extra=1), "unknown key"),
+        (
+            lambda f: f["banks"]["bofa"]["accounts"][0].update(account_number="12a"),
+            "digit string",
+        ),
+        (
+            lambda f: f["banks"]["bofa"]["accounts"][0].update(history_start="2026"),
+            "must be a date",
+        ),
         (lambda f: f["banks"]["bofa"].update(accounts=[]), "non-empty list"),
         (lambda f: f["banks"]["bofa"].pop("credentials"), "credentials: missing"),
         (

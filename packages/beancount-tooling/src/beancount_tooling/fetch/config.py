@@ -20,6 +20,8 @@ the ledger's config, never in this package. Schema:
               last4: "1234"        # or last5; "TODO" is accepted as not-yet-known
               rolling: <file name> # overwritten each run after the guards pass
               archive: "{YYYY}-{MM}.csv"  # optional closed-statement name template
+              account_number: "123"  # brokerages that address accounts by number
+              history_start: 2026-01-01  # optional: oldest activity a cumulative fetcher reads
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ import calendar
 import re
 import string
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +40,7 @@ from beancount_tooling.paths import get_config_dir
 
 PLACEHOLDER = "TODO"
 CREDENTIAL_SOURCES = ("dashlane", "keychain", "env")
-ACCOUNT_KINDS = ("checking", "credit", "saving")
+ACCOUNT_KINDS = ("checking", "credit", "saving", "investment")
 ARCHIVE_FIELDS = ("MonthName", "YYYY", "MM")
 DEFAULT_LOGIN_TIMEOUT_MINUTES = 5
 
@@ -72,6 +75,8 @@ class AccountConfig:
     archive: str | None = None
     last4: str | None = None
     last5: str | None = None
+    account_number: str | None = None
+    history_start: date | None = None
     # The matching accounts[] entry from config/extract.yaml (importer, bank, options).
     extract: dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
 
@@ -187,7 +192,16 @@ def _parse_account(
     where = f"fetch.banks.{bank}.accounts[{index}]"
     if not isinstance(raw, dict):
         raise ConfigError(f"{where}: must be a mapping")
-    unknown = set(raw) - {"path", "kind", "last4", "last5", "rolling", "archive"}
+    unknown = set(raw) - {
+        "path",
+        "kind",
+        "last4",
+        "last5",
+        "rolling",
+        "archive",
+        "account_number",
+        "history_start",
+    }
     if unknown:
         raise ConfigError(f"{where}: unknown key(s) {', '.join(sorted(unknown))}")
 
@@ -218,6 +232,15 @@ def _parse_account(
     if last5 is not None:
         last5 = _validate_digits(last5, 5, f"{where}.last5")
 
+    account_number = raw.get("account_number")
+    if account_number is not None:
+        account_number = str(account_number)
+        if not re.fullmatch(r"\d+", account_number):
+            raise ConfigError(f"{where}.account_number: must be a quoted digit string")
+    history_start = raw.get("history_start")
+    if history_start is not None and not isinstance(history_start, date):
+        raise ConfigError(f"{where}.history_start: must be a date (YYYY-MM-DD)")
+
     rolling = _validate_file_name(raw.get("rolling"), f"{where}.rolling")
     archive = raw.get("archive")
     if archive is not None:
@@ -236,6 +259,8 @@ def _parse_account(
         archive=archive,
         last4=last4,
         last5=last5,
+        account_number=account_number,
+        history_start=history_start,
         extract=extract_accounts[path],
     )
 

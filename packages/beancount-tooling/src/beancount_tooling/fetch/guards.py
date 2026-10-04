@@ -43,6 +43,7 @@ IGNORED_ROW_PREFIXES = ("Beginning balance as of",)
 REF_KEY_COLUMNS = {
     "AmexImporter": "Reference",
     "BofAImporter": "Reference Number",
+    "RobinhoodInvestmentImporter": "Id",
 }
 AMOUNT_COLUMN = "Amount"
 
@@ -219,7 +220,10 @@ def parse_with_importer(
         importer = importer or build_importer(account, payment_account)
         if not identify.identify([importer], str(staged)):
             return ParseResult(False, 0, f"importer did not identify {staged.name}")
-        entries = importer.extract(str(staged), [])
+        # Importers that skip rows by design (a cutover date, rows booked on
+        # another account's file) validate every row instead of counting entries.
+        check = getattr(importer, "check_file", None)
+        entries = check(str(staged)) if check else importer.extract(str(staged), [])
     except Exception as e:  # noqa: BLE001 (importer bugs must not abort other accounts)
         return ParseResult(False, 0, f"importer failed: {type(e).__name__}: {e}")
     count = len(entries)

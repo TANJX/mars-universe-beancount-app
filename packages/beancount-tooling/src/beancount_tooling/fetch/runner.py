@@ -7,6 +7,7 @@ accounts; a guard failure skips that one file. Nothing aborts the run.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import tempfile
 import traceback
@@ -31,6 +32,17 @@ from beancount_tooling.fetch.ledger import (
 )
 
 MAX_LISTED_ROWS = 10
+# Playwright error messages include a call log with request headers.
+SECRET_LINE = re.compile(
+    r"^\s*-?\s*(authorization|cookie|set-cookie|x-[\w-]*token)\s*:", re.IGNORECASE
+)
+BEARER = re.compile(r"(Bearer|Basic)\s+\S+", re.IGNORECASE)
+
+
+def scrub(text: str) -> str:
+    """Drop header lines and bearer values from text printed in the summary."""
+    lines = [line for line in text.splitlines() if not SECRET_LINE.match(line)]
+    return BEARER.sub(r"\1 [redacted]", "\n".join(lines))
 
 
 @dataclass
@@ -47,6 +59,9 @@ class Outcome:
 
 
 def account_label(account: AccountConfig) -> str:
+    if account.type == "investment":
+        # Several accounts share one statements dir; the file names the account.
+        return f"{account.name} {Path(account.rolling).stem}"
     return (
         account.name if account.type == "credit" else f"{account.name} {account.type}"
     )
@@ -314,11 +329,11 @@ def run_bank(
         # Only step errors carry a message built to be printable (step name and
         # constant to tune). Other exceptions may echo page or call details, so
         # only their type is shown.
-        notes = [str(e)] if isinstance(e, SiteStepError) else []
+        notes = [scrub(str(e))] if isinstance(e, SiteStepError) else []
         if type(e).__name__ == "TimeoutError":
             # Playwright's first line names the action ("Page.goto: Timeout
             # 30000ms exceeded."); call-log lines and typed values are dropped.
-            notes = [str(e).splitlines()[0][:200]]
+            notes = [scrub(str(e).splitlines()[0][:200])]
         if shot:
             notes.append(f"screenshot: {shot}")
         if notes and outcomes:
@@ -350,7 +365,7 @@ def run_bank(
             continue
         except Exception as e:  # noqa: BLE001 (isolate failures)
             shot = failure_screenshot(page, staging / "failure.png")
-            notes = [traceback.format_exc().rstrip()]
+            notes = [scrub(traceback.format_exc().rstrip())]
             if shot:
                 notes.append(f"screenshot: {shot}")
             outcomes.append(

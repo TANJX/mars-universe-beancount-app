@@ -85,9 +85,16 @@ def test_dashlane_ambiguous_match_raises(monkeypatch, have_tools, capsys, caplog
 
 
 def test_dashlane_empty_value_raises(monkeypatch, have_tools):
-    monkeypatch.setattr(credentials.subprocess, "run", FakeRun((0, "\n")))
-    with pytest.raises(CredentialError, match="empty"):
+    monkeypatch.setattr(credentials.subprocess, "run", FakeRun((0, "\n"), (0, "\n")))
+    with pytest.raises(CredentialError, match="login.*empty"):
         DashlaneSource("item-123").username()
+
+
+def test_dashlane_username_falls_back_to_email(monkeypatch, have_tools):
+    fake = FakeRun((1, ""), (0, LOGIN + "\n"))
+    monkeypatch.setattr(credentials.subprocess, "run", fake)
+    assert DashlaneSource("item-123").username() == LOGIN
+    assert [argv[4] for argv, _ in fake.calls] == ["login", "email"]
 
 
 def test_dashlane_missing_binary(monkeypatch):

@@ -25,6 +25,7 @@ REGISTRY: dict[str, str] = {
     "bofa": "beancount_tooling.fetch.banks.bofa",
     "amex": "beancount_tooling.fetch.banks.amex",
     "td": "beancount_tooling.fetch.banks.td",
+    "robinhood": "beancount_tooling.fetch.banks.robinhood",
 }
 
 

@@ -54,7 +54,7 @@ def _single_value(raw: str, what: str) -> str:
 
 
 class DashlaneSource(CredentialSource):
-    """Dashlane CLI: `dcli p id=<id> -f login|password -o console`.
+    """Dashlane CLI: `dcli p id=<id> -f login|email|password -o console`.
 
     stdin and stderr are inherited so dcli can prompt for the master password on
     the terminal; only stdout (the requested field) is captured.
@@ -93,7 +93,15 @@ class DashlaneSource(CredentialSource):
         return _single_value(proc.stdout or "", what)
 
     def username(self) -> str:
-        return self._read("login")
+        # Some items (often older ones) keep the username in the email field
+        # and leave login empty; dcli then fails on `-f login`.
+        try:
+            return self._read("login")
+        except CredentialError as login_error:
+            try:
+                return self._read("email")
+            except CredentialError:
+                raise login_error from None
 
     def password(self) -> str:
         return self._read("password")

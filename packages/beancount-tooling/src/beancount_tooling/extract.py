@@ -29,6 +29,7 @@ from beancount_tooling.importer.discover_saving import DiscoverSavingImporter
 from beancount_tooling.importer.wells_fargo_checking import WellsFargoCheckingImporter
 from beancount_tooling.importer.td_checking import TDCheckingImporter
 from beancount_tooling.importer.robinhood import RobinhoodImporter
+from beancount_tooling.importer.robinhood_investment import RobinhoodInvestmentImporter
 
 
 def load_config():
@@ -128,6 +129,7 @@ def build_importer(
         "WellsFargoCheckingImporter": WellsFargoCheckingImporter,
         "TDCheckingImporter": TDCheckingImporter,
         "RobinhoodImporter": RobinhoodImporter,
+        "RobinhoodInvestmentImporter": RobinhoodInvestmentImporter,
     }
 
     importer_cls = importer_classes[importer_class]

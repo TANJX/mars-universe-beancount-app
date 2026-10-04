@@ -244,7 +244,7 @@ def test_failure_screenshot_masks_every_text_field(tmp_path):
 
 
 def test_registry_resolves_fetchers():
-    assert set(REGISTRY) == {"bofa", "amex", "td"}
+    assert set(REGISTRY) == {"bofa", "amex", "td", "robinhood"}
     for key in REGISTRY:
         cls = get_fetcher(key)
         assert issubclass(cls, Fetcher) and cls.key == key and cls.domain
@@ -792,3 +792,20 @@ def test_money_parsers():
     snap = "- text: Posted Charges $29.63\n- text: Total Balance\n- text: $219.07"
     assert parse_total_balance(snap) == Decimal("219.07")
     assert parse_total_balance("- text: Posted Charges $29.63") is None
+
+
+def test_scrub_drops_headers_and_bearer_values():
+    from beancount_tooling.fetch.runner import scrub
+
+    text = (
+        "TimeoutError: APIRequestContext.get: Timeout 30000ms exceeded.\n"
+        "Call log:\n"
+        "  - GET https://api.example/orders/\n"
+        "    - authorization: Bearer abc.def.ghi\n"
+        "    - cookie: session_id=xyz\n"
+        "token was Bearer zzz.yyy"
+    )
+    out = scrub(text)
+    assert "abc.def" not in out and "session_id" not in out and "zzz" not in out
+    assert "GET https://api.example/orders/" in out
+    assert "Bearer [redacted]" in out
