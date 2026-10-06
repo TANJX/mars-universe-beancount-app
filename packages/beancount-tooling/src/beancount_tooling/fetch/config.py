@@ -18,6 +18,7 @@ the ledger's config, never in this package. Schema:
             - path: <type>/<name>  # must match an accounts[].path in config/extract.yaml
               kind: checking       # optional, defaults to <type>
               last4: "1234"        # or last5; "TODO" is accepted as not-yet-known
+              overview_name: "<nickname>"  # optional: the account's link text on the bank's overview
               rolling: <file name> # overwritten each run after the guards pass
               archive: "{YYYY}-{MM}.csv"  # optional closed-statement name template
               account_number: "123"  # brokerages that address accounts by number
@@ -75,6 +76,7 @@ class AccountConfig:
     archive: str | None = None
     last4: str | None = None
     last5: str | None = None
+    overview_name: str | None = None
     account_number: str | None = None
     history_start: date | None = None
     # The matching accounts[] entry from config/extract.yaml (importer, bank, options).
@@ -197,6 +199,7 @@ def _parse_account(
         "kind",
         "last4",
         "last5",
+        "overview_name",
         "rolling",
         "archive",
         "account_number",
@@ -232,6 +235,12 @@ def _parse_account(
     if last5 is not None:
         last5 = _validate_digits(last5, 5, f"{where}.last5")
 
+    overview_name = raw.get("overview_name")
+    if overview_name is not None and (
+        not isinstance(overview_name, str) or not overview_name.strip()
+    ):
+        raise ConfigError(f"{where}.overview_name: must be a non-empty string")
+
     account_number = raw.get("account_number")
     if account_number is not None:
         account_number = str(account_number)
@@ -259,6 +268,7 @@ def _parse_account(
         archive=archive,
         last4=last4,
         last5=last5,
+        overview_name=overview_name.strip() if overview_name else None,
         account_number=account_number,
         history_start=history_start,
         extract=extract_accounts[path],

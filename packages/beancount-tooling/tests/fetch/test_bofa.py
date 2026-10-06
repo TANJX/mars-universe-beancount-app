@@ -89,6 +89,29 @@ def test_account_digits_come_from_config(ledger_dir):
         assert pattern.search(f"Some Account - {account.last_digits}")
 
 
+@pytest.mark.parametrize(
+    "label,matches",
+    [
+        ("Demo Checking Account", True),
+        (" demo checking account ", True),  # whitespace and case
+        ("Demo Checking Account 2", False),
+        ("Your special offer! for Demo Checking Account", False),
+    ],
+)
+def test_account_link_matcher_uses_overview_name(label, matches):
+    account = _card(overview_name="Demo Checking Account")
+    assert bool(bofa.account_link_matcher(account).search(label)) is matches
+
+
+def test_account_link_matcher_escapes_overview_name():
+    account = _card(overview_name="VISA (Travel) + 1")
+    assert bofa.account_link_matcher(account).search("VISA (Travel) + 1")
+
+
+def test_account_link_matcher_falls_back_to_digits():
+    assert bofa.account_link_matcher(_card()).search("Demo Card - 1111")
+
+
 # --- statement periods -------------------------------------------------------
 
 

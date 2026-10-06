@@ -1,7 +1,8 @@
 """BofA fetcher: one login, then checking and credit cards from the overview.
 
 Flow per account:
-    overview -> account link (matched by the last digits in fetch.yaml)
+    overview -> account link (matched by `overview_name` in fetch.yaml, else
+    by the last digits)
     -> Download -> current period -> file type "Microsoft Excel"
     -> Download Transactions, saved under the account's rolling name.
 For accounts with an `archive` template, the period dropdown also lists closed
@@ -45,7 +46,8 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 # Accounts overview. Without a session BofA redirects it to the sign-in form.
-OVERVIEW_URL = (  # UNVERIFIED
+# Since 2026-10-07 it redirects on to the redesigned /accounts-home/ page.
+OVERVIEW_URL = (
     "https://secure.bankofamerica.com/myaccounts/brain/redirect.go"
     "?target=accountsoverview"
 )
@@ -57,8 +59,15 @@ LOGIN_USERNAME_LABEL = re.compile(r"^User ID", re.IGNORECASE)
 LOGIN_PASSWORD_LABEL = re.compile(r"^Password", re.IGNORECASE)
 LOGIN_SUBMIT_BUTTON = re.compile(r"^(Log In|Sign In)$", re.IGNORECASE)
 
-# Logged-in marker: the sign-out control on every authenticated page.
-LOGGED_IN_MARKER = re.compile(r"^(Log Out|Sign Out)$", re.IGNORECASE)  # UNVERIFIED
+# Logged-in marker: the sign-out control on every authenticated page
+# (confirmed 2026-10-07: a "Log out" button).
+LOGGED_IN_MARKER = re.compile(r"^(Log Out|Sign Out)$", re.IGNORECASE)
+
+# One-time modal over the redesigned overview (seen 2026-10-07). It is
+# aria-modal, so while it is open every other control, the logged-in marker
+# included, is hidden from role queries and login() would poll until timeout.
+WELCOME_DIALOG = re.compile(r"^Welcome to Online Banking", re.IGNORECASE)
+WELCOME_DISMISS = re.compile(r"^Continue$", re.IGNORECASE)
 
 # MFA challenge (SMS code or push approval), matched against visible text.
 MFA_TEXT = re.compile(  # UNVERIFIED
@@ -74,16 +83,23 @@ REJECTED_TEXT = re.compile(  # UNVERIFIED
     re.IGNORECASE,
 )
 
-# Overview: one link per account whose accessible name ends with the last
-# digits ("Some Account - 1234"). Formatted with the regex-escaped digits.
-# Confirmed 2026-10-02: "<Nickname> Account - 1234", "VISA <Name> - 1234".
-# Each account also has "Show Quick View for <name>" (and sometimes "Show
-# <offer> for <name>") javascript links ending in the same digits; only the
-# real account link goes to target=acctDetails.
+# Overview: one link per account, going to target=acctDetails.
+# Redesigned overview (confirmed 2026-10-07): the link text is the nickname
+# alone ("<Nickname> Account", "VISA <Name>"), with no digits anywhere on
+# the page, so accounts are matched by `overview_name` in fetch.yaml. Old
+# overview (2026-10-02): "<Nickname> Account - 1234", matched by the digits
+# with ACCOUNT_LINK_TEMPLATE; still used when overview_name is not set.
 ACCOUNT_LINK_TEMPLATE = r"(?:-|\.\.\.|x|\s)\s*{digits}\s*$"
 ACCOUNT_LINK_HREF = "target=acctDetails"
-# The overview row shows the balance as the first money text after the account
-# link ("$2,040.36"; a credit card shows the amount owed).
+# The account's row on the overview: div.account-wrapper on the redesign
+# (link, then "Current Balance $2,040.36"), li/tr/AccountItem before it.
+ACCOUNT_ROW_XPATH = (
+    "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '),"
+    " ' account-wrapper ') or self::li or self::tr"
+    " or contains(@class,'AccountItem')][1]"
+)
+# The row shows the balance as the first money text after the account link
+# ("$2,040.36"; a credit card shows the amount owed).
 MONEY_TEXT = re.compile(r"(?P<neg>-)?\$(?P<amount>\d[\d,]*\.\d{2})")
 # Activity page with nothing in the current period (confirmed 2026-10-02 on a
 # credit card): no download link is offered at all.
@@ -155,6 +171,14 @@ class AccountNotFound(RuntimeError):
 # ---------------------------------------------------------------------------
 # Pure helpers (unit-tested)
 # ---------------------------------------------------------------------------
+
+
+def account_link_matcher(account: AccountConfig) -> re.Pattern[str]:
+    """Regex for the account's overview link name: exactly its overview_name
+    when set, else a name ending in its last digits."""
+    if account.overview_name:
+        return re.compile(rf"^\s*{re.escape(account.overview_name)}\s*$", re.IGNORECASE)
+    return account_link_pattern(account.last_digits)
 
 
 def account_link_pattern(digits: str | None) -> re.Pattern[str]:
@@ -276,6 +300,15 @@ def _text_visible(page: Page, pattern: re.Pattern[str]) -> bool:
     return page.get_by_text(pattern).first.is_visible()
 
 
+def _dismiss_welcome(page: Page) -> None:
+    """Close the redesign's welcome modal if it is showing (non-waiting)."""
+    dialog = page.get_by_role("dialog", name=WELCOME_DIALOG).filter(visible=True)
+    if dialog.count():
+        dialog.first.get_by_role("button", name=WELCOME_DISMISS).click(
+            timeout=STEP_TIMEOUT_MS
+        )
+
+
 def _options(select: Locator) -> list[str]:
     return [t.strip() for t in select.locator("option").all_inner_texts()]
 
@@ -372,11 +405,13 @@ class BofAFetcher(Fetcher):
                 return False
             return bool(field.first.input_value(timeout=PROBE_TIMEOUT_MS).strip())
 
+        def is_logged_in(p: Page) -> bool:
+            _dismiss_welcome(p)
+            return _visible_soon(_clickable(p, LOGGED_IN_MARKER), PROBE_TIMEOUT_MS)
+
         return browser.LoginSpec(
             overview_url=OVERVIEW_URL,
-            is_logged_in=lambda p: _visible_soon(
-                _clickable(p, LOGGED_IN_MARKER), PROBE_TIMEOUT_MS
-            ),
+            is_logged_in=is_logged_in,
             username_field=username_field,
             password_field=password_field,
             submit=submit,
@@ -398,9 +433,11 @@ class BofAFetcher(Fetcher):
     # --- download -----------------------------------------------------------
 
     def _account_link(self, page: Page, account: AccountConfig) -> Locator:
-        pattern = account_link_pattern(account.last_digits)
+        pattern = account_link_matcher(account)
         with _step("overview: load", "OVERVIEW_URL"):
             page.goto(OVERVIEW_URL, timeout=STEP_TIMEOUT_MS)
+        with _step("overview: welcome dialog", "WELCOME_DIALOG"):
+            _dismiss_welcome(page)
         _require(
             _clickable(page, LOGGED_IN_MARKER),
             "overview: session check",
@@ -409,19 +446,16 @@ class BofAFetcher(Fetcher):
         links = page.get_by_role("link", name=pattern).and_(
             page.locator(f'a[href*="{ACCOUNT_LINK_HREF}"]')
         )
-        _require(links, "overview: account link", "ACCOUNT_LINK_TEMPLATE")
+        _require(
+            links, "overview: account link", "overview_name / ACCOUNT_LINK_TEMPLATE"
+        )
         return links
 
     def read_balance(self, page: Page, account: AccountConfig) -> Decimal | None:
         links = self._account_link(page, account)
         if links.count() != 1:
             return None
-        # The account's row on the overview (confirmed 2026-10-02 to hold the
-        # link, then the balance text).
-        row = links.first.locator(
-            "xpath=ancestor::*[self::li or self::tr or contains(@class,'AccountItem')"
-            " or contains(@class,'account')][1]"
-        )
+        row = links.first.locator(ACCOUNT_ROW_XPATH)
         with _step("overview: read balance", "MONEY_TEXT"):
             snapshot = row.aria_snapshot(timeout=STEP_TIMEOUT_MS)
         return parse_money(snapshot)
@@ -431,8 +465,9 @@ class BofAFetcher(Fetcher):
         count = links.count()
         if count != 1:
             raise AccountNotFound(
-                f"BofA: {count} overview links end in the configured digits for "
-                f"{account.path}; refusing to guess (tune ACCOUNT_LINK_TEMPLATE)"
+                f"BofA: {count} overview links match {account_link_matcher(account).pattern!r} for "
+                f"{account.path}; refusing to guess (set overview_name in "
+                "config/fetch.yaml, or tune ACCOUNT_LINK_TEMPLATE)"
             )
         with _step("overview: open account", "ACCOUNT_LINK_TEMPLATE"):
             links.first.click(timeout=STEP_TIMEOUT_MS)

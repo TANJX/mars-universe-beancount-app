@@ -92,6 +92,10 @@ def _mutate(raw, fn):
         ),
         (lambda f: f["banks"]["bofa"]["accounts"][0].update(extra=1), "unknown key"),
         (
+            lambda f: f["banks"]["bofa"]["accounts"][0].update(overview_name="  "),
+            "overview_name",
+        ),
+        (
             lambda f: f["banks"]["bofa"]["accounts"][0].update(account_number="12a"),
             "digit string",
         ),
