@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING
 from beancount_tooling.fetch import browser
 from beancount_tooling.fetch.banks.base import Fetcher, NoActivity, StagedFile
 from beancount_tooling.fetch.config import PLACEHOLDER
+from beancount_tooling.pending import PendingRow
 
 if TYPE_CHECKING:
     from playwright.sync_api import Locator, Page
@@ -139,6 +140,15 @@ STATEMENT_DATE_OPTION = re.compile(
     r"\b(?P<month>\d{1,2})/(?P<day>\d{1,2})/(?P<year>\d{4})\b"
 )
 
+# Pending rows on checking activity (confirmed 2026-10-08): above the posted
+# rows, the date cell reads "Processing" instead of a date. Cells: date,
+# description, type, amount, available balance, reconcile. ACH holds name
+# their date in the description ("ACH HOLD ROBINHOOD Funds ON 10/07");
+# other rows (Zelle) carry none, so the fetch date stands in. The overview's
+# "Current Balance" counts these rows.
+PROCESSING_CELL = "Processing"
+PENDING_DATE_IN_DESC = re.compile(r"\bON (?P<month>\d{1,2})/(?P<day>\d{1,2})\b")
+
 # Timeouts.
 STEP_TIMEOUT_MS = 20_000  # wait for one element before failing the step
 PROBE_TIMEOUT_MS = 3_000  # how long one logged-in check waits
@@ -230,6 +240,31 @@ def previous_month(today: date) -> tuple[int, int]:
     if today.month == 1:
         return today.year - 1, 12
     return today.year, today.month - 1
+
+
+def pending_date(description: str, today: date) -> date:
+    """The date an ACH hold names ("... ON 10/07"), in the year that puts it
+    on or before today; else today."""
+    m = PENDING_DATE_IN_DESC.search(description)
+    if not m:
+        return today
+    try:
+        when = date(today.year, int(m["month"]), int(m["day"]))
+    except ValueError:
+        return today
+    return when if when <= today else when.replace(year=today.year - 1)
+
+
+def parse_pending_cells(cells: Sequence[str], today: date) -> PendingRow | None:
+    """A pending row from a checking activity row's cells, or None for a
+    posted row."""
+    cells = [" ".join(c.split()) for c in cells]
+    if len(cells) < 4 or cells[0] != PROCESSING_CELL:
+        return None
+    amount = parse_money(cells[3])
+    if amount is None:
+        return None
+    return PendingRow(pending_date(cells[1], today), cells[1], amount)
 
 
 def pick_option(options: Sequence[str], pattern: re.Pattern[str]) -> str | None:
@@ -346,6 +381,7 @@ class BofAFetcher(Fetcher):
     key = "bofa"
     display_name = "BofA"
     domain = "bankofamerica.com"
+    balance_includes_pending = True
 
     def __init__(
         self,
@@ -393,6 +429,19 @@ class BofAFetcher(Fetcher):
                 "LOGIN_SUBMIT_BUTTON",
             )
 
+        def open_sign_in(p: Page) -> None:
+            # The sign-in widget renders after domcontentloaded; without this
+            # wait username_prefilled() can look before the saved-ID combobox
+            # exists and send login() after a text box that never appears
+            # (seen 2026-10-08).
+            _require(
+                p.get_by_role("textbox", name=LOGIN_USERNAME_LABEL)
+                .or_(p.get_by_role("combobox", name=LOGIN_USERNAME_LABEL))
+                .filter(visible=True),
+                "sign in: User ID",
+                "LOGIN_USERNAME_LABEL",
+            )
+
         def username_prefilled(p: Page) -> bool:
             # A saved User ID shows as a "User ID" combobox (text input hidden).
             saved = p.get_by_role("combobox", name=LOGIN_USERNAME_LABEL)
@@ -417,6 +466,7 @@ class BofAFetcher(Fetcher):
             submit=submit,
             is_mfa=lambda p: _text_visible(p, MFA_TEXT),
             is_rejected=lambda p: _text_visible(p, REJECTED_TEXT),
+            open_sign_in=open_sign_in,
             username_prefilled=username_prefilled,
         )
 
@@ -459,6 +509,31 @@ class BofAFetcher(Fetcher):
         with _step("overview: read balance", "MONEY_TEXT"):
             snapshot = row.aria_snapshot(timeout=STEP_TIMEOUT_MS)
         return parse_money(snapshot)
+
+    def read_pending(
+        self, page: Page, account: AccountConfig
+    ) -> list[PendingRow] | None:
+        if account.kind != "checking":
+            return None
+        try:
+            self.open_account(page, account)
+        except NoActivity:
+            return []
+        rows = page.get_by_role("row").filter(
+            has=page.get_by_role("cell", name=PROCESSING_CELL, exact=True)
+        )
+        with _step("activity: read pending rows", "PROCESSING_CELL"):
+            # Posted rows render with the pending ones; wait for the table.
+            page.get_by_role("cell").first.wait_for(
+                state="visible", timeout=STEP_TIMEOUT_MS
+            )
+            found = [
+                parse_pending_cells(
+                    r.get_by_role("cell").all_inner_texts(), self.today()
+                )
+                for r in rows.all()
+            ]
+        return [r for r in found if r is not None]
 
     def open_account(self, page: Page, account: AccountConfig) -> None:
         links = self._account_link(page, account)

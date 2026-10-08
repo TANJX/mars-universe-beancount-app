@@ -10,14 +10,16 @@ the current period, and there are no archives.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from beancount_tooling.fetch import browser
 from beancount_tooling.fetch.banks.base import Fetcher, StagedFile
+from beancount_tooling.pending import PendingRow
 
 if TYPE_CHECKING:
     from playwright.sync_api import Locator, Page
@@ -72,6 +74,12 @@ EXPORT_DIALOG_HEADING = re.compile(r"^Export Account Activity$", re.IGNORECASE)
 EXPORT_FILE_TYPE_OPTION = "CSV - Comma Separated Value"
 EXPORT_SUBMIT = re.compile(r"^Export$", re.IGNORECASE)
 
+# Pending rows (confirmed 2026-10-08): the activity grid opens with a
+# "PENDING TRANSACTIONS" section above "ACCOUNT HISTORY". Its rows have the
+# cells date ("10/8/2026"), type, description, amount, and "Pending" where a
+# posted row shows its running balance.
+PENDING_CELL = "Pending"
+
 STEP_TIMEOUT_MS = 20_000
 PROBE_TIMEOUT_MS = 3_000
 DOWNLOAD_TIMEOUT_MS = 60_000
@@ -112,6 +120,19 @@ def parse_amounts(text: str) -> list[Decimal]:
         amount = Decimal(m["amount"].replace(",", ""))
         out.append(-amount if m["neg"] else amount)
     return out
+
+
+def parse_pending_cells(cells: Sequence[str]) -> PendingRow | None:
+    """A pending row from its grid cells, or None for any other row."""
+    cells = [" ".join(c.split()) for c in cells]
+    if len(cells) < 5 or cells[4] != PENDING_CELL:
+        return None
+    amounts = parse_amounts(cells[3])
+    if not amounts:
+        return None
+    month, day, year = (int(part) for part in cells[0].split("/"))
+    when = date(year, month, day)
+    return PendingRow(when, cells[2], amounts[0])
 
 
 def account_cell_name(digits: str | None) -> re.Pattern[str]:
@@ -209,9 +230,8 @@ class TDFetcher(Fetcher):
             return None
         return amounts[BEGINNING_BALANCE_INDEX]
 
-    def fetch(
-        self, page: Page, account: AccountConfig, staging_dir: Path
-    ) -> list[StagedFile]:
+    def _open_activity(self, page: Page, account: AccountConfig) -> Locator:
+        """Open the account's activity page; return its timeframe select."""
         cell = self._account_cell(page, account)
         with step("open the account activity", "ACCOUNT_CELL_TEMPLATE"):
             cell.click(timeout=STEP_TIMEOUT_MS)
@@ -221,6 +241,32 @@ class TDFetcher(Fetcher):
         if dismiss.count():
             with step("dismiss the fraud notice", "FRAUD_MODAL_DISMISS"):
                 dismiss.first.click(timeout=STEP_TIMEOUT_MS)
+        return timeframe
+
+    def read_pending(
+        self, page: Page, account: AccountConfig
+    ) -> list[PendingRow] | None:
+        if account.kind != "checking":
+            return None
+        self._open_activity(page, account)
+        rows = page.get_by_role("row").filter(
+            has=page.get_by_role("gridcell", name=PENDING_CELL, exact=True)
+        )
+        with step("read pending rows", "PENDING_CELL"):
+            # The grid fills in after the timeframe select appears.
+            page.get_by_role("gridcell").first.wait_for(
+                state="visible", timeout=STEP_TIMEOUT_MS
+            )
+            found = [
+                parse_pending_cells(r.get_by_role("gridcell").all_inner_texts())
+                for r in rows.all()
+            ]
+        return [r for r in found if r is not None]
+
+    def fetch(
+        self, page: Page, account: AccountConfig, staging_dir: Path
+    ) -> list[StagedFile]:
+        timeframe = self._open_activity(page, account)
         with step("select All available", "TIMEFRAME_OPTION"):
             timeframe.first.select_option(label=TIMEFRAME_OPTION)
             # The table reloads for the new range; give it a moment to settle.

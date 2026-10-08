@@ -13,6 +13,7 @@ import tempfile
 import traceback
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,7 @@ from beancount_tooling.fetch.ledger import (
     expected_ledger_balance,
     ledger_account,
 )
+from beancount_tooling.pending import PendingRow, snapshot_path, write_snapshot
 
 MAX_LISTED_ROWS = 10
 # Playwright error messages include a call log with request headers.
@@ -241,16 +243,47 @@ def _bank_failure(bank: BankConfig, reason: str) -> list[Outcome]:
     ]
 
 
+def _read_pending(
+    fetcher: Fetcher,
+    page: Any,
+    account: AccountConfig,
+    statements_dir: Path,
+    *,
+    dry_run: bool,
+) -> tuple[list[PendingRow] | None, list[str]]:
+    """The account's pending rows (None when unsupported or unreadable) and
+    the summary notes. Rewrites the snapshot unless the read failed, so a
+    site problem never clears pending entries out of the ledger."""
+    try:
+        rows = fetcher.read_pending(page, account)
+    except Exception as e:  # noqa: BLE001 (pending is extra; never fail the account)
+        return None, [
+            f"pending not read ({type(e).__name__}): kept the previous snapshot"
+        ]
+    if rows is None:
+        return None, []
+    if not dry_run:
+        write_snapshot(snapshot_path(statements_dir, account.path), rows)
+    if not rows:
+        return rows, ["no pending rows"]
+    total = sum((r.amount for r in rows), Decimal(0))
+    notes = [f"{len(rows)} pending ({total:+,.2f}):"]
+    notes += [f"  {r.date:%m/%d}  {r.amount:>+10,.2f}  {r.description}" for r in rows]
+    return rows, notes
+
+
 def _balance_shortcut(
     fetcher: Fetcher,
     page: Any,
     account: AccountConfig,
     ledger: LedgerBalances,
     log: Callable[[str], None],
+    pending: list[PendingRow] | None = None,
 ) -> Outcome | None:
     """An Outcome when the site balance equals the ledger (export skipped);
     None to fetch as usual. Never fails the account: any problem reading
-    either balance just falls back to the export."""
+    either balance just falls back to the export. Compares posted rows only:
+    a site balance that counts pending rows has them taken off first."""
     name = ledger_account(account)
     if name is None:
         return None
@@ -261,19 +294,24 @@ def _balance_shortcut(
         return None
     if site is None:
         return None
-    expected = expected_ledger_balance(account, site)
+    pending_total = sum((r.amount for r in pending or ()), Decimal(0))
+    posted = site - pending_total if fetcher.balance_includes_pending else site
+    expected = expected_ledger_balance(account, posted)
     try:
         actual = ledger.balance(name)
     except Exception as e:  # noqa: BLE001 (the export is the fallback)
         log(f"  ledger balance unavailable: {type(e).__name__}")
         return None
+    shown = f"{site:,.2f}"
+    if posted != site:
+        shown = f"{posted:,.2f} posted, site {site:,.2f} with pending"
     if actual == expected:
         return Outcome(
             account,
             account.rolling,
-            f"balance matches ledger ({site:,.2f}): export skipped",
+            f"balance matches ledger ({shown}): export skipped",
         )
-    log(f"  balance differs: site {site:,.2f}, ledger {actual:,.2f} for {name}")
+    log(f"  balance differs: site {shown}, ledger {actual:,.2f} for {name}")
     return None
 
 
@@ -341,10 +379,14 @@ def run_bank(
         return outcomes
 
     outcomes: list[Outcome] = []
+    pending_notes: dict[str, list[str]] = {}
     for account in bank.accounts:
         staging = account_staging_dir(run_dir, account.path)
+        pending, pending_notes[account.path] = _read_pending(
+            fetcher, page, account, statements_dir, dry_run=dry_run
+        )
         if ledger is not None:
-            matched = _balance_shortcut(fetcher, page, account, ledger, log)
+            matched = _balance_shortcut(fetcher, page, account, ledger, log, pending)
             if matched is not None:
                 outcomes.append(matched)
                 continue
@@ -420,6 +462,10 @@ def run_bank(
                 good_archives.append(staged.path)
             results[i] = outcome
         outcomes += [results[i] for i in range(len(staged_files))]
+    for outcome in outcomes:
+        notes = pending_notes.pop(outcome.account.path, None)
+        if notes:
+            outcome.notes += notes
     return outcomes
 
 

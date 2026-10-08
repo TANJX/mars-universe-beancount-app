@@ -15,6 +15,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from beancount_tooling.pending import PendingRow
+
 if TYPE_CHECKING:
     from playwright.sync_api import Page
 
@@ -98,11 +100,23 @@ class Fetcher(ABC):
         offers no export (the runner keeps the existing file).
         """
 
+    # True when read_balance() counts pending rows (BofA's "Current Balance"),
+    # so the shortcut subtracts them before comparing with posted ledger rows.
+    balance_includes_pending: bool = False
+
     def read_balance(self, page: Page, account: AccountConfig) -> Decimal | None:
         """The balance the site shows for `account`, as displayed: positive
         for money held (checking) or owed (credit). None when this bank does
         not support the balance shortcut. May navigate; fetch() must not rely
         on the page it leaves."""
+        return None
+
+    def read_pending(
+        self, page: Page, account: AccountConfig
+    ) -> list[PendingRow] | None:
+        """The rows the site lists as pending (in no export yet), signed like
+        the ledger (negative leaves a checking account). None when this bank
+        or account kind is not supported. May navigate."""
         return None
 
 

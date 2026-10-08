@@ -30,6 +30,7 @@ from beancount_tooling.importer.wells_fargo_checking import WellsFargoCheckingIm
 from beancount_tooling.importer.td_checking import TDCheckingImporter
 from beancount_tooling.importer.robinhood import RobinhoodImporter
 from beancount_tooling.importer.robinhood_investment import RobinhoodInvestmentImporter
+from beancount_tooling import pending
 
 
 def load_config():
@@ -180,6 +181,56 @@ def read_all_ref():
     return bank_refs
 
 
+def pending_categorizer(importer):
+    """(description, amount) -> (payee, second leg) from a checking importer's
+    own heuristics, fed a row shaped like its CSV. None for other importers."""
+    if isinstance(importer, BofACheckingImporter):
+
+        def row(desc, amt):
+            return {"Description": desc, "Amount": f"{amt:.2f}"}
+
+    elif isinstance(importer, TDCheckingImporter):
+
+        def row(desc, amt):
+            return {
+                "Description": desc,
+                "Debit": f"{-amt:.2f}" if amt < 0 else "",
+                "Credit": f"{amt:.2f}" if amt >= 0 else "",
+            }
+
+    else:
+        return None
+
+    def categorize(desc, amt):
+        postings, payee, _flag = importer.handle_transaction(row(desc, amt), "")
+        return payee, postings[1].account
+
+    return categorize
+
+
+def apply_pending(accounts, new_refs, data_dir, output_path):
+    """Book each account's pending snapshot (statements/pending/<type>/<name>.csv)."""
+    snapshots = [
+        (a, pending.snapshot_path(Path(data_dir), f"{a['type']}/{a['name']}"))
+        for a in accounts
+    ]
+    snapshots = [(a, p) for a, p in snapshots if p.is_file()]
+    if not snapshots:
+        return []
+    entries = loader.load_file(main_journal_path)[0]
+    report = []
+    for account, path in snapshots:
+        report += pending.reconcile(
+            f"{account['type']}/{account['name']}",
+            pending.read_snapshot(path),
+            entries,
+            Path(output_path),
+            new_refs=new_refs,
+            categorize=pending_categorizer(account["importer"]),
+        )
+    return report
+
+
 def main():
     # Load data from journal
     bank_refs = read_all_ref()
@@ -209,6 +260,9 @@ def main():
             }
         )
 
+    pending_root = os.path.join(os.path.realpath(data_dir), pending.PENDING_DIR, "")
+    new_refs = set()
+
     # Track statistics for delta reporting
     account_stats = []
     total_entries = 0
@@ -223,6 +277,9 @@ def main():
         new_entries_list = []
         # iterate over all files in data_dir
         for filename in walk([os.path.realpath(data_dir)]):
+            # Pending snapshots are booked by apply_pending, not the importers.
+            if filename.startswith(pending_root):
+                continue
             importer = identify.identify([account["importer"]], filename)
             if importer:
                 new_entries_list.extend(
@@ -230,6 +287,9 @@ def main():
                 )
 
         for transaction in new_entries_list:
+            ref = (transaction.postings[0].meta or {}).get("ref")
+            if ref:
+                new_refs.add(str(ref))
             month = transaction.date.strftime("%Y-%m")
             month_dict[month].append(printer.format_entry(transaction) + "\n")
 
@@ -259,6 +319,8 @@ def main():
             f.writelines(lines)
             f.close()
 
+    pending_report = apply_pending(ALL_ACCOUNTS, new_refs, data_dir, output_path)
+
     # Print summary of extracted entries
     if total_entries > 0:
         print("\n" + "=" * 50)
@@ -273,6 +335,12 @@ def main():
         print("=" * 50 + "\n")
     else:
         print("\nNo new entries found.\n")
+
+    if pending_report:
+        print("PENDING")
+        for line in pending_report:
+            print(f"  {line}")
+        print()
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from beancount_tooling.fetch.config import AccountConfig
+from beancount_tooling.pending import PENDING_META
 
 # statements/<type>/<name> -> ledger account, matching the importers
 # (e.g. AmexImporter posts to Liabilities:Credit:<name>).
@@ -40,7 +41,8 @@ def expected_ledger_balance(account: AccountConfig, site_balance: Decimal) -> De
 
 class LedgerBalances:
     """Loads the journal once, on first use, and sums USD postings per account
-    for every transaction dated on or before `as_of`."""
+    for every transaction dated on or before `as_of`, except booked pending
+    rows (`pending:` metadata)."""
 
     def __init__(self, journal: Path, as_of: date):
         self.journal = journal
@@ -55,6 +57,9 @@ class LedgerBalances:
         totals: dict[str, Decimal] = {}
         for entry in entries:
             if not isinstance(entry, data.Transaction) or entry.date > self.as_of:
+                continue
+            # Booked pending rows: the shortcut compares posted balances.
+            if PENDING_META in entry.meta:
                 continue
             for posting in entry.postings:
                 units = posting.units
