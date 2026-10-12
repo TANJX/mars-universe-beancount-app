@@ -73,6 +73,13 @@ DOWNLOAD_OPEN = re.compile(r"download|export", re.IGNORECASE)
 EXPORT_DIALOG_HEADING = re.compile(r"^Export Account Activity$", re.IGNORECASE)
 EXPORT_FILE_TYPE_OPTION = "CSV - Comma Separated Value"
 EXPORT_SUBMIT = re.compile(r"^Export$", re.IGNORECASE)
+# Seen 2026-10-12: an Export click right after the dialog opens throws in TD's
+# own code ("Cannot read properties of undefined (reading 'find')" in
+# getSingleAccountFile) and no download starts, because the dialog's account
+# data is still loading. Wait before clicking, and click again if nothing comes.
+EXPORT_SETTLE_MS = 3_000
+EXPORT_ATTEMPTS = 3
+EXPORT_ATTEMPT_TIMEOUT_MS = 20_000
 
 # Pending rows (confirmed 2026-10-08): the activity grid opens with a
 # "PENDING TRANSACTIONS" section above "ACCOUNT HISTORY". Its rows have the
@@ -286,16 +293,26 @@ class TDFetcher(Fetcher):
             dialog.get_by_role("combobox").first.select_option(
                 label=EXPORT_FILE_TYPE_OPTION
             )
-        with step("export", "EXPORT_SUBMIT"):
-            submit = dialog.get_by_role("button", name=EXPORT_SUBMIT).first
-            path = browser.capture_download(
-                page,
-                lambda: submit.click(timeout=STEP_TIMEOUT_MS),
-                staging_dir,
-                account.rolling,
-                timeout_ms=DOWNLOAD_TIMEOUT_MS,
-            )
-        return [StagedFile(path, account.rolling, "rolling")]
+        page.wait_for_timeout(EXPORT_SETTLE_MS)
+        submit = dialog.get_by_role("button", name=EXPORT_SUBMIT).first
+        for attempt in range(1, EXPORT_ATTEMPTS + 1):
+            last = attempt == EXPORT_ATTEMPTS
+            try:
+                with step("export", "EXPORT_SUBMIT"):
+                    path = browser.capture_download(
+                        page,
+                        lambda: submit.click(timeout=STEP_TIMEOUT_MS),
+                        staging_dir,
+                        account.rolling,
+                        timeout_ms=DOWNLOAD_TIMEOUT_MS
+                        if last
+                        else EXPORT_ATTEMPT_TIMEOUT_MS,
+                    )
+                return [StagedFile(path, account.rolling, "rolling")]
+            except TDStepError:
+                if last:
+                    raise
+        raise AssertionError("unreachable")
 
 
 FETCHER_CLASS = TDFetcher
