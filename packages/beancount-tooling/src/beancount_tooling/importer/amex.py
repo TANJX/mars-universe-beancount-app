@@ -2,6 +2,8 @@ from beancount.core.number import D
 from beancount.core import amount
 from beancount.core import flags
 from beancount.core import data
+import re
+
 from titlecase import titlecase
 
 from beancount_tooling.importer.helper import prompt_user_select
@@ -68,6 +70,46 @@ STATES = [
 ]
 
 
+def legacy_payee(description):
+    """Payee as earlier versions derived it: drop a trailing 22-char
+    city/state block when the row ends in a state code, and the AplPay prefix."""
+    payee = titlecase(description.lower())
+    for state in STATES:
+        if description.endswith(f" {state}"):
+            payee = payee[:-22]
+            break
+    return payee.replace("Aplpay", "").strip()
+
+
+def clean_payee(description):
+    """Merchant name from an Amex description.
+
+    Amex pads the merchant name, city and state into fixed-width columns
+    separated by runs of spaces ("DEMO CAFE           SPRINGFIELD         XX").
+    Keep the first column only, so rows with no state code lose the city too.
+    """
+    payee = legacy_payee(description)
+    return re.split(r"\s{2,}", payee, maxsplit=1)[0].strip()
+
+
+def is_payment(description):
+    """Card payments: MOBILE/ONLINE/AUTOPAY PAYMENT - THANK YOU."""
+    desc = description.strip().upper()
+    return desc.endswith("PAYMENT - THANK YOU") or desc.startswith("AUTOPAY PAYMENT")
+
+
+def is_statement_credit(row):
+    """Credits Amex funds itself (card benefits, Amex Offers, cash rewards), as
+    opposed to a merchant refunding a purchase."""
+    desc = " ".join(row["Description"].upper().split())
+    details = " ".join((row.get("Extended Details") or "").upper().split())
+    return (
+        "AMEX OFFER CREDIT" in details
+        or (desc.startswith("AMEX ") and desc.endswith(" CREDIT"))
+        or desc.startswith("YOUR CASH REWARD")
+    )
+
+
 class AmexImporter(GeneralImporter):
     def __init__(
         self,
@@ -89,8 +131,14 @@ class AmexImporter(GeneralImporter):
     def handle_transaction(self, row, line):
         postings = []
         trans_amt = row["Amount"]
-        trans_desc = titlecase(row["Description"].lower())
-        flag = flags.FLAG_OKAY
+        trans_desc = clean_payee(row["Description"])
+        # The activity CSV only lists posted rows. Should a status column ever
+        # appear, a pending row stays `!`; nothing else changes the flag.
+        flag = (
+            flags.FLAG_WARNING
+            if (row.get("Status") or "").strip().lower() == "pending"
+            else flags.FLAG_OKAY
+        )
 
         postings.append(
             data.Posting(
@@ -103,53 +151,22 @@ class AmexImporter(GeneralImporter):
             )
         )
 
-        if (
-            row["Description"] == "MOBILE PAYMENT - THANK YOU"
-            or row["Description"] == "ONLINE PAYMENT - THANK YOU"
-            or row["Description"].startswith("AUTOPAY PAYMENT")
-        ):
-            postings.append(
-                data.Posting(
-                    self.payment_account,
-                    None,
-                    cost=None,
-                    price=None,
-                    flag=None,
-                    meta=None,
-                ),
+        if is_payment(row["Description"]):
+            account_name = self.payment_account
+
+        elif D(trans_amt) < 0:
+            account_name = (
+                "Income:Rebate:Amex" if is_statement_credit(row) else "Equity:FIXME"
             )
 
-        elif float(row["Amount"]) < 0:
-            if trans_desc == "Amex Dining Credit":
-                postings.append(
-                    data.Posting(
-                        "Income:Rebate:Amex",
-                        None,
-                        cost=None,
-                        price=None,
-                        flag=None,
-                        meta=None,
-                    ),
-                )
-            else:
-                flag = flags.FLAG_WARNING
-
         else:
-            # remove last 22 characters (location)
-            for state in STATES:
-                if row["Description"].endswith(f" {state}"):
-                    trans_desc = trans_desc[:-22]
-                    break
-
-            # remove Apple Pay
-            trans_desc = trans_desc.replace("Aplpay", "")
-            trans_desc = trans_desc.strip()
-
-            category = row["Category"]
-
             # Determine the account to use
+            legacy_desc = legacy_payee(row["Description"])
+            category = row["Category"]
             if trans_desc in self.merchant_map:
                 account_name = self.merchant_map[trans_desc]
+            elif legacy_desc in self.merchant_map:
+                account_name = self.merchant_map[legacy_desc]
             elif "Restaurant" in category:
                 account_name = "Expenses:Restaurants"
             else:
@@ -161,15 +178,15 @@ class AmexImporter(GeneralImporter):
                 )
                 self.merchant_map[trans_desc] = account_name
 
-            postings.append(
-                data.Posting(
-                    account_name,
-                    None,
-                    cost=None,
-                    price=None,
-                    flag=None,
-                    meta=None,
-                ),
-            )
+        postings.append(
+            data.Posting(
+                account_name,
+                None,
+                cost=None,
+                price=None,
+                flag=None,
+                meta=None,
+            ),
+        )
 
         return (postings, trans_desc, flag)

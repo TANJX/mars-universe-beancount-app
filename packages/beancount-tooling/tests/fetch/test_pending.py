@@ -3,6 +3,7 @@
 from datetime import date
 from decimal import Decimal
 
+import pytest
 from beancount import loader
 from beancount_tooling import pending
 from beancount_tooling.fetch import runner
@@ -270,3 +271,27 @@ def test_reconcile_books_keeps_carries_and_drops(tmp_path):
     before = bean.read_text()
     report = pending.reconcile("checking/Demo", [zelle], entries, tx)
     assert bean.read_text() == before and report == []
+
+
+# --- appending entries ---------------------------------------------------------
+
+NEW_ENTRY = (
+    '2030-10-09 * "New" ""\n  Assets:Checking:Demo  -1.00 USD\n  Equity:FIXME\n\n'
+)
+OLD_ENTRY = '2030-10-01 * "Old" ""\n  Assets:Checking:Demo  -2.00 USD\n  Equity:FIXME'
+
+
+@pytest.mark.parametrize("tail", ["", "\n", "\n\n", "\n\n\n", "  \n"])
+def test_append_entries_one_blank_line_between_entries(tmp_path, tail):
+    bean = tmp_path / "Demo.bean"
+    bean.write_text(OLD_ENTRY + tail)
+    pending.append_entries(bean, [NEW_ENTRY, NEW_ENTRY])
+    assert bean.read_text() == (
+        OLD_ENTRY + "\n\n" + NEW_ENTRY + NEW_ENTRY.rstrip("\n") + "\n"
+    )
+
+
+def test_append_entries_new_file(tmp_path):
+    bean = tmp_path / "2030-10" / "checking" / "Demo.bean"
+    pending.append_entries(bean, [NEW_ENTRY])
+    assert bean.read_text() == NEW_ENTRY.rstrip("\n") + "\n"

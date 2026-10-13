@@ -141,8 +141,9 @@ class RobinhoodImporter(GeneralImporter):
             other_account = "Assets:Pending-Transfer"
         elif "INTEREST" in desc_upper:
             other_account = "Income:Interest:Robinhood"
-        else:
-            flag = flags.FLAG_WARNING
+        # No FLAG_WARNING for an unknown description: the flag answers "is this
+        # posted at the bank?", and this export only carries posted rows. An
+        # un-determined second leg is signalled by Equity:FIXME alone.
 
         postings.append(
             data.Posting(

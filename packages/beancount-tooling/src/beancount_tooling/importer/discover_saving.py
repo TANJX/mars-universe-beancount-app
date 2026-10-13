@@ -50,8 +50,8 @@ class DiscoverSavingImporter(GeneralImporter):
         elif trans_desc.startswith("Interest Paid"):
             posting_account = "Income:Interest:Discover"
         else:
+            # Posted-only export: `*` with an Equity:FIXME leg, never `!`.
             posting_account = "Equity:FIXME"
-            flag = flags.FLAG_WARNING
 
         postings.append(
             data.Posting(

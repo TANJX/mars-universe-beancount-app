@@ -60,8 +60,10 @@ class ChaseImporter(GeneralImporter):
         elif trans_desc.startswith("Payment Thank You"):
             expense_account = "Assets:Pending-Transfer"
 
-        elif float(trans_amt) > 0:
-            flag = flags.FLAG_WARNING
+        elif D(trans_amt) > 0:
+            # Unrecognized refund or credit: posted (the export only lists
+            # posted rows), second leg left for the reconciler.
+            expense_account = "Equity:FIXME"
 
         else:
             if trans_desc in self.merchant_map:

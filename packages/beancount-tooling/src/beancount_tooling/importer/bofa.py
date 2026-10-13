@@ -1,3 +1,5 @@
+import re
+
 from beancount.core.number import D
 from beancount.core import amount
 from beancount.core import flags
@@ -47,10 +49,14 @@ class BofAImporter(GeneralImporter):
             )
         )
 
-        if (
-            row["Payee"] == "PAYMENT - THANK YOU"
+        # Card payments credit the card: "PAYMENT - THANK YOU",
+        # "PAYMENT FROM CHK <n> CONF#<n>", "BA ELECTRONIC PAYMENT". The word
+        # boundary and sign keep a biller such as "PAYMENTUS ..." a purchase.
+        is_payment = D(trans_amt) > 0 and (
+            re.match(r"PAYMENT\b", row["Payee"].strip().upper())
             or trans_desc == "Ba Electronic Payment"
-        ):
+        )
+        if is_payment:
             postings.append(
                 data.Posting(
                     self.payment_account,
@@ -62,8 +68,19 @@ class BofAImporter(GeneralImporter):
                 ),
             )
 
-        elif float(trans_amt) > 0:
-            flag = flags.FLAG_WARNING
+        elif D(trans_amt) > 0:
+            # A refund or statement credit. The export only lists posted rows,
+            # so it stays `*`; the reconciler resolves the Equity:FIXME leg.
+            postings.append(
+                data.Posting(
+                    "Equity:FIXME",
+                    None,
+                    cost=None,
+                    price=None,
+                    flag=None,
+                    meta=None,
+                ),
+            )
 
         else:
             if trans_desc in self.merchant_map:

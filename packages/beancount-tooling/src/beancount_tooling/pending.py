@@ -294,8 +294,21 @@ def reconcile(
             f"{name}: new pending {row.date} {row.amount:,.2f} {row.description}"
         )
     for month, texts in by_month.items():
-        target = transactions_dir / month / kind / f"{name}.bean"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with target.open("a") as f:
-            f.writelines(texts)
+        append_entries(transactions_dir / month / kind / f"{name}.bean", texts)
     return report
+
+
+def append_entries(path: Path, texts: Iterable[str]) -> None:
+    """Append formatted entries to a .bean file with exactly one blank line
+    between the file's last entry and the first new one, whatever trailing
+    whitespace the file had (a file missing its final newline would otherwise
+    glue the new entry onto its last posting)."""
+    body = "".join(texts).strip("\n")
+    if not body:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = path.read_text().rstrip() if path.exists() else ""
+    if existing:
+        path.write_text(f"{existing}\n\n{body}\n")
+    else:
+        path.write_text(f"{body}\n")

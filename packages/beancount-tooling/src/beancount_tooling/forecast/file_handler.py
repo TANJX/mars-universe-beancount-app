@@ -10,6 +10,7 @@ This module handles:
 import logging
 from datetime import date
 from pathlib import Path
+from collections.abc import Iterable
 from typing import List, Set, Tuple
 import re
 
@@ -182,33 +183,101 @@ def extract_cleared_tids(actual_section: str) -> Set[str]:
     return cleared_tids
 
 
-def generate_forecasted_section(templates: List[TemplateTransaction]) -> str:
+def extract_unmerged_past_forecasts(
+    file_path: Path, split_line: int, today: date, cleared_tids: set[str]
+) -> list[tuple[date, str, str]]:
+    """
+    Find past-dated forecasts in the forecast block that must survive a rebuild.
+
+    The rebuilt forecast block only holds templates dated today or later, so an
+    existing pending (!) entry carrying a tid and dated before today would be
+    dropped even though nothing cleared it (e.g. a rent file whose entries are
+    all dated the 1st, regenerated mid-month). Those entries are kept verbatim.
+
+    Args:
+        file_path: Path to bean file
+        split_line: Line index where the actual section starts
+        today: Current date
+        cleared_tids: tids that already have a cleared (*) counterpart
+
+    Returns:
+        List of (date, tid, raw_text) for each entry to keep, in file order
+    """
+    if not file_path.exists() or split_line <= 0:
+        return []
+
+    try:
+        with open(file_path, "r") as f:
+            lines = f.readlines()[:split_line]
+    except OSError as e:
+        logger.error(f"Failed to read {file_path}: {e}")
+        return []
+
+    # Split the forecast block into entry chunks: a dated header line plus the
+    # indented lines that follow it, up to a blank line or the next header.
+    chunks: list[list[str]] = []
+    current: list[str] = []
+    for line in lines:
+        if line.strip() and line[0].isdigit():
+            if current:
+                chunks.append(current)
+            current = [line]
+        elif current and line.strip():
+            current.append(line)
+        elif current:
+            chunks.append(current)
+            current = []
+    if current:
+        chunks.append(current)
+
+    kept = []
+    for chunk in chunks:
+        header = chunk[0]
+        match = re.match(r"(\d{4}-\d{2}-\d{2})\s+!\s", header)
+        if not match:
+            continue
+        entry_date = date.fromisoformat(match.group(1))
+        tid = None
+        for line in chunk[1:]:
+            tid_match = re.search(r'tid:\s*"([^"]+)"', line)
+            if tid_match:
+                tid = tid_match.group(1)
+                break
+        if tid is None or entry_date >= today or tid in cleared_tids:
+            continue
+        kept.append((entry_date, tid, "".join(chunk).rstrip("\n") + "\n"))
+    return kept
+
+
+def generate_forecasted_section(
+    templates: List[TemplateTransaction],
+    preserved: Iterable[tuple[date, str]] = (),
+) -> str:
     """
     Generate the forecasted transactions section.
 
-    Formats all template transactions and combines them with proper spacing.
+    Formats all template transactions, merges in any preserved raw entries,
+    and combines them in date order with proper spacing.
 
     Args:
         templates: List of TemplateTransaction objects
+        preserved: (date, raw_text) entries kept verbatim from the old block
 
     Returns:
         Formatted string of all forecasted transactions
     """
-    if not templates:
+    items = [
+        (txn.date, printer.format_entry(txn))
+        for txn in (t.to_beancount_transaction() for t in templates)
+    ]
+    items.extend(preserved)
+    if not items:
         return ""
 
-    # Convert templates to beancount transactions
-    transactions = [t.to_beancount_transaction() for t in templates]
+    # Sort by date (stable: preserved entries follow same-day templates)
+    items.sort(key=lambda item: item[0])
 
-    # Sort by date
-    transactions.sort(key=lambda t: t.date)
-
-    # Format each transaction
-    lines = []
-    for txn in transactions:
-        lines.append(printer.format_entry(txn))
-
-    return "\n".join(lines)
+    return "\n".join(text for _, text in items)
 
 
 def write_file_with_forecasts(
@@ -266,13 +335,14 @@ def merge_and_write_file(
 
     Strategy:
     1. Split file into forecasted (top) and actual (bottom) sections
-    2. Generate new forecasted section from templates
+    2. Generate new forecasted section from templates dated today or later,
+       plus existing past-dated pending forecasts with no cleared counterpart
     3. Write: new forecasted section + unchanged actual section
 
     Args:
         file_path: Path to bean file
         template_txns: List of TemplateTransaction objects
-        today: Current date for past/future comparison (unused in new approach)
+        today: Current date for past/future comparison
         dry_run: If True, don't actually write file
 
     Returns:
@@ -285,14 +355,25 @@ def merge_and_write_file(
     cleared_tids = extract_cleared_tids(actual_section)
 
     # Filter templates:
-    # 1. Only include future dates (skip past/today forecasts)
+    # 1. Only include templates dated today or later
     # 2. Skip templates whose tid already has a cleared transaction
     future_templates = [
         t for t in template_txns if t.date >= today and t.tid not in cleared_tids
     ]
 
-    # Generate new forecasted section from filtered templates
-    forecasted_section = generate_forecasted_section(future_templates)
+    # 3. Keep existing past-dated pending forecasts nothing has cleared yet;
+    #    rebuilding from future templates alone would silently drop them.
+    future_tids = {t.tid for t in future_templates}
+    preserved = [
+        (entry_date, text)
+        for entry_date, tid, text in extract_unmerged_past_forecasts(
+            file_path, split_line, today, cleared_tids
+        )
+        if tid not in future_tids
+    ]
+
+    # Generate new forecasted section from filtered templates + kept entries
+    forecasted_section = generate_forecasted_section(future_templates, preserved)
 
     # Write file
     status = write_file_with_forecasts(

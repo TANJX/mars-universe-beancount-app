@@ -312,12 +312,10 @@ def main():
         # append to main journal
         for month in month_dict:
             lines = month_dict[month]
-            account_journal_path = f"{output_path}/{month}/{account['type']}"
-            Path(account_journal_path).mkdir(parents=True, exist_ok=True)
-
-            f = open(f"{account_journal_path}/{account['name']}.bean", "a")
-            f.writelines(lines)
-            f.close()
+            pending.append_entries(
+                Path(output_path) / month / account["type"] / f"{account['name']}.bean",
+                lines,
+            )
 
     pending_report = apply_pending(ALL_ACCOUNTS, new_refs, data_dir, output_path)
 

@@ -102,8 +102,19 @@ class DiscoverImporter(GeneralImporter):
                 ),
             )
 
-        elif float(row["Amount"]) < 0:
-            flag = flags.FLAG_WARNING
+        elif D(row["Amount"]) < 0:
+            # Unrecognized refund or credit: posted (the export only lists
+            # posted rows), second leg left for the reconciler.
+            postings.append(
+                data.Posting(
+                    "Equity:FIXME",
+                    None,
+                    cost=None,
+                    price=None,
+                    flag=None,
+                    meta=None,
+                ),
+            )
 
         else:
             if trans_desc in self.merchant_map:

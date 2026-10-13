@@ -59,8 +59,8 @@ class AppleSavingImporter(GeneralImporter):
             posting_account = "Assets:Pending-Transfer"
             # flag = flags.FLAG_WARNING
         else:
+            # Posted-only export: `*` with an Equity:FIXME leg, never `!`.
             posting_account = "Equity:FIXME"
-            flag = flags.FLAG_WARNING
 
         postings.append(
             data.Posting(
