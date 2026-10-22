@@ -73,4 +73,5 @@ Fava, so no second terminal is needed for Fava while hacking on the web app.
 - `next.config.mjs` bakes `FAVA_INTERNAL_URL` and `FAVA_LEDGER_SLUG` into the
   proxy rewrites at build time, so `release-web.sh` exports them before `next build`.
 - `apps/web/.env.local` is read by `next build` like any other build; whatever
-  `NEXT_PUBLIC_*` values it holds ship in the release.
+  `NEXT_PUBLIC_*` values it holds ship in the release, except
+  `NEXT_PUBLIC_DEMO_MODE`, which `release-web.sh` forces off.

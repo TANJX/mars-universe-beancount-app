@@ -26,6 +26,9 @@ cd "$APP_DIR"
 # FAVA_INTERNAL_URL into the proxy rewrites at build time, not at startup.
 if [ -f .env ]; then set -a; . ./.env; set +a; fi
 export FAVA_INTERNAL_URL="http://127.0.0.1:$FAVA_PORT"
+# Demo mode is for the public demo ledger only. Next.js lets a real env var win
+# over .env.local, so force it off here whatever the dev setup has.
+export NEXT_PUBLIC_DEMO_MODE=
 
 sha=$(git rev-parse --short HEAD)
 dirty=""; [ -z "$(git status --porcelain --untracked-files=no)" ] || dirty="-dirty"
