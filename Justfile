@@ -10,10 +10,10 @@ install:
     uv sync
     pnpm install
 
-# Run Fava on the ledger. Set LEDGER_DIR to override the default ./data location.
+# Collides with the background agent on :5000 if `just install-agents` is in use; `just svc stop fava` first.
+# Run Fava on the ledger in the foreground. Set LEDGER_DIR to override the default ./data location.
 fava:
     uv run fava ${LEDGER_DIR:-./data}/journal/journal.beancount
-    <!-- uv run fava ${LEDGER_DIR:-./data}/journal/journal.beancount -H 0.0.0.0 --port 5000 -->
 
 # Extraction flow
 extract:
@@ -60,6 +60,27 @@ web-dev *args:
 
 web-build:
     pnpm --filter web build
+
+# --- macOS background services (launchd agents + SwiftBar menu). See deploy/macos/README.md ---
+
+# Render + load the Fava and web agents from .env, link the SwiftBar plugin. Builds a web release if none exists.
+install-agents:
+    deploy/macos/install.sh
+
+uninstall-agents:
+    deploy/macos/install.sh --uninstall
+
+# Build the web viewer and promote it to the running service (about a one-second blip)
+release-web:
+    deploy/macos/release-web.sh
+
+# uv sync + restart the Fava service (after a fork bump or extension change)
+restart-fava:
+    deploy/macos/restart-fava.sh
+
+# start|stop|restart|status [fava|web|all]
+svc *args:
+    deploy/macos/ctl.sh {{args}}
 
 # Lint / format everything (Python + JS/TS)
 lint: lint-py lint-js

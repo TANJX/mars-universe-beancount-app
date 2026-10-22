@@ -1,5 +1,7 @@
 # Deploy — Docker Compose stack
 
+For running the same two services as background agents on the laptop (launchd + SwiftBar), see [`macos/README.md`](macos/README.md).
+
 Three services:
 
 | Service   | What                              | Port      |
