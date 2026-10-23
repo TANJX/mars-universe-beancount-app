@@ -24,11 +24,11 @@ if ! mu_load_env 2>/dev/null; then
   exit 0
 fi
 
-# System green / red / orange, light and dark variants.
-GREEN="#34C759,#30D158"
-RED="#FF3B30,#FF453A"
-ORANGE="#FF9500,#FF9F0A"
-GREY="#8E8E93,#98989D"
+# System green / red / orange / grey, for SF Symbol tints.
+GREEN="#34C759"
+RED="#FF3B30"
+ORANGE="#FF9500"
+GREY="#8E8E93"
 
 fava_pid=$(mu_pid "$MU_FAVA_LABEL")
 web_pid=$(mu_pid "$MU_WEB_LABEL")
@@ -49,35 +49,56 @@ head_sha=$(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo "?")
 head_dirty=""
 [ -n "$(git -C "$APP_DIR" status --porcelain --untracked-files=no 2>/dev/null)" ] && head_dirty=1
 
-# Menu bar glyph: one SF Symbol, monochrome like the system items around it.
-if [ $releasing = 1 ]; then icon="arrow.triangle.2.circlepath"
-elif [ $fava_up = 1 ] && [ $web_up = 1 ]; then icon="checkmark.circle"
-elif [ $fava_up = 0 ] && [ $web_up = 0 ]; then icon="xmark.circle"
-else icon="exclamationmark.triangle"
+# Uncommitted ledger work (untracked included: a new statement CSV or .bean counts).
+bank_status=$(git -C "$LEDGER_DIR" status --porcelain 2>/dev/null)
+bank_count=$(printf '%s' "$bank_status" | grep -c .)
+
+# Menu bar glyph: the planet as a template image (macOS tints it like the system
+# items around it), badged for partial/releasing and faded when everything is down.
+if [ $releasing = 1 ]; then icon=busy
+elif [ $fava_up = 1 ] && [ $web_up = 1 ]; then icon=ok
+elif [ $fava_up = 0 ] && [ $web_up = 0 ]; then icon=down
+else icon=warn
 fi
-echo "| sfimage=$icon"
+glyph="templateImage=$(base64 -i "$HERE/icons/planet-$icon.png")"
+# A count next to the glyph is the warning that the ledger has unsaved work.
+if [ "$bank_count" -gt 0 ]; then echo "$bank_count | $glyph"; else echo "| $glyph"; fi
 echo "---"
 
-dot() { [ "$1" = 1 ] && printf '●' || printf '○'; }
-col() { [ "$1" = 1 ] && printf '%s' "$GREEN" || printf '%s' "$RED"; }
+# Text stays the default label color for contrast; state rides on a colored SF Symbol.
+state_icon() {  # up -> sfimage/sfcolor params
+  [ "$1" = 1 ] && printf 'sfimage=circle.fill sfcolor=%s' "$GREEN" || printf 'sfimage=circle.fill sfcolor=%s' "$RED"
+}
 
 pid_desc() { [ -n "$1" ] && printf 'pid %s' "$1" || printf 'stopped'; }
 
-echo "$(dot $fava_up) Fava  :$FAVA_PORT  $(pid_desc "$fava_pid") | color=$(col $fava_up) font=Menlo"
+echo "Fava  :$FAVA_PORT · $(pid_desc "$fava_pid") | $(state_icon $fava_up)"
 
 if [ $releasing = 1 ]; then
-  echo "⟳ Web   :$WEB_PORT  building… | color=$ORANGE font=Menlo"
+  echo "Web  :$WEB_PORT · building… | sfimage=arrow.triangle.2.circlepath sfcolor=$ORANGE"
 else
   web_desc="$(pid_desc "$web_pid")"
   [ -n "$rel_sha" ] && web_desc="$web_desc · $rel_sha${rel_dirty:+-dirty} · built $rel_built"
-  echo "$(dot $web_up) Web   :$WEB_PORT  $web_desc | color=$(col $web_up) font=Menlo"
+  echo "Web  :$WEB_PORT · $web_desc | $(state_icon $web_up)"
   if [ -n "$rel_sha" ] && [ "$rel_sha" != "$head_sha" ]; then
-    echo "  ↑ HEAD is $head_sha${head_dirty:+ (tree dirty)}: release to update | color=$ORANGE font=Menlo"
+    echo "HEAD is $head_sha${head_dirty:+ (tree dirty)}: release to update | sfimage=arrow.up.circle.fill sfcolor=$ORANGE size=12"
   elif [ -n "$head_dirty" ]; then
-    echo "  tree has uncommitted changes | color=$GREY font=Menlo"
+    echo "App tree has uncommitted changes | sfimage=pencil.circle sfcolor=$GREY size=12"
   fi
 fi
 
+echo "---"
+if [ "$bank_count" -gt 0 ]; then
+  [ "$bank_count" = 1 ] && noun=change || noun=changes
+  echo "Bank: $bank_count uncommitted $noun | sfimage=exclamationmark.triangle.fill sfcolor=$ORANGE"
+  # `|` would end the SwiftBar title, so swap it out of any path.
+  printf '%s\n' "$bank_status" | head -n 15 | tr '|' '/' | sed 's/^/--/; s/$/ | font=Menlo size=12/'
+  [ "$bank_count" -gt 15 ] && echo "--… $((bank_count - 15)) more | size=12"
+  echo "-----"
+  echo "--Open in Terminal | bash=/usr/bin/open param1=-a param2=Terminal param3=\"$LEDGER_DIR\" terminal=false"
+else
+  echo "Bank: clean | sfimage=checkmark.circle.fill sfcolor=$GREEN"
+fi
 echo "---"
 echo "Open web | href=http://localhost:$WEB_PORT"
 echo "Open Fava | href=http://localhost:$FAVA_PORT/$FAVA_LEDGER_SLUG/"

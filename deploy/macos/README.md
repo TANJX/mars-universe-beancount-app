@@ -50,6 +50,14 @@ ln -sfn ~/Library/Application\ Support/mars-universe/web/releases/<older> \
 just svc restart web
 ```
 
+## Menu bar
+
+The glyph is the planet from `icons/planet.svg`, rendered as template PNGs:
+plain when both agents are up, a dot badge when one is down, a ring badge while
+a web release builds, faded when both are down. A number next to it counts
+uncommitted files in `$LEDGER_DIR`; the menu lists them. After editing the SVG,
+re-render with `uv run deploy/macos/icons/render.py`.
+
 ## Day-to-day commands
 
 ```sh
