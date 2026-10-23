@@ -24,12 +24,6 @@ if ! mu_load_env 2>/dev/null; then
   exit 0
 fi
 
-# System green / red / orange / grey, for SF Symbol tints.
-GREEN="#34C759"
-RED="#FF3B30"
-ORANGE="#FF9500"
-GREY="#8E8E93"
-
 fava_pid=$(mu_pid "$MU_FAVA_LABEL")
 web_pid=$(mu_pid "$MU_WEB_LABEL")
 # AirPlay Receiver squats on *:5000 and answers 403, so "any response" isn't "Fava is up".
@@ -65,36 +59,49 @@ glyph="templateImage=$(base64 -i "$HERE/icons/planet-$icon.png")"
 if [ "$bank_count" -gt 0 ]; then echo "$bank_count | $glyph"; else echo "| $glyph"; fi
 echo "---"
 
-# Text stays the default label color for contrast; state rides on a colored SF Symbol.
 # Every status row gets a click action: macOS disables action-less items, which greys
 # the text and drops the symbol tint.
 log_action() { printf 'bash=/usr/bin/open param1=-a param2=Console param3=%s/%s.log terminal=false' "$MU_LOG_DIR" "$1"; }
 term_action() { printf 'bash=/usr/bin/open param1=-a param2=Terminal param3="%s" terminal=false' "$1"; }
-state_icon() {  # up -> sfimage/sfcolor params
-  [ "$1" = 1 ] && printf 'sfimage=circle.fill sfcolor=%s' "$GREEN" || printf 'sfimage=circle.fill sfcolor=%s' "$RED"
+# macOS 26 darkens SF Symbol images in menus to near-black whatever the tint,
+# so state is shown with emoji, which render as text in full color.
+state_dot() { [ "$1" = 1 ] && printf '🟢' || printf '🔴'; }
+
+# "2026-10-23 17:53" -> "17:53" today, "Nd ago" otherwise.
+short_built() {
+  local day=${1%% *} then now
+  [ "$day" = "$(date +%Y-%m-%d)" ] && { printf '%s' "${1##* }"; return; }
+  then=$(date -j -f %Y-%m-%d "$day" +%s 2>/dev/null) || { printf '%s' "$1"; return; }
+  now=$(date -j -f %Y-%m-%d "$(date +%Y-%m-%d)" +%s)
+  printf '%sd ago' $(( (now - then) / 86400 ))
 }
 
 pid_desc() { [ -n "$1" ] && printf 'pid %s' "$1" || printf 'stopped'; }
 
-echo "Fava  :$FAVA_PORT · $(pid_desc "$fava_pid") | $(state_icon $fava_up) $(log_action fava)"
+# Top level stays narrow; holding Option swaps in the pid and full build time.
+echo "$(state_dot $fava_up) Fava  :$FAVA_PORT | $(log_action fava)"
+echo "$(state_dot $fava_up) Fava  :$FAVA_PORT · $(pid_desc "$fava_pid") | alternate=true $(log_action fava)"
 
 if [ $releasing = 1 ]; then
-  echo "Web  :$WEB_PORT · building… | sfimage=arrow.triangle.2.circlepath sfcolor=$ORANGE $(log_action release)"
+  echo "🟠 Web  :$WEB_PORT · building… | $(log_action release)"
 else
-  web_desc="$(pid_desc "$web_pid")"
-  [ -n "$rel_sha" ] && web_desc="$web_desc · $rel_sha${rel_dirty:+-dirty} · built $rel_built"
-  echo "Web  :$WEB_PORT · $web_desc | $(state_icon $web_up) $(log_action web)"
+  web_short=""; web_long="$(pid_desc "$web_pid")"
+  if [ -n "$rel_sha" ]; then
+    web_short=" · $rel_sha${rel_dirty:+-dirty} · $(short_built "$rel_built")"
+    web_long="$web_long · $rel_sha${rel_dirty:+-dirty} · built $rel_built"
+  fi
+  echo "$(state_dot $web_up) Web  :$WEB_PORT$web_short | $(log_action web)"
+  echo "$(state_dot $web_up) Web  :$WEB_PORT · $web_long | alternate=true $(log_action web)"
   if [ -n "$rel_sha" ] && [ "$rel_sha" != "$head_sha" ]; then
-    echo "HEAD is $head_sha${head_dirty:+ (tree dirty)}: release to update | sfimage=arrow.up.circle.fill sfcolor=$ORANGE size=12 bash=$HERE/release-web.sh terminal=false refresh=true"
+    echo "HEAD is $head_sha${head_dirty:+ (tree dirty)}: release to update | size=12 bash=$HERE/release-web.sh terminal=false refresh=true"
   elif [ -n "$head_dirty" ]; then
-    echo "App tree has uncommitted changes | sfimage=pencil.circle sfcolor=$GREY size=12 $(term_action "$APP_DIR")"
+    echo "App tree has uncommitted changes | size=12 $(term_action "$APP_DIR")"
   fi
 fi
 
 echo "---"
 if [ "$bank_count" -gt 0 ]; then
-  [ "$bank_count" = 1 ] && noun=change || noun=changes
-  echo "Bank: $bank_count uncommitted $noun | sfimage=exclamationmark.triangle.fill sfcolor=$ORANGE $(term_action "$LEDGER_DIR")"
+  echo "⚠️ Bank: $bank_count uncommitted | $(term_action "$LEDGER_DIR")"
   # `|` would end the SwiftBar title, so swap it out of any path. Rows need an
   # action too, or macOS greys them out.
   bank_action=$(term_action "$LEDGER_DIR")
@@ -105,16 +112,16 @@ if [ "$bank_count" -gt 0 ]; then
   echo "-----"
   echo "--Open in Terminal | $(term_action "$LEDGER_DIR")"
 else
-  echo "Bank: clean | sfimage=checkmark.circle.fill sfcolor=$GREEN $(term_action "$LEDGER_DIR")"
+  echo "✅ Bank: clean | $(term_action "$LEDGER_DIR")"
 fi
 echo "---"
 # No href when the service is down: an item without an action renders disabled.
 echo "Open web |$([ $web_up = 1 ] && printf ' href=http://localhost:%s' "$WEB_PORT")"
 echo "Open Fava |$([ $fava_up = 1 ] && printf ' href=http://localhost:%s/%s/' "$FAVA_PORT" "$FAVA_LEDGER_SLUG")"
 echo "---"
-echo "Release web (build + restart) | bash=$HERE/release-web.sh terminal=false refresh=true"
+echo "Release web | tooltip=\"Build and restart\" bash=$HERE/release-web.sh terminal=false refresh=true"
 echo "Restart web | bash=$HERE/ctl.sh param1=restart param2=web terminal=false refresh=true"
-echo "Restart Fava (uv sync + restart) | bash=$HERE/restart-fava.sh terminal=false refresh=true"
+echo "Restart Fava | tooltip=\"uv sync and restart\" bash=$HERE/restart-fava.sh terminal=false refresh=true"
 echo "---"
 if [ -n "$fava_pid" ] || [ -n "$web_pid" ]; then
   echo "Stop all | bash=$HERE/ctl.sh param1=stop param2=all terminal=false refresh=true"
