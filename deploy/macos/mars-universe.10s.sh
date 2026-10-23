@@ -94,9 +94,13 @@ fi
 echo "---"
 if [ "$bank_count" -gt 0 ]; then
   [ "$bank_count" = 1 ] && noun=change || noun=changes
-  echo "Bank: $bank_count uncommitted $noun | sfimage=exclamationmark.triangle.fill sfcolor=$ORANGE"
-  # `|` would end the SwiftBar title, so swap it out of any path.
-  printf '%s\n' "$bank_status" | head -n 15 | tr '|' '/' | sed 's/^/--/; s/$/ | font=Menlo size=12/'
+  echo "Bank: $bank_count uncommitted $noun | sfimage=exclamationmark.triangle.fill sfcolor=$ORANGE $(term_action "$LEDGER_DIR")"
+  # `|` would end the SwiftBar title, so swap it out of any path. Rows need an
+  # action too, or macOS greys them out.
+  bank_action=$(term_action "$LEDGER_DIR")
+  printf '%s\n' "$bank_status" | head -n 15 | tr '|' '/' | while IFS= read -r line; do
+    echo "--$line | font=Menlo size=12 $bank_action"
+  done
   [ "$bank_count" -gt 15 ] && echo "--… $((bank_count - 15)) more | size=12"
   echo "-----"
   echo "--Open in Terminal | $(term_action "$LEDGER_DIR")"
