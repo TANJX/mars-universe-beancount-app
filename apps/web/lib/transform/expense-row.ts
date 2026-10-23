@@ -57,7 +57,7 @@ export function deriveExpenseRow(txn: Transaction): ExpenseRowData | null {
     return false
   })
   const totalPaid = Math.abs(
-    funding.reduce((s, p) => s + (p.amount.number < 0 ? p.amount.number : 0), 0)
+    funding.reduce((s, p) => s + Math.min(p.amount.number, 0), 0)
   )
   const fundingPosting =
     funding.find((p) => p.amount.number < 0) ?? funding[0] ?? null
