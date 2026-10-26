@@ -1,0 +1,97 @@
+# Example config/fire.yaml for the /fire page (lives in the ledger repo, next
+# to ui.yaml). The ledger supplies today's net worth and trailing-12-month
+# flows; this file holds forward assumptions the ledger cannot know. Every
+# value is a starting point the page lets you edit; saved scenarios go to
+# <ledger dir>/plan/fire-scenarios.json.
+#
+# Money is real (today's) dollars per year. Illustrative values only.
+
+start_year: 2027
+end_age: 95
+path: normal                # normal | coast | barista
+barista_income: 25000       # side income on the barista path, until full retirement age
+
+assumptions:
+  real_return: 0.05
+  return_volatility: 0.16   # stdev of annual real return, Monte Carlo
+  swr: 0.035
+  coast_age: 60             # full retirement age: all work stops (Coast/Barista paths)
+  real_raise_growth: 0.01   # after the last salary step
+  spend_creep: 0
+  k401_limit: 24500
+
+retirement_spend:
+  individual: { lean: 40000, base: 55000, fat: 85000 }
+  household:  { lean: 60000, base: 90000, fat: 130000 }
+
+household:
+  primary_share: 0.5        # share of shared costs the first person carries alone
+  marriage_year: 2028       # federal joint filing from this year; omit for single
+
+people:
+  - id: alex
+    name: Alex
+    birth_year: 1995
+    work_state: ny            # ny_from_nj | ny | nj | none (wage tax schedule)
+    pretax: { hsa: 4400, commuter: 0 }
+    other_income: 1000
+    k401_deferral: 0
+    net_worth: ledger       # "ledger" = live snapshot; or a number
+    # Jobs carry pay and equity. A job ends at `leave` ("YYYY-MM"), or when the
+    # next enabled job starts. `enabled: false` keeps a job or step listed but off.
+    jobs:
+      - id: startup-a
+        employer: Startup A
+        start: 2024-03
+        salary:
+          - { year: 2026, gross: 110000 }
+          - { year: 2028, gross: 130000, note: "Promotion" }
+        grants:
+          - { label: "Hire grant", type: iso, shares: 20000, strike: 0.50, price: 2.00,
+              vest_start: 2024-03, vest_months: 48, cliff_months: 12 }
+          # A grant can also be a dollar value at today's price (offer-letter
+          # style): shares = value / price, strike = price.
+        equity:
+          enabled: false
+          liquidity_year: 2031
+          multiple: 3              # outcome the main line uses
+          tax_rate: 0.25
+          dilution: 0.2            # value lost to later rounds before exit
+          exercise_at_leave: true  # pay the strike when leaving before liquidity
+          odds: { fail: 0.5, modest: 0.35, big: 0.15 }   # Monte Carlo draws
+          modest_multiple: 2
+          big_multiple: 10
+      - id: bigco
+        employer: Public company (scenario)
+        start: 2030-01
+        salary:
+          - { year: 2030, gross: 150000 }
+        grants:
+          - { label: "RSUs", type: rsu, value: 120000, price: 100,
+              vest_start: 2030-01, vest_months: 48, cliff_months: 12 }
+    spending: { housing: 24000, car: 3000, discretionary: 12000, essentials: 9000 }
+  - id: sam
+    name: Sam
+    birth_year: 1996
+    work_state: nj
+    net_worth: 20000
+    jobs:
+      - employer: Current job
+        salary:
+          - { year: 2026, gross: 80000 }
+    spending: { housing: 12000, car: 0, discretionary: 9000, essentials: 7000 }
+
+kids:
+  cost_by_age:
+    - { from: 0, to: 4, amount: 20000 }
+    - { from: 5, to: 17, amount: 12000 }
+    - { from: 18, to: 21, amount: 25000 }
+
+# Pay and equity live on jobs, not events.
+# kinds: lump (amount, negative = cost), marker,
+# kid, japan/abroad (years, net_saving), crash (drop).
+# `enabled: false` keeps an event listed but off.
+events:
+  - { id: kid-1, kind: kid, year: 2029, label: "Kid" }
+  - { id: sabbatical, kind: abroad, year: 2034, years: 1, net_saving: -20000, label: "Sabbatical" }
+  - { id: crash, kind: crash, year: 2036, drop: 0.4, label: "Market crash", enabled: false }

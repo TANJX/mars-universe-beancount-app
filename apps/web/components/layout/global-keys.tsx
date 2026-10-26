@@ -56,6 +56,10 @@ export function GlobalKeys() {
             e.preventDefault()
             router.push(periodHref("/portfolio"))
             return
+          case "r":
+            e.preventDefault()
+            router.push(periodHref("/fire"))
+            return
           case "i":
             e.preventDefault()
             router.push(periodHref("/income"))

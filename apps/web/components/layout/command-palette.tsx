@@ -4,6 +4,7 @@ import {
   BarChart3,
   BookOpen,
   CalendarClock,
+  Flame,
   Hash,
   LayoutGrid,
   ListTree,
@@ -48,6 +49,8 @@ const NAV: NavItem[] = [
     // `p` belongs to Plan, so Portfolio takes the next letter in its own name.
     leaderKey: "f",
   },
+  // `f` belongs to Portfolio; FIRE takes the next letter in its own name.
+  { href: "/fire", label: "FIRE", icon: Flame, leaderKey: "r" },
   { href: "/income", label: "Income", icon: BarChart3, leaderKey: "i" },
   { href: "/expenses", label: "Expenses", icon: Receipt, leaderKey: "e" },
   { href: "/journal", label: "Journal", icon: BookOpen, leaderKey: "j" },

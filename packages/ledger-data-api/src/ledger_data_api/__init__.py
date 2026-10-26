@@ -11,7 +11,7 @@ from fava.ext import FavaExtensionBase, extension_endpoint
 from fava.helpers import FavaAPIError
 from flask import request
 
-from . import portfolio, store
+from . import fire, portfolio, store
 from .merge import (
     _credit_balance_on,
     build_grid_response,
@@ -353,3 +353,32 @@ class LedgerDataApi(FavaExtensionBase):
             asof=asof,
         )
         return json.dumps(payload)
+
+    @extension_endpoint
+    def fire_data(self):
+        """Everything the /fire page loads: ledger snapshot, fire.yaml, scenarios."""
+        asof = datetime.date.today()
+        path = self._ledger_path()
+        return json.dumps(
+            {
+                "snapshot": fire.build_snapshot(
+                    ledger=g.ledger,
+                    entries=g.ledger.all_entries,
+                    ui_config=self._ui_config(),
+                    asof=asof,
+                ),
+                "config": fire.read_fire_config(path),
+                "scenarios": fire.list_scenarios(path),
+            }
+        )
+
+    @extension_endpoint(methods=["POST"])
+    def fire_scenario_save(self):
+        saved = fire.save_scenario(self._ledger_path(), request.json or {})
+        return json.dumps(saved)
+
+    @extension_endpoint(methods=["POST"])
+    def fire_scenario_delete(self):
+        data = request.json or {}
+        fire.delete_scenario(self._ledger_path(), str(data.get("id", "")))
+        return json.dumps({})
