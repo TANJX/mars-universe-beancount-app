@@ -13,6 +13,7 @@ import { NumberField, SectionCard, Toggle, YearStepper } from "./controls"
 
 const KIND_LABEL: Record<EventKind, string> = {
   lump: "Lump sum",
+  lifestyle: "Lifestyle step",
   marker: "Milestone",
   kid: "Child",
   japan: "Abroad",
@@ -25,6 +26,15 @@ function blank(kind: EventKind, year: number, inputs: Inputs): FireEvent {
   switch (kind) {
     case "lump":
       return { ...base, kind, label: "One-off", amount: -10000 }
+    case "lifestyle":
+      return {
+        ...base,
+        kind,
+        label: "Lifestyle",
+        amount: 5000,
+        endYear: null,
+        retirement: false,
+      }
     case "marker":
       return { ...base, kind, label: "Milestone" }
     case "kid":
@@ -142,6 +152,51 @@ function EventParams({
           <span className="text-muted-foreground">negative = cost</span>
         </>
       )
+    case "lifestyle": {
+      const open = e.endYear === null
+      return (
+        <>
+          <NumberField
+            ariaLabel="Amount per year"
+            prefix="$"
+            suffix="/yr"
+            className="w-28"
+            value={e.amount}
+            onChange={(v) => set({ amount: v } as Partial<FireEvent>)}
+          />
+          <label className="flex items-center gap-1.5 text-muted-foreground">
+            <Toggle
+              checked={!open}
+              onChange={(v) =>
+                set({ endYear: v ? e.year + 4 : null } as Partial<FireEvent>)
+              }
+              label="Ends"
+            />
+            ends
+          </label>
+          {open ? (
+            <label className="flex items-center gap-1.5 text-muted-foreground">
+              <Toggle
+                checked={e.retirement}
+                onChange={(v) => set({ retirement: v } as Partial<FireEvent>)}
+                label="Continues in retirement"
+              />
+              in retirement too
+            </label>
+          ) : (
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              through
+              <YearStepper
+                value={e.endYear ?? e.year}
+                onChange={(y) =>
+                  set({ endYear: Math.max(e.year, y) } as Partial<FireEvent>)
+                }
+              />
+            </span>
+          )}
+        </>
+      )
+    }
     case "japan":
       return (
         <>

@@ -108,6 +108,15 @@ export type FireEvent =
   | (EventBase & { kind: "kid" })
   | (EventBase & { kind: "japan"; years: number; netSaving: number })
   | (EventBase & { kind: "crash"; drop: number })
+  | (EventBase & {
+      kind: "lifestyle"
+      /** $/yr added to spending (negative cuts), from `year` on. */
+      amount: number
+      /** Last year it applies; null = for good. */
+      endYear: number | null
+      /** Also raise retirement spend (only when open-ended). */
+      retirement: boolean
+    })
 
 export type EventKind = FireEvent["kind"]
 
@@ -117,7 +126,6 @@ export interface Assumptions {
   swr: number
   coastAge: number
   realRaiseGrowth: number
-  spendCreep: number
   k401Limit: number
 }
 
@@ -125,16 +133,6 @@ export interface TierSpend {
   lean: number
   base: number
   fat: number
-}
-
-export interface Levers {
-  /** $/yr change to the primary person's housing from `leverYear`. */
-  housingDelta: number
-  /** $/yr change to car costs from `leverYear`. */
-  carDelta: number
-  /** Fraction of discretionary spend cut, 0 to 0.5. */
-  discretionaryTrim: number
-  leverYear: number
 }
 
 export interface KidCostBand {
@@ -160,7 +158,6 @@ export interface Inputs {
   people: Person[]
   kidCosts: KidCostBand[]
   events: FireEvent[]
-  levers: Levers
 }
 
 export interface Snapshot {

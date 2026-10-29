@@ -17,7 +17,6 @@ assumptions:
   swr: 0.035
   coast_age: 60             # full retirement age: all work stops (Coast/Barista paths)
   real_raise_growth: 0.01   # after the last salary step
-  spend_creep: 0
   k401_limit: 24500
 
 retirement_spend:
@@ -89,9 +88,12 @@ kids:
 
 # Pay and equity live on jobs, not events.
 # kinds: lump (amount, negative = cost), marker,
-# kid, japan/abroad (years, net_saving), crash (drop).
+# lifestyle (amount per year from `year`; optional end_year; retirement: true
+# also raises retirement spend when open-ended), kid, japan/abroad (years,
+# net_saving), crash (drop).
 # `enabled: false` keeps an event listed but off.
 events:
+  - { id: car-fund, kind: lifestyle, year: 2028, amount: 4000, retirement: true, label: "Car replacement fund" }
   - { id: kid-1, kind: kid, year: 2029, label: "Kid" }
   - { id: sabbatical, kind: abroad, year: 2034, years: 1, net_saving: -20000, label: "Sabbatical" }
   - { id: crash, kind: crash, year: 2036, drop: 0.4, label: "Market crash", enabled: false }

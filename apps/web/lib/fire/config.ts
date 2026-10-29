@@ -95,7 +95,6 @@ export const DEMO_INPUTS: Inputs = {
     swr: 0.035,
     coastAge: 60,
     realRaiseGrowth: 0.01,
-    spendCreep: 0,
     k401Limit: 24500,
   },
   retirementSpend: {
@@ -149,12 +148,6 @@ export const DEMO_INPUTS: Inputs = {
     { from: 18, to: 21, amount: 25000 },
   ],
   events: [],
-  levers: {
-    housingDelta: 0,
-    carDelta: 0,
-    discretionaryTrim: 0,
-    leverYear: new Date().getFullYear() + 1,
-  },
 }
 
 type Raw = Record<string, unknown>
@@ -321,6 +314,14 @@ function event(v: unknown, i: number): FireEvent | null {
       }
     case "crash":
       return { ...base, kind: "crash", drop: num(o.drop, 0.4) }
+    case "lifestyle":
+      return {
+        ...base,
+        kind: "lifestyle",
+        amount: num(o.amount, 0),
+        endYear: typeof o.end_year === "number" ? o.end_year : null,
+        retirement: o.retirement === true,
+      }
     default:
       return null
   }
@@ -363,7 +364,6 @@ export function inputsFromConfig(config: Raw): Inputs {
       swr: num(a.swr, d.assumptions.swr),
       coastAge: num(a.coast_age, d.assumptions.coastAge),
       realRaiseGrowth: num(a.real_raise_growth, d.assumptions.realRaiseGrowth),
-      spendCreep: num(a.spend_creep, d.assumptions.spendCreep),
       k401Limit: num(a.k401_limit, d.assumptions.k401Limit),
     },
     retirementSpend: {
@@ -380,7 +380,6 @@ export function inputsFromConfig(config: Raw): Inputs {
     events: arr(config.events)
       .map(event)
       .filter((e): e is FireEvent => e !== null),
-    levers: { ...d.levers, leverYear: startYear + 1 },
   }
 }
 
@@ -392,7 +391,6 @@ export function applyScenario(base: Inputs, scenario: Scenario): Inputs {
     ...base,
     ...o,
     assumptions: { ...base.assumptions, ...(o.assumptions ?? {}) },
-    levers: { ...base.levers, ...(o.levers ?? {}) },
     retirementSpend: { ...base.retirementSpend, ...(o.retirementSpend ?? {}) },
   }
 }

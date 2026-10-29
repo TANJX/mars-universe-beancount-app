@@ -1,14 +1,14 @@
 "use client"
 
-// Assumptions (returns, SWR, full retirement age, growth, creep), spending levers, and
-// the "what moves the date" list: each preset is re-simulated against the
+// Assumptions (returns, SWR, full retirement age, growth) and the "what moves
+// the date" list: each preset is re-simulated against the
 // current plan and ranked by years gained.
 
 import type { LeverImpact } from "@/lib/fire/engine"
 import type { Inputs } from "@/lib/fire/types"
 import { cn } from "@/lib/utils"
 
-import { pct, SectionCard, SliderRow, usd } from "./controls"
+import { pct, SectionCard, SliderRow } from "./controls"
 
 export function AssumptionsPanel({
   inputs,
@@ -18,15 +18,12 @@ export function AssumptionsPanel({
   onChange: (next: Inputs) => void
 }) {
   const a = inputs.assumptions
-  const l = inputs.levers
   const setA = (patch: Partial<Inputs["assumptions"]>) =>
     onChange({ ...inputs, assumptions: { ...a, ...patch } })
-  const setL = (patch: Partial<Inputs["levers"]>) =>
-    onChange({ ...inputs, levers: { ...l, ...patch } })
 
   return (
     <SectionCard
-      title="Assumptions and levers"
+      title="Assumptions"
       hint="All rates are real (after inflation)."
     >
       <div className="grid grid-cols-1 gap-x-6 gap-y-4 @md:grid-cols-2">
@@ -80,56 +77,6 @@ export function AssumptionsPanel({
           format={(v) => pct(v, 2)}
           onChange={(v) => setA({ realRaiseGrowth: v })}
           info="Yearly real pay growth applied after each person's last salary step or salary event."
-        />
-        <SliderRow
-          label="Lifestyle creep"
-          value={a.spendCreep}
-          min={0}
-          max={0.03}
-          step={0.0025}
-          format={(v) => `${pct(v, 2)} / yr`}
-          onChange={(v) => setA({ spendCreep: v })}
-          info="Extra real growth in working-years spending each year, counted from the start year. Retirement spend is unchanged; set that with the tier."
-        />
-        <SliderRow
-          label={`Housing change from ${l.leverYear}`}
-          value={l.housingDelta}
-          min={-15000}
-          max={15000}
-          step={500}
-          format={(v) => `${v > 0 ? "+" : ""}${usd(v)} / yr`}
-          onChange={(v) => setL({ housingDelta: v })}
-          info="Dollars per year added to the first person's housing spend from the Levers start year (negative removes them). Working years only."
-        />
-        <SliderRow
-          label={`Car change from ${l.leverYear}`}
-          value={l.carDelta}
-          min={-10000}
-          max={10000}
-          step={250}
-          format={(v) => `${v > 0 ? "+" : ""}${usd(v)} / yr`}
-          onChange={(v) => setL({ carDelta: v })}
-          info="Dollars per year added to the first person's car spend from the Levers start year (negative removes them). Working years only."
-        />
-        <SliderRow
-          label="Trim discretionary"
-          value={l.discretionaryTrim}
-          min={0}
-          max={0.5}
-          step={0.05}
-          format={(v) => pct(v, 0)}
-          onChange={(v) => setL({ discretionaryTrim: v })}
-          info="Percent cut to every active person's discretionary spend from the Levers start year. Working years only."
-        />
-        <SliderRow
-          label="Levers start"
-          value={l.leverYear}
-          min={inputs.startYear}
-          max={inputs.startYear + 10}
-          step={1}
-          format={(v) => `${v}`}
-          onChange={(v) => setL({ leverYear: v })}
-          info="The year the housing, car and trim changes take effect."
         />
       </div>
     </SectionCard>

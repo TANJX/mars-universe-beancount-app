@@ -406,9 +406,9 @@ export function FireView({ data }: { data: FireData }) {
                     )}
                   </span>
                   <InfoTip label="Taxes">
-                    Federal tax uses joint brackets from the marriage year,
-                    with both incomes combined, even when the plan covers only
-                    one person. State tax stays per person.
+                    Federal tax uses joint brackets from the marriage year, with
+                    both incomes combined, even when the plan covers only one
+                    person. State tax stays per person.
                   </InfoTip>
                 </Row>
               ) : null}

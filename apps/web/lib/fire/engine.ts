@@ -69,34 +69,41 @@ function kidCostPV(inputs: Inputs, year: number, r: number): number {
   return pv
 }
 
+/** Lifestyle steps in force in `year` (working-years spending). */
+function lifestyleIn(inputs: Inputs, year: number): number {
+  let total = 0
+  for (const e of enabled(inputs, "lifestyle")) {
+    if (year >= e.year && (e.endYear === null || year <= e.endYear)) {
+      total += e.amount
+    }
+  }
+  return total
+}
+
+/** The tier (or custom) spend plus every open-ended lifestyle step marked as
+ * carrying into retirement, whatever its start year: a permanent change of
+ * lifestyle belongs in the FI target from the start. */
 export function retirementSpend(inputs: Inputs): number {
-  if (inputs.tier === "custom") return inputs.customSpend
   const tiers =
     inputs.mode === "household"
       ? inputs.retirementSpend.household
       : inputs.retirementSpend.individual
-  return tiers[inputs.tier]
+  const tier =
+    inputs.tier === "custom" ? inputs.customSpend : tiers[inputs.tier]
+  let steps = 0
+  for (const e of enabled(inputs, "lifestyle")) {
+    if (e.retirement && e.endYear === null) steps += e.amount
+  }
+  return Math.max(0, tier + steps)
 }
 
 function workingSpend(inputs: Inputs, year: number): number {
-  const { levers, assumptions } = inputs
   let spend = 0
-  activePeople(inputs).forEach((p, i) => {
+  for (const p of activePeople(inputs)) {
     const s = p.spending
-    let discretionary = s.discretionary
-    let housing = s.housing
-    let car = s.car
-    if (year >= levers.leverYear) {
-      discretionary *= 1 - levers.discretionaryTrim
-      if (i === 0) {
-        housing += levers.housingDelta
-        car += levers.carDelta
-      }
-    }
-    spend +=
-      Math.max(0, housing) + Math.max(0, car) + discretionary + s.essentials
-  })
-  return spend * (1 + assumptions.spendCreep) ** (year - inputs.startYear)
+    spend += s.housing + s.car + s.discretionary + s.essentials
+  }
+  return Math.max(0, spend + lifestyleIn(inputs, year))
 }
 
 function startPortfolio(inputs: Inputs, snapshot: Snapshot | null): number {
@@ -478,6 +485,35 @@ function toggleEvent(
   }
 }
 
+function sumSpend(inputs: Inputs, pick: (s: Person["spending"]) => number) {
+  return activePeople(inputs).reduce((a, p) => a + pick(p.spending), 0)
+}
+
+/** The plan plus one lifestyle step from the start year. */
+function withStep(
+  inputs: Inputs,
+  id: string,
+  amount: number,
+  retirement = false
+): Inputs {
+  return {
+    ...inputs,
+    events: [
+      ...inputs.events,
+      {
+        id: `preset-${id}`,
+        kind: "lifestyle",
+        label: id,
+        year: inputs.startYear,
+        enabled: true,
+        amount,
+        endYear: null,
+        retirement,
+      },
+    ],
+  }
+}
+
 export const LEVER_PRESETS: LeverPreset[] = [
   {
     id: "max401k",
@@ -494,26 +530,21 @@ export const LEVER_PRESETS: LeverPreset[] = [
   {
     id: "housing",
     label: "Housing −$6k/yr",
-    detail: "Cheaper lease or better split from the lever year",
-    apply: (x) => ({
-      ...x,
-      levers: { ...x.levers, housingDelta: x.levers.housingDelta - 6000 },
-    }),
+    detail: "Cheaper lease or better split from the start year",
+    apply: (x) => withStep(x, "housing", -6000),
   },
   {
     id: "car",
     label: "Drop the car",
-    detail: "Car costs to zero from the lever year",
-    apply: (x) => ({
-      ...x,
-      levers: { ...x.levers, carDelta: -(x.people[0]?.spending.car ?? 0) },
-    }),
+    detail: "Car costs to zero from the start year",
+    apply: (x) => withStep(x, "car", -sumSpend(x, (s) => s.car)),
   },
   {
     id: "trim",
     label: "Trim discretionary 30%",
     detail: "Restaurants, travel, purchases, leisure",
-    apply: (x) => ({ ...x, levers: { ...x.levers, discretionaryTrim: 0.3 } }),
+    apply: (x) =>
+      withStep(x, "trim", -0.3 * sumSpend(x, (s) => s.discretionary)),
   },
   {
     id: "raise",
@@ -575,16 +606,10 @@ export const LEVER_PRESETS: LeverPreset[] = [
     }),
   },
   {
-    id: "creep",
-    label: "Lifestyle creep +1%/yr",
-    detail: "Spending grows 1% real a year",
-    apply: (x) => ({
-      ...x,
-      assumptions: {
-        ...x.assumptions,
-        spendCreep: x.assumptions.spendCreep + 0.01,
-      },
-    }),
+    id: "lifestyle",
+    label: "Lifestyle +$10k/yr",
+    detail: "Spend $10k more for good, retirement included",
+    apply: (x) => withStep(x, "lifestyle", 10000, true),
   },
 ]
 
