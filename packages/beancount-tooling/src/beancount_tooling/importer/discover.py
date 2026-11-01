@@ -66,6 +66,7 @@ class DiscoverImporter(GeneralImporter):
             # flag = flags.FLAG_WARNING
 
         elif trans_desc.startswith("Mta*nyct"):
+            trans_desc = self.merchant_payee(row)
             postings.append(
                 data.Posting(
                     "Expenses:Transportation:Public",
@@ -105,6 +106,7 @@ class DiscoverImporter(GeneralImporter):
         elif D(row["Amount"]) < 0:
             # Unrecognized refund or credit: posted (the export only lists
             # posted rows), second leg left for the reconciler.
+            trans_desc = self.merchant_payee(row)
             postings.append(
                 data.Posting(
                     "Equity:FIXME",
@@ -117,8 +119,11 @@ class DiscoverImporter(GeneralImporter):
             )
 
         else:
-            if trans_desc in self.merchant_map:
-                account_name = self.merchant_map[trans_desc]
+            legacy_desc = trans_desc
+            trans_desc = self.merchant_payee(row)
+            account_name = self.lookup_merchant_account(row, legacy_desc)
+            if account_name is not None:
+                pass
             elif "Restaurant" in trans_cat:
                 account_name = "Expenses:Restaurants"
             else:
@@ -128,7 +133,7 @@ class DiscoverImporter(GeneralImporter):
                     info=[trans_desc, trans_cat, trans_amt],
                     all_accounts=self.all_accounts,
                 )
-                self.merchant_map[trans_desc] = account_name
+                self.remember_merchant_account(trans_desc, account_name)
 
             postings.append(
                 data.Posting(

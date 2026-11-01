@@ -53,6 +53,7 @@ class ChaseImporter(GeneralImporter):
 
         elif trans_desc.startswith("Lyft"):
             expense_account = "Expenses:Transportation:Cab"
+            trans_desc = self.merchant_payee(row)
 
         elif trans_cat == "Fees & Adjustments" and float(trans_amt) > 0:
             expense_account = "Income:Rebate:Chase"
@@ -64,18 +65,20 @@ class ChaseImporter(GeneralImporter):
             # Unrecognized refund or credit: posted (the export only lists
             # posted rows), second leg left for the reconciler.
             expense_account = "Equity:FIXME"
+            trans_desc = self.merchant_payee(row)
 
         else:
-            if trans_desc in self.merchant_map:
-                expense_account = self.merchant_map[trans_desc]
-            else:
+            legacy_desc = trans_desc
+            trans_desc = self.merchant_payee(row)
+            expense_account = self.lookup_merchant_account(row, legacy_desc)
+            if expense_account is None:
                 # prompt user in the terminal to choose an account
                 expense_account = prompt_user_select(
                     trans_desc,
                     info=[trans_desc, trans_cat, trans_amt],
                     all_accounts=self.all_accounts,
                 )
-                self.merchant_map[trans_desc] = expense_account
+                self.remember_merchant_account(trans_desc, expense_account)
 
         postings.append(
             data.Posting(

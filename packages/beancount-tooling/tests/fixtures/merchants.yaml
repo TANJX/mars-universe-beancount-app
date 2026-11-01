@@ -1,0 +1,75 @@
+# Synthetic merchant map for tests. Made-up local names; universal brands only.
+merchants:
+  "Demo Mart":
+    rules:
+      - pattern: "\\bDEMO\\s*MART\\b(?:\\s*#?\\d+)?(?:\\s+(?P<city>[A-Z][A-Z ]*?))?(?:\\s+[A-Z]{2})?$"
+        detail: "{city}"
+    aliases:
+      - "Demo Mart #12"
+      - "Demo Mart 0042 Springfield"
+    details:
+      "Demo Mart 0042 Springfield": "Springfield"
+  "Demo Noodle Bar":
+    aliases:
+      - "Demo Noodle Bar"
+      - "Demo Noodle"
+    rules:
+      - "^DEMO NOODLE\\b"
+  "Costco":
+    rules:
+      - "\\bCOSTCO\\b"
+  "Costco Gas":
+    priority: 5
+    rules:
+      - pattern: "\\bCOSTCO\\s+GAS\\b"
+        detail: "Gas"
+  "DoorDash":
+    priority: 10
+    rules:
+      - pattern: "\\bDD\\s*\\*\\s*DOORDASH\\s*(?P<store>.*)$"
+        detail: "{store}"
+      - "\\bDD\\s*\\*\\s*DOORDA"  # Amex cuts the Description: only a city follows
+    aliases:
+      - "Bt*dd *Doorda"
+  "Uber Eats":
+    priority: 10
+    rules:
+      - "\\bUBER\\s*\\*?\\s*EATS\\b"
+  "Uber One":
+    priority: 10
+    rules:
+      - pattern: "\\bUBER\\s*\\*?\\s*ONE\\b"
+        detail: "Membership"
+  "Uber":
+    rules:
+      - "^UBER\\b"
+  "Apple":
+    rules:
+      - pattern: "^APPLE STORE\\s*#?\\w*\\s+(?P<city>[A-Z][A-Z ]*?)\\s+[A-Z]{2}$"
+        detail: "{city}"
+  "App Store":
+    rules:
+      - "APPLE\\.COM/BILL"
+  "Demo Auto":
+    aliases:
+      - "Demo Auto Inc"
+  "Demo Auto Supercharger":
+    rules:
+      - "^DEMO AUTO INC\\s+SUPERCHARGER\\b"
+  "東京デモ書店":
+    aliases:
+      - "Tokyo Demo Shoten"
+
+ambiguous:
+  "Apple":
+    candidates: ["Apple", "App Store"]
+    note: "Merchant column says Apple for hardware and subscriptions alike."
+
+non_merchant:
+  - "Monthly Service Fee"
+  - "Demo Noodle"
+
+non_merchant_patterns:
+  - "\\bZELLE\\b|^VENMO\\b"
+  - "^DEMO AUTO INC\\b(?!\\s+SUPERCHARGER)"
+  - "^AMEX\\b.*\\bCREDIT\\b"

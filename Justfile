@@ -29,6 +29,11 @@ fetch *args:
 format:
     @find "${LEDGER_DIR:-./data}" -type d -name tickers -prune -o -name '*.bean' -print | xargs uv run bean-format-compat -i -w 45
 
+# Rewrite merchant payees to the canonical names in $LEDGER_DIR/config/merchants.yaml
+# (header strings + a raw: line only). Flags: --dry-run, --month YYYY-MM, --file PATH.
+normalize-payees *args:
+    uv run normalize-payees {{args}}
+
 # Stock price updater
 prices:
     uv run update-stock-price
@@ -81,6 +86,11 @@ restart-fava:
 # start|stop|restart|status [fava|web|all]
 svc *args:
     deploy/macos/ctl.sh {{args}}
+
+# Python tests for beancount-tooling (args go to pytest, e.g. `just test -k merchant`).
+# LEDGER_DIR comes from .env; the suite installs synthetic configs and never reads it.
+test *args:
+    cd packages/beancount-tooling && uv run pytest -q {{args}}
 
 # Lint / format everything (Python + JS/TS)
 lint: lint-py lint-js

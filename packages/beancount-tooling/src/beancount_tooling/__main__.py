@@ -30,3 +30,9 @@ def run_fetch():
     from beancount_tooling.fetch.cli import main
 
     raise SystemExit(main())
+
+
+def run_normalize_payees():
+    from beancount_tooling.normalize_payees import main
+
+    raise SystemExit(main())

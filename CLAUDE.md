@@ -40,6 +40,7 @@ Only `just` loads the root `.env`. Running the underlying tool directly (`pnpm -
 
 - Extraction flow: `just extract`
 - Stock price updater: `just prices`
+- Merchant payee cleanup: `just normalize-payees [--dry-run] [--month YYYY-MM] [--file PATH]` (header strings + a `raw:` line only; scope from the `scope:` section of `$LEDGER_DIR/config/merchants.yaml`)
 - Forecast generation:
   - `just forecast`
   - Dry run: `uv run generate-forecast --dry-run` (no just recipe)
@@ -69,11 +70,11 @@ After non-trivial edits, run the relevant subset (`lint-py`/`lint-js`) before re
 
 ## Test Commands
 
-At the moment, there is no committed `tests/` suite or pytest config in this repo.
-When adding tests, use `pytest` via `uv run` and follow commands below.
+The pytest suite lives in `packages/beancount-tooling/tests/`. The gate is `just test` plus `just lint-py`.
+`tests/conftest.py` installs an empty merchant map for every test, so the private `$LEDGER_DIR/config/merchants.yaml` never leaks in; use the `merchant_map` fixture (synthetic `tests/fixtures/merchants.yaml`) when a test needs one.
 
 - Run all tests:
-  - `uv run pytest`
+  - `just test` (extra args go to pytest: `just test -k merchant`)
 - Run a test file:
   - `uv run pytest tests/test_forecast.py`
 - Run a single test (important):

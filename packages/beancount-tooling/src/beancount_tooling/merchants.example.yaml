@@ -1,0 +1,109 @@
+# Merchant alias map: one canonical payee per merchant, whichever card or bank paid.
+# Copy to <LEDGER_DIR>/config/merchants.yaml. Without that file every payee is left
+# as the importer cleans it.
+#
+# The importer books the canonical name as the payee, puts the detail (city, store,
+# product, route) in the narration, and keeps the untouched bank text as `raw:`
+# transaction metadata.
+#
+# Resolution order (first hit wins):
+#   1. non_merchant (exact payee) / non_merchant_patterns (regex on the raw text):
+#      not a merchant, payee left as-is (payments, transfers, fees, loan ACH).
+#   2. Exact, case-sensitive alias match on the raw descriptor or the importer's
+#      cleaned payee. Every canonical name is an alias of itself.
+#   3. ambiguous payees resolve only through a rule hit on richer text (the raw
+#      descriptor, narration, raw:, extra CSV columns), limited to `candidates`.
+#   4. rules: case-insensitive re.search on the raw descriptor after a leading
+#      'AplPay ' and 'Refund: ' are removed ('Refund: ' becomes the detail "Refund").
+#      Higher `priority` first, then file order.
+#   5. Otherwise the importer's cleaned payee is kept and reported as unmapped.
+#
+# A rule is a regex string, or {pattern, detail} where detail is a template over
+# the pattern's named groups ("{city}"). Upper-case captures are title-cased.
+# `category` is informational only; routing comes from the learned merchant map.
+
+merchants:
+  "Costco":
+    rules:
+      - pattern: "\\bCOSTCO\\s+WHSE\\s*#?\\d+\\s+(?P<city>[A-Z][A-Z .]*?)\\s+[A-Z]{2}$"
+        detail: "{city}"
+      - "\\bCOSTCO\\b"
+    aliases:
+      - "Costco Whse #0001"
+    details:
+      "Costco Whse #0001": "Springfield"
+    category: "Expenses:Groceries"
+
+  # A product line of the same brand gets its own payee and a higher priority.
+  "Costco Gas":
+    priority: 5
+    rules:
+      - "\\bCOSTCO\\s+GAS\\b"
+    category: "Expenses:Transportation:Driving"
+
+  # Delivery platforms are the payee; the store goes in the narration. The
+  # priority makes "DD *DOORDASH DEMOCAFE" DoorDash, not Demo Cafe.
+  "DoorDash":
+    priority: 10
+    rules:
+      - pattern: "^DD\\s*\\*\\s*DOORDASH\\s*(?P<store>.*)$"
+        detail: "{store}"
+    category: "Expenses:Restaurants"
+
+  "Uber Eats":
+    priority: 10
+    rules:
+      - "\\bUBER\\s*\\*?\\s*EATS\\b"
+    category: "Expenses:Restaurants"
+
+  "Uber One":
+    priority: 10
+    rules:
+      - pattern: "\\bUBER\\s*\\*?\\s*ONE\\b"
+        detail: "Membership"
+    category: "Expenses:Subscription"
+
+  "Uber":
+    rules:
+      - "^UBER\\b"
+    category: "Expenses:Transportation:Cab"
+
+  "Apple":
+    rules:
+      - pattern: "^APPLE STORE\\s*#?\\w*\\s*(?P<city>[A-Z][A-Z ]*?)\\s+[A-Z]{2}$"
+        detail: "{city}"
+    category: "Expenses:Purchases:Electronic"
+
+  "App Store":
+    rules:
+      - "APPLE\\.COM/BILL"
+    category: "Expenses:Subscription"
+
+  "Demo Cafe":
+    rules:
+      - pattern: "^(?:SQ \\*|TST\\* ?)?DEMO CAFE\\b(?:\\s+(?P<city>[A-Z][A-Z ]*?))?(?:\\s+[A-Z]{2})?$"
+        detail: "{city}"
+    aliases:
+      - "Sq *demo Cafe"
+    category: "Expenses:Restaurants"
+
+# Historical payees shared by several merchants: resolved per transaction from
+# the raw descriptor / narration / raw:, never from the payee alone.
+ambiguous:
+  "Apple":
+    candidates: ["Apple", "App Store"]
+    note: "Apple Card's Merchant column says 'Apple' for both hardware and apple.com/bill."
+
+non_merchant:
+  - "Monthly Service Fee"
+
+non_merchant_patterns:
+  - "\\bZELLE\\b|^VENMO\\b"  # P2P transfers
+  - "^DEMO AUTO FINANCE\\b"  # car-loan ACH
+
+# Optional: which entries `just normalize-payees` may rename (importers ignore it). Without this
+# section only entries posting under Expenses are in scope.
+scope:
+  accounts: ["Expenses", "Assets:Receivable:Work"]  # account roots
+  gift_cards: ["Assets:Gift-Card"]  # a funded purchase into one of these is in scope
+  exclude_files: ["**/transit-card.bean"]  # journal-relative globs, never touched

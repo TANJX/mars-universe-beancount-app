@@ -55,6 +55,22 @@ class RobinhoodImporter(GeneralImporter):
             line_copy, prefix=self.get_trans_date(row, line).strftime("%Y%m%d")
         )
 
+    def raw_descriptor(self, row):
+        if self.type != "credit":
+            return row.get("Description") or ""
+        # Pending card rows have no Description yet; the Merchant column stands in.
+        return row.get("Description") or row.get("Merchant") or ""
+
+    def descriptor_extras(self, row):
+        if self.type == "credit" and row.get("Merchant"):
+            return {"Merchant": row["Merchant"]}
+        return {}
+
+    def legacy_payee(self, row):
+        if self.type != "credit":
+            return (row.get("Description") or "").strip()
+        return row.get("Merchant") or ""
+
     def handle_transaction(self, row, line):
         if self.type in {"checking", "saving"}:
             return self._handle_bank_transaction(row)
@@ -88,16 +104,17 @@ class RobinhoodImporter(GeneralImporter):
             # flag = flags.FLAG_WARNING
 
         else:
-            if trans_desc in self.merchant_map:
-                expense_account = self.merchant_map[trans_desc]
-            else:
+            legacy_desc = trans_desc
+            trans_desc = self.merchant_payee(row)
+            expense_account = self.lookup_merchant_account(row, legacy_desc)
+            if expense_account is None:
                 # prompt user in the terminal to choose an account
                 expense_account = prompt_user_select(
                     trans_desc,
                     info=[trans_desc, trans_cat, trans_amt],
                     all_accounts=self.all_accounts,
                 )
-                self.merchant_map[trans_desc] = expense_account
+                self.remember_merchant_account(trans_desc, expense_account)
 
         postings.append(
             data.Posting(
@@ -141,6 +158,10 @@ class RobinhoodImporter(GeneralImporter):
             other_account = "Assets:Pending-Transfer"
         elif "INTEREST" in desc_upper:
             other_account = "Income:Interest:Robinhood"
+        elif self.type == "checking":
+            # An unclassified checking debit is a debit-card purchase; savings
+            # rows are never merchant rows.
+            trans_desc = self.bank_merchant_payee(row, trans_desc, trans_amt)
         # No FLAG_WARNING for an unknown description: the flag answers "is this
         # posted at the bank?", and this export only carries posted rows. An
         # un-determined second leg is signalled by Equity:FIXME alone.

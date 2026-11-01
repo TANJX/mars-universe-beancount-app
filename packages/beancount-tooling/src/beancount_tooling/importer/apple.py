@@ -36,6 +36,15 @@ class AppleImporter(GeneralImporter):
     def get_trans_date(self, row, line):
         return datetime.strptime(row["Transaction Date"], "%m/%d/%Y").date()
 
+    def raw_descriptor(self, row):
+        return row.get("Description") or row.get("Merchant") or ""
+
+    def descriptor_extras(self, row):
+        return {"Merchant": row["Merchant"]} if row.get("Merchant") else {}
+
+    def legacy_payee(self, row):
+        return titlecase((row.get("Merchant") or "").lower())
+
     def handle_transaction(self, row, line):
         postings = []
         trans_amt = row["Amount (USD)"]
@@ -69,6 +78,7 @@ class AppleImporter(GeneralImporter):
         elif D(trans_amt) < 0:
             # Unrecognized refund or credit: posted (the export only lists
             # posted rows), second leg left for the reconciler.
+            trans_merchant = self.merchant_payee(row)
             postings.append(
                 data.Posting(
                     "Equity:FIXME",
@@ -81,9 +91,12 @@ class AppleImporter(GeneralImporter):
             )
 
         else:
-            if trans_merchant in self.merchant_map:
-                account_name = self.merchant_map[trans_merchant]
-            elif trans_merchant == "Uber":
+            legacy_merchant = trans_merchant
+            trans_merchant = self.merchant_payee(row)
+            account_name = self.lookup_merchant_account(row, legacy_merchant)
+            if account_name is not None:
+                pass
+            elif legacy_merchant == "Uber":
                 account_name = "Expenses:Transportation:Cab"
             else:
                 # prompt user in the terminal to choose an account
@@ -92,7 +105,7 @@ class AppleImporter(GeneralImporter):
                     info=[row["Transaction Date"], trans_merchant, trans_amt],
                     all_accounts=self.all_accounts,
                 )
-                self.merchant_map[trans_merchant] = account_name
+                self.remember_merchant_account(trans_merchant, account_name)
 
             postings.append(
                 data.Posting(

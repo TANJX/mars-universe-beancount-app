@@ -273,6 +273,45 @@ def test_reconcile_books_keeps_carries_and_drops(tmp_path):
     assert bean.read_text() == before and report == []
 
 
+# --- merchant normalization on pending rows ----------------------------------
+
+
+def test_pending_entry_uses_importer_merchant(merchant_map):
+    from beancount_tooling.importer.bofa_checking import BofACheckingImporter
+
+    importer = BofACheckingImporter("Demo")
+
+    def categorize(desc, amt):
+        row = {"Description": desc, "Amount": f"{amt:.2f}"}
+        postings, payee, _flag, merchant = importer.categorize_row(row)
+        return payee, postings[1].account, merchant
+
+    raw = "CHECKCARD 1008 DD *DOORDASH DEMO MART"
+    row = PendingRow(date(2030, 10, 8), raw, Decimal("-9.99"), "p1")
+    entry = pending._pending_entry(row, "Assets:Checking:Demo", categorize)
+    assert (entry.payee, entry.narration, entry.meta["raw"]) == (
+        "DoorDash",
+        "Demo Mart",
+        raw,
+    )
+    assert entry.meta["pending"] == "p1"
+
+    zelle = PendingRow(date(2030, 10, 8), "Zelle payment to Demo", Decimal(5), "p2")
+    entry = pending._pending_entry(zelle, "Assets:Checking:Demo", categorize)
+    assert (entry.payee, entry.narration) == ("Zelle Payment to Demo", "")
+    assert "raw" not in entry.meta
+
+
+def test_pending_entry_without_categorizer_normalizes_confident_hits(merchant_map):
+    hit = PendingRow(date(2030, 10, 8), "UBER *EATS PENDING", Decimal(-9), "p1")
+    entry = pending._pending_entry(hit, "Assets:Checking:Demo", None)
+    assert (entry.payee, entry.meta["raw"]) == ("Uber Eats", "UBER *EATS PENDING")
+    miss = PendingRow(date(2030, 10, 8), "SOMEWHERE NEW", Decimal(-9), "p2")
+    entry = pending._pending_entry(miss, "Assets:Checking:Demo", None)
+    assert (entry.payee, entry.narration) == ("SOMEWHERE NEW", "")
+    assert "raw" not in entry.meta
+
+
 # --- appending entries ---------------------------------------------------------
 
 NEW_ENTRY = (

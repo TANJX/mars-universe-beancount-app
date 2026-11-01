@@ -61,6 +61,11 @@ class TDCheckingImporter(GeneralImporter):
             other_account = "Assets:Pending-Transfer"
         elif trans_desc.startswith("Instalily Inc"):
             other_account = "Income:Salary:Instalily"
+
+        # An unclassified debit is a merchant debit-card purchase (or an
+        # unknown): book it under the canonical merchant payee.
+        if other_account == "Equity:FIXME":
+            trans_desc = self.bank_merchant_payee(row, trans_desc, trans_amt)
         # No FLAG_WARNING for an unknown description: the flag answers "is this
         # posted at the bank?", and this export only carries posted rows. An
         # un-determined second leg is signalled by Equity:FIXME alone.

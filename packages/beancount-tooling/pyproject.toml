@@ -21,6 +21,7 @@ update-stock-price = "beancount_tooling.__main__:run_update_stock_price"
 backfill-prices = "beancount_tooling.__main__:run_backfill_prices"
 generate-forecast = "beancount_tooling.__main__:run_generate_forecast"
 bean-format-compat = "beancount_tooling.format_compat:main"
+normalize-payees = "beancount_tooling.__main__:run_normalize_payees"
 
 [build-system]
 requires = ["hatchling"]

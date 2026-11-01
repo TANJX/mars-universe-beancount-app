@@ -7,6 +7,7 @@ from pathlib import Path
 from beancount.parser import printer
 from beangulp import extract, identify
 from beancount import loader
+from beancount.core import data
 from beanquery import query
 from beangulp.utils import walk
 
@@ -31,6 +32,7 @@ from beancount_tooling.importer.td_checking import TDCheckingImporter
 from beancount_tooling.importer.robinhood import RobinhoodImporter
 from beancount_tooling.importer.robinhood_investment import RobinhoodInvestmentImporter
 from beancount_tooling import pending
+from beancount_tooling import merchants
 
 
 def load_config():
@@ -94,16 +96,38 @@ def read_all_usd_accounts():
 
 
 def read_merchant_map():
-    """Read existing merchant to account mappings from the journal"""
-    merchant_map = dict()
+    """Learned payee -> account routing from the journal.
 
-    entries, _, options_map = loader.load_file(main_journal_path)
-    _, rrows = query.run_query(
-        entries, options_map, 'select payee, account where account ~ "Expense"'
+    Every expense posting counts, plus purchases into the non-expense roots the
+    merchant map puts in scope (`scope.accounts` / `scope.gift_cards` in
+    merchants.yaml): a payee mostly bought as gift cards or reimbursable work
+    expenses must not be routed to an expense in silence once its descriptor
+    variants share one canonical payee (see merchants.learn_merchant_routes)."""
+    entries, _, _ = loader.load_file(main_journal_path)
+    config = merchants.get_config()
+    other_roots = tuple(
+        root
+        for root in (*config.scope_accounts, *config.gift_card_accounts)
+        if root != merchants.EXPENSE_ROOT
     )
-    for row in rrows:
-        merchant_map[row[0]] = row[1]  # Store full account path
-    return merchant_map
+
+    def under(account):
+        return any(account == r or account.startswith(r + ":") for r in other_roots)
+
+    rows = []
+    for entry in entries:
+        if not isinstance(entry, data.Transaction) or not entry.payee:
+            continue
+        desc = entry.meta.get("raw")
+        desc = desc if isinstance(desc, str) and desc else None
+        for posting in entry.postings:
+            if "Expense" in posting.account or (
+                under(posting.account)
+                and posting.units is not None
+                and posting.units.number > 0
+            ):
+                rows.append((entry.date, entry.payee, desc, posting.account))
+    return merchants.learn_merchant_routes(rows)
 
 
 def build_importer(
@@ -202,8 +226,8 @@ def pending_categorizer(importer):
         return None
 
     def categorize(desc, amt):
-        postings, payee, _flag = importer.handle_transaction(row(desc, amt), "")
-        return payee, postings[1].account
+        postings, payee, _flag, merchant = importer.categorize_row(row(desc, amt))
+        return payee, postings[1].account, merchant
 
     return categorize
 
@@ -319,6 +343,11 @@ def main():
 
     pending_report = apply_pending(ALL_ACCOUNTS, new_refs, data_dir, output_path)
 
+    unmapped = []
+    for account in ALL_ACCOUNTS:
+        for trans_date, payee, raw in getattr(account["importer"], "unmapped", []):
+            unmapped.append((trans_date, account["name"], payee, raw))
+
     # Print summary of extracted entries
     if total_entries > 0:
         print("\n" + "=" * 50)
@@ -338,6 +367,14 @@ def main():
         print("PENDING")
         for line in pending_report:
             print(f"  {line}")
+        print()
+
+    if unmapped:
+        # Resolve each per reconciliation-training.md section 14: add an alias
+        # or rule to config/merchants.yaml, then renormalize the touched file.
+        print(f"UNMAPPED MERCHANTS ({len(unmapped)})")
+        for trans_date, name, payee, raw in sorted(unmapped):
+            print(f"  {trans_date} {name}: {payee!r} (raw: {raw!r})")
         print()
 
 

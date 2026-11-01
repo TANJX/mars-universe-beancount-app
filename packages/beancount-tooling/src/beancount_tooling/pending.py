@@ -106,8 +106,10 @@ def read_snapshot(path: Path) -> list[PendingRow]:
 # ---------------------------------------------------------------------------
 
 # (description, amount) -> (payee, second-leg account) from the importer's
-# usual heuristics; the caller falls back to Equity:FIXME.
-Categorize = Callable[[str, Decimal], tuple[str, str]]
+# usual heuristics; the caller falls back to Equity:FIXME. A third element, the
+# importer's merchant_payee result (or None for payments and transfers), lets
+# the pending row carry the same narration detail and `raw:` as a posted one.
+Categorize = Callable[[str, Decimal], tuple]
 
 
 @dataclass
@@ -155,20 +157,33 @@ def _is_categorized(entry) -> bool:
 def _pending_entry(row: PendingRow, account: str, categorize: Categorize | None):
     from beancount.core import amount, data, flags
 
-    payee, other = row.description, FIXME_ACCOUNTS[0]
+    payee, other, merchant = row.description, FIXME_ACCOUNTS[0], None
     if categorize is not None:
         try:
-            payee, other = categorize(row.description, row.amount)
+            payee, other, *rest = categorize(row.description, row.amount)
+            merchant = rest[0] if rest else None
         except Exception:  # noqa: BLE001 (heuristics are best-effort)
-            payee, other = row.description, FIXME_ACCOUNTS[0]
+            payee, other, merchant = row.description, FIXME_ACCOUNTS[0], None
+    else:
+        from beancount_tooling import merchants
+
+        found = merchants.normalize(row.description)
+        # Without importer heuristics only a confident hit renames the row.
+        if found.mapped:
+            payee, merchant = found.payee, found
     meta = data.new_metadata("<pending>", 0)
     meta[PENDING_META] = row.id
+    narration = ""
+    if merchant is not None and getattr(merchant, "is_merchant", False):
+        narration = merchant.detail
+        if payee != row.description:
+            meta["raw"] = row.description
     return data.Transaction(
         meta=meta,
         date=row.date,
         flag=flags.FLAG_WARNING,
         payee=payee,
-        narration="",
+        narration=narration,
         tags=frozenset(),
         links=frozenset(),
         postings=[

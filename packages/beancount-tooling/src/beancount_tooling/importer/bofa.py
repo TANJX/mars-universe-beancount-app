@@ -32,6 +32,9 @@ class BofAImporter(GeneralImporter):
     def get_trans_ref(self, row, line):
         return row["Reference Number"]
 
+    def raw_descriptor(self, row):
+        return row.get("Payee") or ""
+
     def handle_transaction(self, row, line):
         postings = []
         trans_amt = row["Amount"]
@@ -71,6 +74,7 @@ class BofAImporter(GeneralImporter):
         elif D(trans_amt) > 0:
             # A refund or statement credit. The export only lists posted rows,
             # so it stays `*`; the reconciler resolves the Equity:FIXME leg.
+            trans_desc = self.merchant_payee(row)
             postings.append(
                 data.Posting(
                     "Equity:FIXME",
@@ -83,16 +87,17 @@ class BofAImporter(GeneralImporter):
             )
 
         else:
-            if trans_desc in self.merchant_map:
-                account_name = self.merchant_map[trans_desc]
-            else:
+            legacy_desc = trans_desc
+            trans_desc = self.merchant_payee(row)
+            account_name = self.lookup_merchant_account(row, legacy_desc)
+            if account_name is None:
                 # prompt user in the terminal to choose an account
                 account_name = prompt_user_select(
                     trans_desc,
                     info=[trans_desc, trans_amt],
                     all_accounts=self.all_accounts,
                 )
-                self.merchant_map[trans_desc] = account_name
+                self.remember_merchant_account(trans_desc, account_name)
 
             postings.append(
                 data.Posting(

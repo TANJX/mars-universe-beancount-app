@@ -71,8 +71,8 @@ class BofACheckingImporter(GeneralImporter):
             other_account = "Income:Salary:Instalily"
 
         elif trans_desc.startswith("E-Zpass Rebill"):
-            # trans_desc = "Carnegie Mellon Direct Deposit"
             other_account = "Expenses:Transportation:Driving"
+            trans_desc = self.merchant_payee(row)
 
         elif (
             trans_desc.startswith("American Express Des:ach")
@@ -90,6 +90,11 @@ class BofACheckingImporter(GeneralImporter):
             or trans_desc.startswith("Astra*future")
         ):
             other_account = "Assets:Pending-Transfer"
+
+        # An unclassified debit is a merchant debit-card purchase (or an
+        # unknown): book it under the canonical merchant payee.
+        if other_account == "Equity:FIXME":
+            trans_desc = self.bank_merchant_payee(row, trans_desc, trans_amt)
 
         # No `else` clause setting FLAG_WARNING here on purpose: the flag answers
         # "is this posted at the bank?", and BofA's stmt.csv only exports posted rows.

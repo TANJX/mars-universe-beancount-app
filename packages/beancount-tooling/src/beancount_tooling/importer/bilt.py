@@ -61,6 +61,7 @@ class BiltImporter(GeneralImporter):
         elif D(trans_amt) > 0:
             # Unrecognized refund or credit: posted (the export only lists
             # posted rows), second leg left for the reconciler.
+            trans_desc = self.merchant_payee(row)
             postings.append(
                 data.Posting(
                     "Equity:FIXME",
@@ -73,9 +74,12 @@ class BiltImporter(GeneralImporter):
             )
 
         else:
-            if trans_desc in self.merchant_map:
-                account_name = self.merchant_map[trans_desc]
-            elif trans_desc.startswith("Lyft"):
+            legacy_desc = trans_desc
+            trans_desc = self.merchant_payee(row)
+            account_name = self.lookup_merchant_account(row, legacy_desc)
+            if account_name is not None:
+                pass
+            elif legacy_desc.startswith("Lyft"):
                 account_name = "Expenses:Transportation:Cab"
             else:
                 # prompt user in the terminal to choose an account
@@ -84,7 +88,7 @@ class BiltImporter(GeneralImporter):
                     info=[row["Date"], trans_desc, trans_amt],
                     all_accounts=self.all_accounts,
                 )
-                self.merchant_map[trans_desc] = account_name
+                self.remember_merchant_account(trans_desc, account_name)
 
             postings.append(
                 data.Posting(

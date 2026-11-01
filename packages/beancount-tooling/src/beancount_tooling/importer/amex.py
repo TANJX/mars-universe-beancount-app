@@ -128,6 +128,16 @@ class AmexImporter(GeneralImporter):
     def get_trans_ref(self, row, line):
         return row["Reference"][1:-1]
 
+    def legacy_payee(self, row):
+        return clean_payee(row["Description"])
+
+    def descriptor_extras(self, row):
+        return {
+            key: row[key]
+            for key in ("Extended Details", "Appears On Your Statement As")
+            if row.get(key)
+        }
+
     def handle_transaction(self, row, line):
         postings = []
         trans_amt = row["Amount"]
@@ -155,18 +165,23 @@ class AmexImporter(GeneralImporter):
             account_name = self.payment_account
 
         elif D(trans_amt) < 0:
-            account_name = (
-                "Income:Rebate:Amex" if is_statement_credit(row) else "Equity:FIXME"
-            )
+            if is_statement_credit(row):
+                account_name = "Income:Rebate:Amex"
+            else:
+                # A merchant refund: same payee as the purchase.
+                account_name = "Equity:FIXME"
+                trans_desc = self.merchant_payee(row)
 
         else:
-            # Determine the account to use
-            legacy_desc = legacy_payee(row["Description"])
+            trans_desc = self.merchant_payee(row)
             category = row["Category"]
-            if trans_desc in self.merchant_map:
-                account_name = self.merchant_map[trans_desc]
-            elif legacy_desc in self.merchant_map:
-                account_name = self.merchant_map[legacy_desc]
+            # Canonical payee first, then the pre-normalization payees
+            # (clean, then legacy) for history not yet migrated.
+            account_name = self.lookup_merchant_account(
+                row, clean_payee(row["Description"]), legacy_payee(row["Description"])
+            )
+            if account_name is not None:
+                pass
             elif "Restaurant" in category:
                 account_name = "Expenses:Restaurants"
             else:
@@ -176,7 +191,7 @@ class AmexImporter(GeneralImporter):
                     info=[row["Extended Details"], category, trans_amt],
                     all_accounts=self.all_accounts,
                 )
-                self.merchant_map[trans_desc] = account_name
+                self.remember_merchant_account(trans_desc, account_name)
 
         postings.append(
             data.Posting(
