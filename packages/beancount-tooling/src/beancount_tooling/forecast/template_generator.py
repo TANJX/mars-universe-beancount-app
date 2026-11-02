@@ -420,10 +420,22 @@ def generate_month_templates(
         else:
             logger.warning(f"Could not find short name for account {account}")
 
-    # Add Tesla loan template
+    # Add Tesla loan template, in the file of the account that pays it
     if tesla_template:
-        td_file_path = get_account_file_path(config, "TD", year, month_num)
-        file_templates[Path(td_file_path)].append(tesla_template)
+        template_account = tesla_template.postings[0].account
+        account_short = next(
+            (
+                short_name
+                for short_name, account_config in config["accounts"].items()
+                if account_config["beancount_account"] == template_account
+            ),
+            None,
+        )
+        if account_short:
+            file_path = get_account_file_path(config, account_short, year, month_num)
+            file_templates[Path(file_path)].append(tesla_template)
+        else:
+            logger.warning(f"Could not find short name for account {template_account}")
 
     # Add custom templates
     for template in custom_templates:
