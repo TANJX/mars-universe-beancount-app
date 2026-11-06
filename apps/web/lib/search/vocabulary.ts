@@ -18,7 +18,7 @@ const EMPTY: SearchVocabulary = {
 
 /**
  * Derives the suggestion pool for the search bar from the in-memory journal.
- * Each field is sorted + deduped. Pulls from whatever txns are currently
+ * Each field is sorted + deduped. Accounts include non-leaf ancestors. Pulls from whatever txns are currently
  * loaded, so suggestions reflect the active period and primary-account scope.
  */
 export function useSearchVocabulary(
@@ -34,7 +34,14 @@ export function useSearchVocabulary(
       if (t.payee) payees.add(t.payee)
       for (const tag of t.tags) tags.add(tag)
       for (const link of t.links) links.add(link)
-      for (const p of t.postings) accounts.add(p.account)
+      // Add every ancestor too (Expenses, Expenses:Food, ...) so a parent
+      // account can be picked as a filter; matching is hierarchical.
+      for (const p of t.postings) {
+        const segs = p.account.split(":")
+        for (let i = 1; i <= segs.length; i++) {
+          accounts.add(segs.slice(0, i).join(":"))
+        }
+      }
     }
     return {
       accounts: [...accounts].sort(),
