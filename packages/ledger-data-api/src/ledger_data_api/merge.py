@@ -250,6 +250,13 @@ def compute_paid_this_cycle(
 _BRIDGE_ACCOUNT = "Assets:Pending-Transfer"
 
 
+def _is_bank_real(entry) -> bool:
+    """Posted (`*`) or a bank-side pending row (`!` with `pending:` meta)."""
+    return entry.flag == "*" or (
+        entry.flag == "!" and bool((entry.meta or {}).get("pending"))
+    )
+
+
 def find_cc_payment_offsets(entries) -> dict[tuple[str, str, str], str]:
     """Map cleared bank-side postings to the CC card they pay.
 
@@ -260,7 +267,7 @@ def find_cc_payment_offsets(entries) -> dict[tuple[str, str, str], str]:
          Liabilities:Credit:Y +N
 
     B. **Bridged payment** via `_BRIDGE_ACCOUNT`:
-         Txn 1 (cleared `*`):  Assets:Checking:X      -N
+         Txn 1 (`*`, or `!` with `pending:`): Assets:Checking:X -N
                                Assets:Pending-Transfer +N
          Txn 2 (any flag):     Assets:Pending-Transfer -N
                                Liabilities:Credit:Y    +N
@@ -324,7 +331,7 @@ def find_cc_payment_offsets(entries) -> dict[tuple[str, str, str], str]:
         for bridge in bridge_legs:
             bridge_amt = bridge.units.number
             key = (entry.date.isoformat(), abs(bridge_amt))
-            if entry.flag == "*" and bridge_amt > 0:
+            if _is_bank_real(entry) and bridge_amt > 0:
                 # Bank side: bridge in (+), other Assets:* leg out (−).
                 for p in entry.postings:
                     if p is bridge:
@@ -571,7 +578,9 @@ def build_grid_response(
         end_date = auto_end
 
     # 3. Pull all txns from BQL (with flag) for description + cleared-vs-scheduled
-    query = """SELECT account, date, payee, position, flag WHERE account ~ "^Assets:Saving" OR account ~ "^Assets:Checking" """
+    # `pending` is the §12 snapshot id on `!` rows the bank shows as pending
+    # (real money movement, unlike `tid:` forecasts), so plans can match them.
+    query = """SELECT account, date, payee, position, flag, entry_meta('pending') AS pending WHERE account ~ "^Assets:Saving" OR account ~ "^Assets:Checking" """
     rtypes, rrows = exec_query(query)
     cleared_amounts_by_date_account: dict[tuple[str, str], list[Decimal]] = defaultdict(
         list
@@ -598,7 +607,7 @@ def build_grid_response(
                 "description": _short_payee(r.payee),
             }
         )
-        if kind == "cleared":
+        if kind == "cleared" or getattr(r, "pending", None):
             cleared_amounts_by_date_account[(d, r.account)].append(amount)
 
     # 4. CC projections — derive live currentBalance from the .bean ledger.
