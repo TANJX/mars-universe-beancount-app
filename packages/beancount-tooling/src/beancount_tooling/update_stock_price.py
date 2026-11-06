@@ -116,6 +116,7 @@ crypto_ids = {
     "XLM": "stellar",
     "XRP": "ripple",
     "ADA": "cardano",
+    "USDG": "global-dollar",
 }
 
 
