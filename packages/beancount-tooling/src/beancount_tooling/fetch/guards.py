@@ -27,10 +27,13 @@ from typing import Any
 from beancount_tooling.fetch.config import AccountConfig
 
 BOFA_PLACEHOLDER_TEXT = "has no posted transactions"
-DATE_COLUMNS = ("Posted Date", "Date")
+# Chase card exports date rows by "Transaction Date" (confirmed 2026-11-07).
+DATE_COLUMNS = ("Posted Date", "Date", "Transaction Date")
 DATE_FORMAT = "%m/%d/%Y"
-# TD exports ISO dates (confirmed 2026-10-02).
-DATE_FORMATS = (DATE_FORMAT, "%Y-%m-%d")
+# TD exports ISO dates (confirmed 2026-10-02). Capital One 360 exports MM/DD/YY
+# (confirmed 2026-11-07); it goes first because %Y would read "25" as year 25,
+# while %y rejects a four-digit year, so MM/DD/YYYY still falls through.
+DATE_FORMATS = ("%m/%d/%y", DATE_FORMAT, "%Y-%m-%d")
 # Rows that are statement furniture rather than transactions. Their date tracks
 # the requested range, so they legitimately change between exports.
 IGNORED_ROW_PREFIXES = ("Beginning balance as of",)

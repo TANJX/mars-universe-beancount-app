@@ -28,6 +28,8 @@ REGISTRY: dict[str, str] = {
     "amex": "beancount_tooling.fetch.banks.amex",
     "td": "beancount_tooling.fetch.banks.td",
     "robinhood": "beancount_tooling.fetch.banks.robinhood",
+    "chase": "beancount_tooling.fetch.banks.chase",
+    "capitalone": "beancount_tooling.fetch.banks.capitalone",
 }
 
 

@@ -22,6 +22,8 @@ from beancount_tooling.importer.bofa_checking import BofACheckingImporter
 from beancount_tooling.importer.discover import DiscoverImporter
 from beancount_tooling.importer.chase import ChaseImporter
 from beancount_tooling.importer.chase_checking import ChaseCheckingImporter
+from beancount_tooling.importer.capital_one import CapitalOneImporter
+from beancount_tooling.importer.capital_one_bank import CapitalOneBankImporter
 from beancount_tooling.importer.bofa import BofAImporter
 from beancount_tooling.importer.bilt import BiltImporter
 from beancount_tooling.importer.apple import AppleImporter
@@ -146,6 +148,8 @@ def build_importer(
         "DiscoverImporter": DiscoverImporter,
         "ChaseImporter": ChaseImporter,
         "ChaseCheckingImporter": ChaseCheckingImporter,
+        "CapitalOneImporter": CapitalOneImporter,
+        "CapitalOneBankImporter": CapitalOneBankImporter,
         "BofAImporter": BofAImporter,
         "BiltImporter": BiltImporter,
         "AppleImporter": AppleImporter,
