@@ -1,0 +1,33 @@
+# Synthetic partner person file for test_runway_api.py.
+id: sam
+label: Sam
+job:
+  employer: Current job
+  gross_annual: 60000
+  schedule: { frequency: biweekly, anchor: 2026-11-13 }
+  deductions:
+    - { label: Life, amount: 1.5, pretax: false }
+  withholding: { state: ny, state_payroll: { flat_per_paycheck: 12 } }
+  match: { type: threshold, min_pct: 0.02, pct: 0.01 }
+  vesting: { date: 2027-05-01, unvested_start: 300 }
+k401:
+  ytd: { 2026: 1000 }
+  elections:
+    - { from: 2026-11, mode: percent, pretax_pct: 0.5, roth_pct: 0.02 }
+    - { from: 2027-01, mode: max, cap_pct: 0.8 }
+spending: { monthly: 3000 }
+cash:
+  buffer: 2000
+  ef_months: 6
+  earmarks: [ { label: Trip, amount: 5000 } ]
+  card_payoff: { checking: 0.5, ef: 0.5 }
+scenarios:
+  - id: offer
+    label: Offer A
+    job: { start: 2027-06, gross_annual: 80000, match: { type: flat, pct: 0.03 }, raise: null }
+starting:
+  source: static
+  asof: 2026-11-01
+  balances: { checking: 10000, ef: 30000, reserve: 40000, core: 20000, ira: 15000, k401: 10000, play: 5000 }
+  cards: 2000
+  unvested: 300

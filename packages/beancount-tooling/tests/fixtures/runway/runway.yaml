@@ -1,0 +1,41 @@
+# Synthetic runway.yaml for test_runway_api.py.
+version: 1
+asof: 2026-11-08
+start: 2026-11
+months: 24
+defaults:
+  returns: { equity: 0.06 }
+  k401_limits: { 2026: 24500, 2027: 24500 }
+  spread_through: horizon
+people:
+  - id: alex
+    job:
+      employer: Current job
+      raise: { month: 2, pct: 0.03 }
+      schedule: { frequency: semimonthly, days: [15, -1] }
+      deductions:
+        - { label: Commuter, amount: 100, per: month, paycheck: 1, pretax: true }
+        - { label: HSA, amount: 200, per: month, paycheck: 2, pretax: true, sleeve: hsa }
+      withholding: { state: ny_nonresident, state_payroll: { rate: 0.005, annual_cap: 400 } }
+    k401:
+      ytd: { 2026: 0 }
+      elections:
+        - { from: 2026-11, mode: fixed, pretax: 3000 }
+    ira: { amount: 7000, month: 1 }
+    cash: { buffer: 1000, ef_months: 3, earmarks: [], dca_months: 6 }
+    scenarios:
+      - id: next
+        label: Next job
+        job: { start: 2028-01, gross_annual: 120000, match: { type: flat, pct: 0.04 }, raise: null }
+    starting:
+      source: ledger
+      rules:
+        - { sleeve: checking, accounts: "^Assets:Checking:" }
+        - { sleeve: ef, accounts: "^Assets:Saving:" }
+        - { sleeve: reserve, accounts: "^Assets:Investment:Broker:(TBILL|USD)$" }
+        - { sleeve: core, accounts: "^Assets:Investment:Broker:VTI$" }
+        - { sleeve: play, accounts: "^Assets:Investment:Broker:" }
+      cards: "^Liabilities:Credit:"
+      loans: "^Liabilities:Loan:"
+  - include: partner/runway.yaml
+    label: Sam (inline)

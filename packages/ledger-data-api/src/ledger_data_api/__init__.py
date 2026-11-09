@@ -11,7 +11,7 @@ from fava.ext import FavaExtensionBase, extension_endpoint
 from fava.helpers import FavaAPIError
 from flask import request
 
-from . import fire, portfolio, store
+from . import fire, portfolio, runway, store
 from .merge import (
     _credit_balance_on,
     build_grid_response,
@@ -370,6 +370,21 @@ class LedgerDataApi(FavaExtensionBase):
                 "config": fire.read_fire_config(path),
                 "scenarios": fire.list_scenarios(path),
             }
+        )
+
+    @extension_endpoint
+    def runway_data(self):
+        """Everything the /runway page loads: config/runway.yaml resolved per
+        person (includes, fire.yaml inheritance, ledger starting balances)."""
+        path = self._ledger_path()
+        return json.dumps(
+            runway.build_runway_data(
+                ledger=g.ledger,
+                entries=g.ledger.all_entries,
+                ledger_file_path=path,
+                fire_config=fire.read_fire_config(path),
+                today=datetime.date.today(),
+            )
         )
 
     @extension_endpoint(methods=["POST"])

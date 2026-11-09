@@ -1,0 +1,106 @@
+# Example config/runway.yaml for the /runway page (lives in the ledger repo, next
+# to ui.yaml and fire.yaml). /runway projects the next N months per person:
+# take-home pay per paycheck, monthly outflows, and the balance of each sleeve
+# (checking buffer, emergency fund, reserve, core index, IRA, 401k, HSA, gold,
+# play). /fire is the long run in real dollars; this page is the near term in
+# nominal dollars. Every value is a starting point the page lets you edit.
+#
+# Money is nominal USD. Rates are decimals (0.03 = 3%). Months are YYYY-MM.
+# Illustrative values only.
+
+version: 1
+# start: 2026-11                 # first projected month; default: the current month
+months: 24                       # horizon
+# asof: 2026-11-08               # default today; ledger balances are taken as of this
+#                                # date and only pay dates after it are simulated
+# first_month_spend_fraction: 0.7  # default: share of the first month still ahead
+
+defaults:                        # deep-merged under every person; person keys win
+  returns: { equity: 0.07, reserve: 0.039, ef: 0.0365, gold: 0.03 }   # per year
+  k401_limits: { 2026: 24500, 2027: 24500, 2028: 25000 }   # else fire.yaml k401_limit
+  reserve_lookahead_months: 12   # the reserve holds earmarks + this many months of shortfall
+  spread_through: year_end       # max_spread: spread the remaining limit over paychecks to
+                                 # Dec 31 (year_end) or only those inside the horizon
+  play_cap: 0.10                 # play sleeve cap as a share of invested assets
+
+people:
+  - id: alex                     # matching a fire.yaml person id inherits label, work
+    label: Alex                  # state, gross salary and monthly spending when omitted
+    job:
+      employer: Current job
+      gross_annual: 90000
+      raise: { month: 2, pct: 0.03 }   # compounds each February; null = flat
+      schedule: { frequency: biweekly, anchor: 2026-11-13 }
+      # schedule: { frequency: semimonthly, days: [15, -1] }   # -1 = last weekday
+      deductions:
+        # pretax: off federal, state and FICA wages (fica_exempt defaults to pretax).
+        # per: paycheck | month; for per: month, `paycheck` picks which one (1-based).
+        # sleeve: credit the amount to a sleeve (an HSA, say).
+        - { label: Medical, amount: 30, per: paycheck, pretax: true }
+        - { label: Commuter, amount: 20, per: paycheck, pretax: true }
+        - { label: Life, amount: 1.50, per: paycheck, pretax: false }
+      withholding:
+        filing: single           # single | joint
+        federal_std: 16100
+        state: ny_nonresident    # ny | ny_nonresident | nj | none
+        state_std: 8000
+        state_payroll: { flat_per_paycheck: 12, rate: 0, annual_cap: null }
+        ss_wage_base: 184500
+      # none | flat {pct} | threshold {min_pct, pct} | tiered {tiers: [{rate, up_to_pct}]}
+      match: { type: threshold, min_pct: 0.04, pct: 0.02 }
+      vesting: { date: 2027-09-01, unvested_start: 500 }   # unvested match is forfeited
+                                                           # on leaving before this date
+    k401:
+      ytd: { 2026: 0 }           # employee deferrals already made this year
+      elections:                 # the latest `from` on or before a paycheck wins
+        - { from: 2026-11, mode: percent, pretax_pct: 0.10, roth_pct: 0 }
+        - { from: 2027-01, mode: max_spread, cap_pct: 0.5, roth_share: 0 }
+        # - { from: 2027-01, mode: fixed, pretax: 1000, roth: 0 }   # $ per paycheck,
+        #                                                           # clipped at the limit
+    spending: { monthly: 4200 }
+    ira: { amount: 7500, month: 1 }    # deposited each January; null = none
+    one_offs:                          # negative = refund
+      - { month: 2027-04, amount: 1500, label: "April tax due" }
+    cash:
+      buffer: 3000               # checking floor; topped up from reserve, then EF, then core
+      ef_months: 6               # emergency fund target in months of spending
+      earmarks: [ { label: Down payment, amount: 15000 } ]   # held in the reserve
+      dca_months: 12             # move the reserve's starting excess to core over this long
+      card_payoff: { checking: 1 }   # which cash sleeves pay today's card balances
+    scenarios:                   # `stay` (no change) is always first
+      - id: new-job
+        label: New job $110k
+        job: { start: 2027-07, gross_annual: 110000, match: { type: flat, pct: 0.04 } }
+        # omitted job fields (schedule, deductions, withholding, raise) carry over;
+        # vesting starts over unless given
+    starting:
+      source: ledger             # balances from the ledger at asof
+      rules:                     # ordered; the first regex matching the account wins
+        - { sleeve: checking, accounts: "^Assets:Checking:Acme-Bank$" }
+        - { sleeve: ef, accounts: "^Assets:Saving:Acme-Bank$" }
+        - { sleeve: reserve, accounts: "^Assets:Investment:Brokerage:Cash$" }
+        - { sleeve: core, accounts: "^Assets:Investment:Brokerage:VTI$" }
+      cards: "^Liabilities:Credit:"    # summed into the starting card balance
+      loans: "^Liabilities:Loan:"      # held flat, subtracted from net worth
+      unvested: 0
+
+  # A second person can live in its own file anywhere inside the ledger folder
+  # (an encrypted path, say). Inline keys beside `include` override the file; give
+  # `id` and `label` here so the page can still list the person while the file is
+  # locked.
+  # - include: partner/runway.yaml
+  #   id: sam
+  #   label: Sam
+  #
+  # partner/runway.yaml holds a whole person mapping, for example:
+  #   job: { gross_annual: 70000, schedule: { frequency: semimonthly, days: [15, -1] } }
+  #   k401: { elections: [ { from: 2026-11, mode: max_spread } ] }
+  #   spending: { monthly: 3500 }
+  #   starting:
+  #     source: static
+  #     asof: 2026-11-01
+  #     balances: { checking: 10000, ef: 30000, reserve: 40000, core: 20000, ira: 15000,
+  #                 k401: 10000, gold: 0, play: 5000 }
+  #     cards: 2000
+  #     loans: 0
+  #     unvested: 0
