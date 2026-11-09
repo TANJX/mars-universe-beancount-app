@@ -11,9 +11,9 @@
 
 import type { Person, WorkState } from "./types"
 
-type Bracket = [upTo: number, rate: number]
+export type Bracket = [upTo: number, rate: number]
 
-const FED_SINGLE: Bracket[] = [
+export const FED_SINGLE: Bracket[] = [
   [12_400, 0.1],
   [50_400, 0.12],
   [105_700, 0.22],
@@ -22,7 +22,7 @@ const FED_SINGLE: Bracket[] = [
   [640_600, 0.35],
   [Number.POSITIVE_INFINITY, 0.37],
 ]
-const FED_JOINT: Bracket[] = [
+export const FED_JOINT: Bracket[] = [
   [24_800, 0.1],
   [100_800, 0.12],
   [211_400, 0.22],
@@ -35,13 +35,13 @@ const STD_SINGLE = 16_100
 const STD_JOINT = 32_200
 
 const SS_RATE = 0.062
-const SS_WAGE_BASE = 184_500
+export const SS_WAGE_BASE = 184_500
 const MEDICARE = 0.0145
 const MEDICARE_SURTAX = 0.009
 const SURTAX_SINGLE = 200_000
 const SURTAX_JOINT = 250_000
 
-const NY: Bracket[] = [
+export const NY: Bracket[] = [
   [8_500, 0.04],
   [11_700, 0.045],
   [13_900, 0.0525],
@@ -52,11 +52,11 @@ const NY: Bracket[] = [
   [25_000_000, 0.103],
   [Number.POSITIVE_INFINITY, 0.109],
 ]
-const NY_STD = 8_000
+export const NY_STD = 8_000
 /** NY paid family leave + disability, employee share, capped. */
 const NY_PAYROLL = (wages: number) => Math.min(wages * 0.00432, 411.91) + 31.2
 
-const NJ: Bracket[] = [
+export const NJ: Bracket[] = [
   [20_000, 0.014],
   [35_000, 0.0175],
   [40_000, 0.035],
@@ -65,11 +65,11 @@ const NJ: Bracket[] = [
   [1_000_000, 0.0897],
   [Number.POSITIVE_INFINITY, 0.1075],
 ]
-const NJ_EXEMPTION = 1_000
+export const NJ_EXEMPTION = 1_000
 /** NJ disability + family leave insurance, employee share, capped. */
 const NJ_PAYROLL = (wages: number) => Math.min(wages, 171_100) * 0.0042
 
-function bracketTax(income: number, brackets: Bracket[]): number {
+export function bracketTax(income: number, brackets: Bracket[]): number {
   let tax = 0
   let floor = 0
   for (const [upTo, rate] of brackets) {

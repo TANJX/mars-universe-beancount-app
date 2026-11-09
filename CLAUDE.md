@@ -71,6 +71,7 @@ After non-trivial edits, run the relevant subset (`lint-py`/`lint-js`) before re
 ## Test Commands
 
 The pytest suite lives in `packages/beancount-tooling/tests/`. The gate is `just test` plus `just lint-py`.
+The web app's pure engines (`apps/web/lib/runway/`) have `node --test` unit tests run straight from the TypeScript source: `just test-web`. They have no extra dependencies; a private prototype-parity test runs only when `RUNWAY_PARITY_FIXTURE` points at a fixture outside the repo.
 `tests/conftest.py` installs an empty merchant map for every test, so the private `$LEDGER_DIR/config/merchants.yaml` never leaks in; use the `merchant_map` fixture (synthetic `tests/fixtures/merchants.yaml`) when a test needs one.
 
 - Run all tests:

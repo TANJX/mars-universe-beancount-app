@@ -8,13 +8,14 @@
 
 import {
   AlertTriangle,
-  PanelRightClose,
   PanelRightOpen,
   RotateCcw,
+  Waypoints,
 } from "lucide-react"
+import Link from "next/link"
 import * as React from "react"
 
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { useDeleteScenario, useSaveScenario } from "@/hooks/use-fire"
 import { applyScenario, type FireData } from "@/lib/fire/config"
@@ -46,6 +47,7 @@ import { AssumptionsPanel, ImpactPanel } from "./levers"
 import { PeoplePanel } from "./people"
 import { ProjectionChart, ProjectionLegend } from "./projection-chart"
 import { type ComparedRow, ScenariosPanel } from "./scenarios"
+import { PANE_FILL, SectionNav, usePaneOpen } from "./workbench"
 import { YearTable } from "./year-table"
 
 const FREE_LABEL: Record<Path, string> = {
@@ -87,18 +89,7 @@ export function FireView({ data }: { data: FireData }) {
   const [horizonAge, setHorizonAge] = React.useState(75)
   const paneRef = React.useRef<HTMLElement>(null)
   // Folding gives the chart the full width; remembered per browser.
-  const [paneOpen, setPaneOpen] = React.useState(true)
-  React.useEffect(() => {
-    try {
-      if (localStorage.getItem(PANE_KEY) === "0") setPaneOpen(false)
-    } catch {}
-  }, [])
-  const setPane = (open: boolean) => {
-    setPaneOpen(open)
-    try {
-      localStorage.setItem(PANE_KEY, open ? "1" : "0")
-    } catch {}
-  }
+  const [paneOpen, setPane] = usePaneOpen("fire.controlsOpen")
   const save = useSaveScenario()
   const del = useDeleteScenario()
 
@@ -228,6 +219,12 @@ export function FireView({ data }: { data: FireData }) {
             >
               <RotateCcw /> Reset to config
             </Button>
+            <Link
+              href="/runway"
+              className={buttonVariants({ variant: "ghost", size: "xs" })}
+            >
+              <Waypoints /> Next 24 months
+            </Link>
           </div>
           <div className="flex flex-wrap items-end gap-6">
             <Stat
@@ -362,7 +359,11 @@ export function FireView({ data }: { data: FireData }) {
           !paneOpen && "xl:hidden"
         )}
       >
-        <SectionNav paneRef={paneRef} onFold={() => setPane(false)} />
+        <SectionNav
+          sections={SECTIONS}
+          paneRef={paneRef}
+          onFold={() => setPane(false)}
+        />
 
         <div id="fire-plan" className="flex scroll-mt-12 flex-col gap-4">
           <SectionCard
@@ -560,12 +561,6 @@ function Row({
   )
 }
 
-const PANE_KEY = "fire.controlsOpen"
-
-/** Opaque fill for the controls pane and its sticky nav (the nav must hide
- * what scrolls under it, so no alpha). */
-const PANE_FILL = "bg-[color-mix(in_oklch,var(--muted)_60%,var(--background))]"
-
 const SECTIONS = [
   { id: "fire-plan", label: "Plan" },
   { id: "fire-people", label: "People" },
@@ -574,73 +569,3 @@ const SECTIONS = [
   { id: "fire-ledger", label: "Ledger" },
   { id: "fire-learn", label: "Learn" },
 ]
-
-/** Chips that jump within the controls pane, highlighting the section in
- * view. Sticky at the top of whichever element scrolls (the pane at xl, the
- * page below it). */
-function SectionNav({
-  paneRef,
-  onFold,
-}: {
-  paneRef: React.RefObject<HTMLElement | null>
-  onFold: () => void
-}) {
-  const [active, setActive] = React.useState(SECTIONS[0].id)
-  React.useEffect(() => {
-    const pane = paneRef.current
-    if (!pane) return
-    const isPane = getComputedStyle(pane).overflowY === "auto"
-    const obs = new IntersectionObserver(
-      (entries) => {
-        const top = entries
-          .filter((e) => e.isIntersecting)
-          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
-        if (top[0]) setActive(top[0].target.id)
-      },
-      { root: isPane ? pane : null, rootMargin: "0px 0px -70% 0px" }
-    )
-    for (const s of SECTIONS) {
-      const el = document.getElementById(s.id)
-      if (el) obs.observe(el)
-    }
-    return () => obs.disconnect()
-  }, [paneRef])
-
-  return (
-    <nav
-      className={cn(
-        "-mx-4 flex flex-wrap items-center gap-1 rounded-t-xl px-4 pt-3 pb-2 xl:sticky xl:top-0 xl:z-[5]",
-        PANE_FILL
-      )}
-    >
-      {SECTIONS.map((s) => (
-        <button
-          key={s.id}
-          type="button"
-          onClick={() =>
-            document
-              .getElementById(s.id)
-              ?.scrollIntoView({ behavior: "smooth", block: "start" })
-          }
-          className={cn(
-            "h-6 rounded-md px-2 text-xs transition-colors",
-            active === s.id
-              ? "bg-background font-medium text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          )}
-        >
-          {s.label}
-        </button>
-      ))}
-      <button
-        type="button"
-        onClick={onFold}
-        aria-label="Hide controls"
-        title="Hide controls"
-        className="ml-auto hidden size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground xl:inline-flex"
-      >
-        <PanelRightClose size={15} />
-      </button>
-    </nav>
-  )
-}

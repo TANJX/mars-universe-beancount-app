@@ -11,6 +11,7 @@ import {
   PieChart,
   Receipt,
   Search as SearchIcon,
+  Waypoints,
 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import * as React from "react"
@@ -51,6 +52,8 @@ const NAV: NavItem[] = [
   },
   // `f` belongs to Portfolio; FIRE takes the next letter in its own name.
   { href: "/fire", label: "FIRE", icon: Flame, leaderKey: "r" },
+  // `r` belongs to FIRE; Runway takes the next letter in its own name.
+  { href: "/runway", label: "Runway", icon: Waypoints, leaderKey: "u" },
   { href: "/income", label: "Income", icon: BarChart3, leaderKey: "i" },
   { href: "/expenses", label: "Expenses", icon: Receipt, leaderKey: "e" },
   { href: "/journal", label: "Journal", icon: BookOpen, leaderKey: "j" },

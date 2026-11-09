@@ -11,6 +11,7 @@ import {
   Receipt,
   Search,
   Settings2,
+  Waypoints,
 } from "lucide-react"
 import Link from "next/link"
 import { usePathname, useSearchParams } from "next/navigation"
@@ -62,6 +63,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/balances", label: "Balances", icon: ListTree },
   { href: "/portfolio", label: "Portfolio", icon: PieChart },
   { href: "/fire", label: "FIRE", icon: Flame },
+  { href: "/runway", label: "Runway", icon: Waypoints },
   { href: "/income", label: "Income", icon: BarChart3 },
   { href: "/expenses", label: "Expenses", icon: Receipt },
   { href: "/journal", label: "Journal", icon: BookOpen },

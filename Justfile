@@ -92,6 +92,12 @@ svc *args:
 test *args:
     cd packages/beancount-tooling && uv run pytest -q {{args}}
 
+# Web engine unit tests (node --test on the TypeScript source, no extra deps).
+# Private prototype parity runs only when RUNWAY_PARITY_FIXTURE points at a JSON
+# fixture, e.g. RUNWAY_PARITY_FIXTURE=$LEDGER_DIR/<private>/runway-parity.json just test-web
+test-web *args:
+    cd apps/web && node --import ./lib/runway/test/resolve-ts.mjs --test 'lib/runway/**/*.test.ts' {{args}}
+
 # Lint / format everything (Python + JS/TS)
 lint: lint-py lint-js
 fmt: fmt-py fmt-js

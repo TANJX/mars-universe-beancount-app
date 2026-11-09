@@ -132,6 +132,7 @@ export function NumberField({
   prefix,
   suffix,
   ariaLabel,
+  id,
 }: {
   value: number
   onChange: (v: number) => void
@@ -140,6 +141,8 @@ export function NumberField({
   prefix?: string
   suffix?: string
   ariaLabel: string
+  /** Lets a visible `<label htmlFor>` point at the input. */
+  id?: string
 }) {
   const [draft, setDraft] = React.useState(String(value))
   React.useEffect(() => setDraft(String(value)), [value])
@@ -157,6 +160,7 @@ export function NumberField({
     >
       {prefix ? <span className="text-muted-foreground">{prefix}</span> : null}
       <input
+        id={id}
         aria-label={ariaLabel}
         inputMode="decimal"
         step={step}
@@ -168,7 +172,9 @@ export function NumberField({
         }}
         className="w-full min-w-0 bg-transparent font-mono tabular-nums outline-none"
       />
-      {suffix ? <span className="text-muted-foreground">{suffix}</span> : null}
+      {suffix ? (
+        <span className="whitespace-nowrap text-muted-foreground">{suffix}</span>
+      ) : null}
     </span>
   )
 }
@@ -198,21 +204,37 @@ export function Segmented<T extends string>({
   value,
   options,
   onChange,
+  ariaLabel,
+  className,
+  optionClassName,
 }: {
   value: T
-  options: { value: T; label: string }[]
+  options: { value: T; label: React.ReactNode }[]
   onChange: (v: T) => void
+  /** Names the group for screen readers ("Person", "Chart"). */
+  ariaLabel?: string
+  className?: string
+  optionClassName?: string
 }) {
   return (
-    <div className="inline-flex h-7 items-center rounded-lg bg-muted p-[3px] text-xs">
+    <div
+      role="group"
+      aria-label={ariaLabel}
+      className={cn(
+        "inline-flex h-7 items-center rounded-lg bg-muted p-[3px] text-xs",
+        className
+      )}
+    >
       {options.map((o) => (
         <button
           key={o.value}
           type="button"
+          aria-pressed={value === o.value}
           onClick={() => onChange(o.value)}
           className={cn(
-            "h-full rounded-md px-2.5 font-medium text-muted-foreground transition-colors",
-            value === o.value && "bg-background text-foreground shadow-sm"
+            "h-full rounded-md px-2.5 font-medium text-muted-foreground transition-[color,background-color,box-shadow,scale] active:scale-[0.96]",
+            value === o.value && "bg-background text-foreground shadow-sm",
+            optionClassName
           )}
         >
           {o.label}

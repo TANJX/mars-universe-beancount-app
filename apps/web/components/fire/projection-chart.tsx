@@ -27,6 +27,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import type { MonteCarlo, TimelineMark } from "@/lib/fire/engine"
 import type { Path, Phase, SimResult } from "@/lib/fire/types"
 
+import { axisMoney, niceTicks } from "./axis"
 import { usd, usdShort } from "./controls"
 
 const CONFIG: ChartConfig = {
@@ -34,23 +35,6 @@ const CONFIG: ChartConfig = {
   target: { label: "FI target", color: "var(--foreground)" },
   coast: { label: "Coast line", color: "var(--muted-foreground)" },
   band: { label: "10th–90th pct", color: "var(--primary)" },
-}
-
-/** Round-number ticks, about 8 to 14 of them: recharts' default 5 lands on
- * values like $850k and $1.70M that are hard to read across. */
-function niceTicks(max: number): { max: number; ticks: number[] } {
-  const steps = [50e3, 100e3, 200e3, 250e3, 500e3, 1e6, 2e6, 5e6]
-  const step = steps.find((x) => max / x <= 14) ?? 1e7
-  const top = Math.max(step, Math.ceil(max / step) * step)
-  const ticks = Array.from({ length: top / step + 1 }, (_, i) => i * step)
-  return { max: top, ticks }
-}
-
-/** $250k, $1.5M, $2M: no trailing zeros on an axis. */
-function axisMoney(v: number): string {
-  if (v >= 1e6) return `$${Number((v / 1e6).toFixed(2))}M`
-  if (v >= 1e3) return `$${Math.round(v / 1e3)}k`
-  return `$${v}`
 }
 
 const FREE_TAG: Record<Path, string> = {

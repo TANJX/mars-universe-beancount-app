@@ -13,6 +13,9 @@ import { usePeriodHref } from "@/components/layout/ui-state"
  *   g + o   → /overview
  *   g + p   → /plan
  *   g + b   → /balances
+ *   g + f   → /portfolio
+ *   g + r   → /fire
+ *   g + u   → /runway
  *   g + i   → /income
  *   g + e   → /expenses
  *   g + j   → /journal
@@ -21,6 +24,7 @@ import { usePeriodHref } from "@/components/layout/ui-state"
  *
  * `[` / `]` (period prev/next) and `m` (open period popover) are owned by
  * PeriodCommand; ⌘P/⌘K are owned by their respective components.
+ * Keep the letters in sync with the leaderKey list in command-palette.tsx.
  */
 export function GlobalKeys() {
   const router = useRouter()
@@ -59,6 +63,10 @@ export function GlobalKeys() {
           case "r":
             e.preventDefault()
             router.push(periodHref("/fire"))
+            return
+          case "u":
+            e.preventDefault()
+            router.push(periodHref("/runway"))
             return
           case "i":
             e.preventDefault()
