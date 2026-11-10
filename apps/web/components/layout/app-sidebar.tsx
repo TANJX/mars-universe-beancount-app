@@ -7,6 +7,7 @@ import {
   Flame,
   LayoutGrid,
   ListTree,
+  PanelLeft,
   PieChart,
   Receipt,
   Search,
@@ -45,10 +46,12 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useResolvedUIConfig, useUIConfig } from "@/lib/config"
 import type { Density } from "@/lib/types/views"
+import { cn } from "@/lib/utils"
 import { MarsLogo } from "./mars-logo"
 
 interface NavItem {
@@ -69,6 +72,13 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/journal", label: "Journal", icon: BookOpen },
 ]
 
+// Shared by the parts of the sidebar that only exist in one state. They fade
+// on the provider's timing: out first on collapse, in last on expand.
+const EXPANDED_ONLY =
+  "transition-opacity delay-(--sidebar-fade) duration-(--sidebar-fade) group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:delay-0"
+const COLLAPSED_ONLY =
+  "opacity-0 transition-opacity duration-(--sidebar-fade) group-data-[collapsible=icon]:opacity-100 group-data-[collapsible=icon]:delay-(--sidebar-fade)"
+
 export function AppSidebar() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -77,13 +87,25 @@ export function AppSidebar() {
   const { openCommandPalette } = useCommandPalette()
   const { branding, sidebar } = useResolvedUIConfig()
   const { isPending } = useUIConfig()
+  const { open, toggleSidebar } = useSidebar()
 
   return (
-    <Sidebar collapsible="none">
+    <Sidebar
+      collapsible="icon"
+      // The app separates sidebar and content with space, not a rule.
+      className="group-data-[side=left]:border-r-0"
+    >
       <SidebarHeader>
         <div className="flex items-center gap-2.5 px-1 py-1">
-          <MarsLogo />
-          <div className="min-w-0 flex-1 leading-tight">
+          <span className="shrink-0">
+            <MarsLogo />
+          </span>
+          <div
+            className={cn(
+              "min-w-0 flex-1 overflow-hidden leading-tight whitespace-nowrap",
+              EXPANDED_ONLY
+            )}
+          >
             {isPending ? (
               <div className="flex flex-col gap-1 py-0.5">
                 <Skeleton className="h-3.5 w-24" />
@@ -104,15 +126,20 @@ export function AppSidebar() {
           </div>
         </div>
 
-        <button
+        {/* px-[7px] + the 1px border keeps the icon on the same axis as the
+            nav icons below, so it stays centered in the collapsed rail. */}
+        <SidebarMenuButton
           type="button"
           onClick={openCommandPalette}
-          className="flex w-full cursor-pointer items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-left text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+          tooltip={{ children: <TooltipLabel label="Search" keys="⌘K" /> }}
+          className="cursor-pointer border bg-background px-[7px] text-muted-foreground"
         >
-          <Search size={12} />
-          <span className="flex-1 text-sm">Search</span>
-          <kbd className="font-mono text-xs text-muted-foreground/80">⌘K</kbd>
-        </button>
+          <Search />
+          <span className="flex flex-1 items-center gap-2">
+            <span className="flex-1 truncate">Search</span>
+            <kbd className="font-mono text-xs text-muted-foreground/80">⌘K</kbd>
+          </span>
+        </SidebarMenuButton>
       </SidebarHeader>
 
       <SidebarContent>
@@ -128,6 +155,7 @@ export function AppSidebar() {
                     <SidebarMenuButton
                       render={<Link href={periodHref(item.href)} />}
                       isActive={active}
+                      tooltip={item.label}
                     >
                       <Icon size={14} />
                       <span>{item.label}</span>
@@ -149,9 +177,11 @@ export function AppSidebar() {
                     // sidebar doesn't reflow when the real data arrives.
                     Array.from({ length: 4 }).map((_, i) => (
                       <SidebarMenuItem key={i}>
-                        <div className="flex items-center gap-2 px-2 py-1.5">
-                          <Skeleton className="size-1.5 rounded-full" />
-                          <Skeleton className="h-3 w-16" />
+                        <div className="flex h-7 items-center gap-2 px-2">
+                          <span className="flex size-4 shrink-0 items-center justify-center">
+                            <Skeleton className="size-2 rounded-full" />
+                          </span>
+                          <Skeleton className={cn("h-3 w-16", EXPANDED_ONLY)} />
                         </div>
                       </SidebarMenuItem>
                     ))
@@ -170,8 +200,29 @@ export function AppSidebar() {
                             size="sm"
                             render={<Link href={href} />}
                             isActive={active}
+                            tooltip={b.label}
                           >
-                            <AccountDot root={b.root} />
+                            {/* Bookmarks have no icon. The dot sits in the
+                                same 16px slot as the nav icons; collapsed, a
+                                monogram takes its place so the rail is not a
+                                column of identical dots. */}
+                            <span
+                              aria-hidden
+                              className="relative flex size-4 shrink-0 items-center justify-center"
+                            >
+                              <AccountDot
+                                root={b.root}
+                                className={EXPANDED_ONLY}
+                              />
+                              <span
+                                className={cn(
+                                  "absolute inset-0 flex items-center justify-center rounded-sm bg-sidebar-foreground/10 text-[10px] leading-none font-medium",
+                                  COLLAPSED_ONLY
+                                )}
+                              >
+                                {monogram(b.label)}
+                              </span>
+                            </span>
                             <span>{b.label}</span>
                           </SidebarMenuButton>
                         </SidebarMenuItem>
@@ -183,20 +234,44 @@ export function AppSidebar() {
         )}
       </SidebarContent>
 
-      <SidebarFooter>
-        <ClientOnly
-          fallback={
-            <div
-              aria-hidden
-              className="flex justify-start px-1"
-              style={{ height: "1.75rem" }}
-            />
-          }
-        >
+      <SidebarFooter className="gap-0">
+        <ClientOnly fallback={<div aria-hidden style={{ height: "2rem" }} />}>
           <SettingsMenu />
         </ClientOnly>
+        <SidebarMenuButton
+          type="button"
+          aria-expanded={open}
+          // detail is 0 when the click came from Enter/Space: keyboard
+          // toggles skip the animation, same as ⌘B.
+          onClick={(e) => toggleSidebar({ instant: e.detail === 0 })}
+          tooltip={{
+            children: <TooltipLabel label="Expand sidebar" keys="⌘B" />,
+          }}
+          className="cursor-pointer text-muted-foreground"
+        >
+          <PanelLeft />
+          <span className="flex flex-1 items-center gap-2">
+            <span className="flex-1 truncate">
+              {open ? "Collapse sidebar" : "Expand sidebar"}
+            </span>
+            <kbd className="font-mono text-xs text-muted-foreground/80">⌘B</kbd>
+          </span>
+        </SidebarMenuButton>
       </SidebarFooter>
     </Sidebar>
+  )
+}
+
+function monogram(label: string): string {
+  return Array.from(label.trim())[0]?.toUpperCase() ?? "?"
+}
+
+function TooltipLabel({ label, keys }: { label: string; keys: string }) {
+  return (
+    <>
+      {label}
+      <kbd className="font-mono text-background/60">{keys}</kbd>
+    </>
   )
 }
 
@@ -206,64 +281,64 @@ function SettingsMenu() {
   const { openShortcuts } = useShortcutsDialog()
 
   return (
-    <div className="flex justify-start px-1">
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          aria-label="Display settings"
-          className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
-        >
-          <Settings2 size={14} />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="start"
-          side="top"
-          sideOffset={8}
-          className="w-auto min-w-44"
-        >
-          <DropdownMenuGroup>
-            <DropdownMenuLabel>Theme</DropdownMenuLabel>
-            <DropdownMenuRadioGroup
-              value={theme}
-              onValueChange={(v) => setTheme(v)}
-            >
-              <DropdownMenuRadioItem value="light">
-                <span className="whitespace-nowrap">Light</span>
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="dark">
-                <span className="whitespace-nowrap">Dark</span>
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="system">
-                <span className="whitespace-nowrap">System</span>
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuGroup>
-            <DropdownMenuLabel>Row height</DropdownMenuLabel>
-            <DropdownMenuRadioGroup
-              value={density}
-              onValueChange={(v) => setDensity(v as Density)}
-            >
-              <DropdownMenuRadioItem value="comfortable">
-                <span className="whitespace-nowrap">Comfortable</span>
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="compact">
-                <span className="whitespace-nowrap">Compact</span>
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            closeOnClick={false}
-            onClick={() => {
-              setTimeout(openShortcuts, 50)
-            }}
+    <DropdownMenu>
+      <SidebarMenuButton
+        render={<DropdownMenuTrigger />}
+        tooltip="Display settings"
+        className="cursor-pointer text-muted-foreground"
+      >
+        <Settings2 />
+        <span>Display settings</span>
+      </SidebarMenuButton>
+      <DropdownMenuContent
+        align="start"
+        side="top"
+        sideOffset={8}
+        className="w-auto min-w-44"
+      >
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Theme</DropdownMenuLabel>
+          <DropdownMenuRadioGroup
+            value={theme}
+            onValueChange={(v) => setTheme(v)}
           >
-            <span className="whitespace-nowrap">Keyboard shortcuts</span>
-            <DropdownMenuShortcut>?</DropdownMenuShortcut>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+            <DropdownMenuRadioItem value="light">
+              <span className="whitespace-nowrap">Light</span>
+            </DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="dark">
+              <span className="whitespace-nowrap">Dark</span>
+            </DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="system">
+              <span className="whitespace-nowrap">System</span>
+            </DropdownMenuRadioItem>
+          </DropdownMenuRadioGroup>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Row height</DropdownMenuLabel>
+          <DropdownMenuRadioGroup
+            value={density}
+            onValueChange={(v) => setDensity(v as Density)}
+          >
+            <DropdownMenuRadioItem value="comfortable">
+              <span className="whitespace-nowrap">Comfortable</span>
+            </DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="compact">
+              <span className="whitespace-nowrap">Compact</span>
+            </DropdownMenuRadioItem>
+          </DropdownMenuRadioGroup>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          closeOnClick={false}
+          onClick={() => {
+            setTimeout(openShortcuts, 50)
+          }}
+        >
+          <span className="whitespace-nowrap">Keyboard shortcuts</span>
+          <DropdownMenuShortcut>?</DropdownMenuShortcut>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

@@ -1,5 +1,7 @@
 "use client"
 
+import * as React from "react"
+
 import { AppSidebar } from "@/components/layout/app-sidebar"
 import { CommandPalette } from "@/components/layout/command-palette"
 import { DensityWrapper } from "@/components/layout/density-wrapper"
@@ -58,9 +60,37 @@ function MobileShell({ children }: { children: React.ReactNode }) {
   )
 }
 
+const SIDEBAR_OPEN_KEY = "mars-sidebar-open"
+
+function readStoredSidebarOpen(): boolean {
+  try {
+    return window.localStorage.getItem(SIDEBAR_OPEN_KEY) !== "0"
+  } catch {
+    return true
+  }
+}
+
 function DesktopShell({ children }: { children: React.ReactNode }) {
+  // DesktopShell only ever mounts on the client (see LedgerShell), so the
+  // stored state can be read synchronously for the very first render: the
+  // sidebar appears already collapsed or expanded, never default-then-fixed.
+  // localStorage rather than a cookie because no server render reads it.
+  const [sidebarOpen, setSidebarOpen] = React.useState(readStoredSidebarOpen)
+  const onSidebarOpenChange = React.useCallback((open: boolean) => {
+    setSidebarOpen(open)
+    try {
+      window.localStorage.setItem(SIDEBAR_OPEN_KEY, open ? "1" : "0")
+    } catch {
+      // Storage unavailable (private mode): the toggle still works.
+    }
+  }, [])
+
   return (
-    <SidebarProvider className="h-svh">
+    <SidebarProvider
+      className="h-svh"
+      open={sidebarOpen}
+      onOpenChange={onSidebarOpenChange}
+    >
       <CommandPalette>
         <AppSidebar />
         <SidebarInset className="flex flex-col overflow-hidden">

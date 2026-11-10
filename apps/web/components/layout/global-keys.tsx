@@ -23,7 +23,8 @@ import { usePeriodHref } from "@/components/layout/ui-state"
  *   ?       → log a placeholder; future shortcuts dialog
  *
  * `[` / `]` (period prev/next) and `m` (open period popover) are owned by
- * PeriodCommand; ⌘P/⌘K are owned by their respective components.
+ * PeriodCommand; ⌘P/⌘K are owned by their respective components, and ⌘B
+ * (toggle sidebar) by SidebarProvider.
  * Keep the letters in sync with the leaderKey list in command-palette.tsx.
  */
 export function GlobalKeys() {

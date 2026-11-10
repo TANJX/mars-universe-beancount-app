@@ -21,8 +21,9 @@ interface ShortcutGroup {
 }
 
 // Single source of truth for keyboard shortcut documentation. Changing a
-// binding in `global-keys.tsx`, `period-command.tsx`, or `command-palette.tsx`
-// should be mirrored here so the help dialog stays accurate.
+// binding in `global-keys.tsx`, `period-command.tsx`, `command-palette.tsx`,
+// or `ui/sidebar.tsx` (⌘B) should be mirrored here so the help dialog stays
+// accurate.
 const SHORTCUTS: ShortcutGroup[] = [
   {
     heading: "Navigation",
@@ -53,6 +54,10 @@ const SHORTCUTS: ShortcutGroup[] = [
       { keys: ["⌘", "K"], description: "Open command palette" },
       { keys: ["/"], description: "Focus the page's search input" },
     ],
+  },
+  {
+    heading: "View",
+    items: [{ keys: ["⌘", "B"], description: "Toggle sidebar" }],
   },
   {
     heading: "Help",
