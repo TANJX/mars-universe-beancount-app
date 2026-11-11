@@ -9,12 +9,34 @@ job:
     - { label: Life, amount: 1.5, pretax: false }
   withholding: { state: ny, state_payroll: { flat_per_paycheck: 12 } }
   match: { type: threshold, min_pct: 0.02, pct: 0.01 }
+  hsa_employer: { amount: 500, month: 1 }
   vesting: { date: 2027-05-01, unvested_start: 300 }
-k401:
-  ytd: { 2026: 1000 }
-  elections:
-    - { from: 2026-11, mode: percent, pretax_pct: 0.5, roth_pct: 0.02 }
-    - { from: 2027-01, mode: max, cap_pct: 0.8 }
+hsa_coverage:
+  - { from: 2026-01, tier: self }
+  - { from: 2027-06, tier: none }
+limits:
+  2027: { hsa_self: 4500 }
+contributions:
+  - id: k401-pretax
+    account: k401
+    tax: traditional
+    ytd: { 2026: 1000 }
+    schedule:
+      - { from: 2027-01, pace: max, cap_pct: 0.8 }
+      - { from: 2026-11, pace: percent, pct: 0.5 }
+  - account: k401
+    tax: roth
+    schedule:
+      - { from: 2026-11, pace: percent, pct: 0.02 }
+      - { from: 2027-01, pace: off }
+  - account: hsa
+    schedule:
+      - { from: 2026-11, pace: fixed, amount: 150, per: month, paycheck: 2 }
+      - { from: 2027-01, pace: front_load, cap_pct: 0.25 }
+  - account: ira
+    tax: roth
+    schedule:
+      - { from: 2026-11, pace: lump, month: 1, amount: max }
 spending: { monthly: 3000 }
 cash:
   buffer: 2000
@@ -24,7 +46,7 @@ cash:
 scenarios:
   - id: offer
     label: Offer A
-    job: { start: 2027-06, gross_annual: 80000, match: { type: flat, pct: 0.03 }, raise: null }
+    job: { start: 2027-06, gross_annual: 80000, match: { type: flat, pct: 0.03 }, raise: null, hsa_coverage: none }
 starting:
   source: static
   asof: 2026-11-01

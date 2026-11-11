@@ -30,7 +30,7 @@ export function sleeveInfos(
     .filter((s) => used.includes(s.id))
     .sort((a, b) => a.flow - b.flow)
     .map((s) => {
-      const o = overrides[s.id === "other" ? "hsa" : s.id] ?? overrides[s.id]
+      const o = overrides[s.id]
       return {
         id: s.id,
         title: o?.title ?? SLEEVE_TEXT[s.id].title,

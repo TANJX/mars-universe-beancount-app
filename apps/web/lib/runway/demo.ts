@@ -2,6 +2,7 @@
 // says so). Synthetic round numbers that describe nobody; the same people as
 // runway.example.yaml.
 
+import { defaultLimits } from "./contributions"
 import { addMonths } from "./schedule"
 import type {
   Job,
@@ -72,6 +73,8 @@ const ALEX_JOB: Job = {
   withholding: DEFAULT_WITHHOLDING,
   match: { type: "threshold", minPct: 0.04, pct: 0.02 },
   vesting: { date: "2027-09-01", unvestedStart: 500 },
+  hsaEmployer: null,
+  hsaTier: null,
 }
 
 const SAM_JOB: Job = {
@@ -79,43 +82,63 @@ const SAM_JOB: Job = {
   grossAnnual: 140_000,
   raise: null,
   schedule: { frequency: "semimonthly", anchor: null, days: [15, -1] },
-  deductions: [
-    {
-      label: "HSA",
-      amount: 300,
-      per: "month",
-      paycheckOfMonth: 2,
-      pretax: true,
-      ficaExempt: true,
-      sleeve: "hsa",
-    },
-  ],
+  deductions: [],
   withholding: {
     ...DEFAULT_WITHHOLDING,
     statePayroll: { flatPerPaycheck: 0, rate: 0.00432, annualCap: 411.91 },
   },
   match: { type: "none" },
   vesting: null,
+  hsaEmployer: { amount: 500, month: 1 },
+  hsaTier: null,
 }
 
 function demoPeople(asof: string, start: string): RunwayPerson[] {
   const y = Number(start.slice(0, 4))
-  const limits = { [y]: 24_500, [y + 1]: 24_500, [y + 2]: 25_000 }
+  const limits = {
+    [y]: defaultLimits(y, null),
+    [y + 1]: defaultLimits(y + 1, null),
+    [y + 2]: { ...defaultLimits(y + 2, null), k401: 25_000 },
+  }
   const next = (n: number) => addMonths(start, n)
   const alex: RunwayPerson = {
     id: "alex",
     label: "Alex",
     job: ALEX_JOB,
-    k401: {
-      limits,
-      ytd: { [y]: 0 },
-      elections: [
-        { from: start, mode: "percent", pretaxPct: 0.1, rothPct: 0 },
-        { from: `${y + 1}-01`, mode: "max_spread", capPct: 0.5, rothShare: 0 },
-      ],
-    },
+    contributions: [
+      {
+        id: "k401-pretax",
+        account: "k401",
+        tax: "traditional",
+        channel: "payroll",
+        ytd: { [y]: 0 },
+        schedule: [
+          { from: start, pace: "percent", pct: 0.1 },
+          { from: `${y + 1}-01`, pace: "even", share: 0.6, capPct: 0.3 },
+        ],
+      },
+      {
+        id: "k401-roth",
+        account: "k401",
+        tax: "roth",
+        channel: "payroll",
+        ytd: {},
+        schedule: [
+          { from: `${y + 1}-01`, pace: "even", share: 0.4, capPct: 0.2 },
+        ],
+      },
+      {
+        id: "ira-roth",
+        account: "ira",
+        tax: "roth",
+        channel: "direct",
+        ytd: {},
+        schedule: [{ from: start, pace: "lump", month: 1, amount: null }],
+      },
+    ],
+    limits,
+    hsaCoverage: [],
     spendingMonthly: 4_200,
-    ira: { amount: 7_500, month: 1 },
     oneOffs: [{ month: `${y + 1}-04`, amount: 1_500, label: "Tax due" }],
     cash: {
       buffer: 3_000,
@@ -170,11 +193,50 @@ function demoPeople(asof: string, start: string): RunwayPerson[] {
     id: "sam",
     label: "Sam",
     job: SAM_JOB,
-    k401: {
-      limits,
-      ytd: { [y]: 18_000 },
-      elections: [{ from: start, mode: "fixed", pretax: 2_000, roth: 0 }],
-    },
+    contributions: [
+      {
+        id: "k401-pretax",
+        account: "k401",
+        tax: "traditional",
+        channel: "payroll",
+        ytd: { [y]: 18_000 },
+        schedule: [
+          {
+            from: start,
+            pace: "fixed",
+            amount: 2_000,
+            per: "paycheck",
+            paycheckOfMonth: null,
+          },
+        ],
+      },
+      {
+        id: "hsa",
+        account: "hsa",
+        tax: "traditional",
+        channel: "payroll",
+        ytd: { [y]: 2_750 },
+        schedule: [
+          {
+            from: start,
+            pace: "fixed",
+            amount: 275,
+            per: "month",
+            paycheckOfMonth: 2,
+          },
+          { from: `${y + 1}-01`, pace: "front_load", share: 1, capPct: 0.25 },
+        ],
+      },
+      {
+        id: "ira-roth",
+        account: "ira",
+        tax: "roth",
+        channel: "direct",
+        ytd: {},
+        schedule: [{ from: start, pace: "lump", month: 1, amount: null }],
+      },
+    ],
+    hsaCoverage: [{ from: `${y}-01`, tier: "self" }],
     spendingMonthly: 5_500,
     oneOffs: [],
     cash: {

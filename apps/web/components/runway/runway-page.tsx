@@ -12,8 +12,10 @@ import { AlertTriangle, PanelRightOpen } from "lucide-react"
 import { parseAsString, parseAsStringLiteral, useQueryState } from "nuqs"
 import * as React from "react"
 
+import { usd } from "@/components/fire/controls"
 import { PANE_FILL, SectionNav, usePaneOpen } from "@/components/fire/workbench"
 import { personInputs } from "@/lib/runway/config"
+import { ACCOUNT_LABEL } from "@/lib/runway/contributions"
 import { compareScenarios, simulate } from "@/lib/runway/engine"
 import {
   SLEEVES,
@@ -21,12 +23,14 @@ import {
   sleeveUsed,
   sleeveValue,
 } from "@/lib/runway/sleeves"
-import type {
-  RunwayData,
-  RunwayInputs,
-  RunwayIssue,
-  RunwayPerson,
-  UnavailablePerson,
+import {
+  CONTRIBUTION_ACCOUNTS,
+  type RunwayData,
+  type RunwayInputs,
+  type RunwayIssue,
+  type RunwayPerson,
+  type RunwayResult,
+  type UnavailablePerson,
 } from "@/lib/runway/types"
 import { cn } from "@/lib/utils"
 
@@ -178,7 +182,10 @@ function RunwayPersonView({
       return new Set(others)
     })
 
-  const issues = issuesFor(data, personId)
+  const issues = [
+    ...(result ? limitIssues(result, personId) : []),
+    ...issuesFor(data, personId),
+  ]
   const hasNotices = !data.fromConfig || issues.length > 0
   const notices = (
     <>
@@ -325,6 +332,7 @@ function RunwayPersonView({
               inputs={inputs}
               config={config}
               scenario={scenario}
+              result={result}
               onChange={setInputs}
             />
           </div>
@@ -393,6 +401,45 @@ function useFitsSticky(
   return fits
 }
 
+/** Contribution limits the current inputs run into, from the live run so
+ * they follow page edits. An excess gets a line per year. A fixed or percent
+ * stream that asks for more than its limit gets one line per account (the
+ * engine stops it there; payroll may not), and only when the overshoot is
+ * more than 1% of the limit: a few dollars shows on the card, not up here. */
+function limitIssues(result: RunwayResult, personId: string): RunwayIssue[] {
+  const out: RunwayIssue[] = []
+  const years = Object.keys(result.pools).sort()
+  for (const a of CONTRIBUTION_ACCOUNTS) {
+    const name = ACCOUNT_LABEL[a]
+    const clipped: string[] = []
+    let firstDate: string | null = null
+    for (const year of years) {
+      const pool = result.pools[year][a]
+      if (pool.excess > 0)
+        out.push({
+          personId,
+          path: "contributions",
+          message: `${name} is ${usd(pool.excess)} over its ${year} limit of ${usd(pool.limit)}`,
+        })
+      else if (pool.clippedDate && pool.cut > pool.limit * 0.01) {
+        clipped.push(year)
+        firstDate ??= pool.clippedDate
+      }
+    }
+    if (firstDate)
+      out.push({
+        personId,
+        path: "contributions",
+        message: `${name} asks for more than its limit allows from ${firstDate}${
+          clipped.length > 1
+            ? ` (and again in ${clipped.slice(1).join(", ")})`
+            : ""
+        }. This plan stops at the limit; payroll may not`,
+      })
+  }
+  return out
+}
+
 function issuesFor(data: RunwayData, personId: string): RunwayIssue[] {
   const unavailableIds = new Set(data.unavailable.map((u) => u.id))
   return [
@@ -424,7 +471,7 @@ function IssueList({ issues }: { issues: RunwayIssue[] }) {
       ))}
       {issues.length > shown.length ? (
         <span className="pl-[18px] text-muted-foreground">
-          and {issues.length - shown.length} more in config/runway.yaml
+          and {issues.length - shown.length} more
         </span>
       ) : null}
     </div>

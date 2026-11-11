@@ -173,7 +173,9 @@ export function NumberField({
         className="w-full min-w-0 bg-transparent font-mono tabular-nums outline-none"
       />
       {suffix ? (
-        <span className="whitespace-nowrap text-muted-foreground">{suffix}</span>
+        <span className="whitespace-nowrap text-muted-foreground">
+          {suffix}
+        </span>
       ) : null}
     </span>
   )
@@ -232,7 +234,7 @@ export function Segmented<T extends string>({
           aria-pressed={value === o.value}
           onClick={() => onChange(o.value)}
           className={cn(
-            "h-full rounded-md px-2.5 font-medium text-muted-foreground transition-[color,background-color,box-shadow,scale] active:scale-[0.96]",
+            "h-full rounded-md px-2.5 font-medium text-muted-foreground outline-none transition-[color,background-color,box-shadow,scale] focus-visible:ring-3 focus-visible:ring-ring/50 active:scale-[0.96]",
             value === o.value && "bg-background text-foreground shadow-sm",
             optionClassName
           )}

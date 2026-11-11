@@ -59,6 +59,75 @@ export interface Raise {
   pct: number
 }
 
+export type ContributionAccount = "k401" | "ira" | "hsa"
+
+/** Display order: payroll accounts first. Also the pool keys: every stream
+ * in one account shares that account's annual limit. */
+export const CONTRIBUTION_ACCOUNTS: ContributionAccount[] = [
+  "k401",
+  "hsa",
+  "ira",
+]
+
+export type TaxTreatment = "traditional" | "roth"
+/** payroll: taken off the paycheck. direct: paid from cash. */
+export type Channel = "payroll" | "direct"
+
+export type Pace =
+  | { pace: "off" }
+  | {
+      pace: "fixed"
+      amount: number
+      /** Direct streams are always per month. */
+      per: "paycheck" | "month"
+      /** 1-based; which paycheck carries a per-month payroll amount. */
+      paycheckOfMonth: number | null
+    }
+  | { pace: "percent"; pct: number }
+  /** `share` of the pool's remaining room, spread over the periods left in
+   * the year, at most `capPct` of a paycheck. */
+  | { pace: "even"; share: number; capPct: number }
+  /** `share` of the pool's remaining room as early as `capPct` of each
+   * paycheck allows. */
+  | { pace: "front_load"; share: number; capPct: number }
+  /** Once a year in `month`; `amount` null means whatever room is left. */
+  | { pace: "lump"; month: number; amount: number | null }
+
+export type PaceKind = Pace["pace"]
+
+/** One dated step of a stream; the latest `from` on or before a month wins. */
+export type Phase = { from: string } & Pace
+
+/** One stream of money into a tax-advantaged account. Tax effect and the
+ * destination sleeve follow from (account, tax, channel). */
+export interface Contribution {
+  id: string
+  account: ContributionAccount
+  /** Always "traditional" for an HSA. */
+  tax: TaxTreatment
+  /** 401k is always payroll and IRA always direct; an HSA can be either. */
+  channel: Channel
+  /** Already contributed this year before `asof`, by year. */
+  ytd: Record<string, number>
+  schedule: Phase[]
+}
+
+export type HsaTier = "self" | "family" | "none"
+
+/** HDHP coverage on the first of the month, from `from` onward. */
+export interface HsaCoverage {
+  from: string
+  tier: HsaTier
+}
+
+/** Annual limits for one year, catch-up already included. */
+export interface YearLimits {
+  k401: number
+  ira: number
+  hsaSelf: number
+  hsaFamily: number
+}
+
 export interface StatePayroll {
   flatPerPaycheck: number
   rate: number
@@ -94,14 +163,12 @@ export interface Job {
   withholding: Withholding
   match: Match
   vesting: Vesting | null
+  /** Employer money into the HSA once a year; counts toward the HSA limit. */
+  hsaEmployer: { amount: number; month: number } | null
+  /** A scenario job's HDHP coverage from its start month; null keeps the
+   * person's coverage schedule. */
+  hsaTier: HsaTier | null
 }
-
-export type Election =
-  | { from: string; mode: "fixed"; pretax: number; roth: number }
-  | { from: string; mode: "percent"; pretaxPct: number; rothPct: number }
-  | { from: string; mode: "max_spread"; capPct: number; rothShare: number }
-
-export type ElectionMode = Election["mode"]
 
 export interface JobScenario {
   id: string
@@ -141,13 +208,12 @@ export interface RunwayPerson {
   id: string
   label: string
   job: Job
-  k401: {
-    limits: Record<string, number>
-    ytd: Record<string, number>
-    elections: Election[]
-  }
+  contributions: Contribution[]
+  /** By year; a missing year reuses the closest earlier one. */
+  limits: Record<string, YearLimits>
+  /** Empty means self-only coverage throughout. */
+  hsaCoverage: HsaCoverage[]
   spendingMonthly: number
-  ira: { amount: number; month: number } | null
   oneOffs: { month: string; amount: number; label: string }[]
   cash: {
     buffer: number
@@ -220,8 +286,12 @@ export interface PaycheckRow {
   month: string
   employer: "current" | "new"
   gross: number
+  /** Pre-tax 401k. */
   pre: number
+  /** Roth 401k. */
   roth: number
+  /** Payroll HSA. */
+  hsa: number
   pretaxDeductions: number
   postTaxDeductions: number
   federal: number
@@ -232,6 +302,31 @@ export interface PaycheckRow {
   match: number
 }
 
+/** One account's annual limit and what goes against it in one year. */
+export interface PoolYear {
+  /** The year's final limit (an HSA's is prorated by covered months). */
+  limit: number
+  /** Contributed before `asof` (the streams' `ytd`). */
+  before: number
+  /** Contributed inside the horizon, by contribution id. */
+  streams: Record<string, number>
+  /** Employer money that counts toward the limit (HSA only). */
+  employer: number
+  /** before + streams + employer. */
+  contributed: number
+  /** Contributed above the final limit (coverage ended after the money
+   * went in, or `ytd` already exceeded it). */
+  excess: number
+  /** Pay date or month the limit was reached. */
+  hitDate: string | null
+  /** First date a fixed or percent stream was cut short by the limit. */
+  clippedDate: string | null
+  /** How much those streams asked for beyond the limit, inside the horizon. */
+  cut: number
+  /** The whole rest of the year is inside the horizon. */
+  complete: boolean
+}
+
 export interface MonthRow {
   month: string
   takeHome: number
@@ -239,10 +334,15 @@ export interface MonthRow {
   /** max(0, outflows - takeHome): drawn from the reserve. */
   shortfall: number
   spendOut: number
+  /** Direct IRA deposits, paid from cash. */
   iraOut: number
+  /** Direct HSA deposits, paid from cash. */
+  hsaOut: number
   /** One-off bills (tax due and the like); negative for refunds. */
   taxOut: number
   k401In: number
+  /** Everything into the HSA: payroll, direct and employer money. */
+  hsaIn: number
   match: number
   reserveToCore: number
   paychecks: number
@@ -289,6 +389,10 @@ export interface RunwayResult {
   /** Month of the deepest negative checking balance. */
   unfundedPeakMonth: string | null
   k401Contributed: number
+  hsaContributed: number
+  iraContributed: number
+  /** By year, then account. */
+  pools: Record<string, Record<ContributionAccount, PoolYear>>
   matchTotal: number
   shortfallTotal: number
   movedToCore: number

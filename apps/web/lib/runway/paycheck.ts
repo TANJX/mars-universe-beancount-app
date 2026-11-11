@@ -32,12 +32,17 @@ export const STATE_WITHHOLDING: Record<
   none: () => 0,
 }
 
+/** Money a contribution stream takes off this check. */
+export interface Deferral {
+  amount: number
+  incomeTaxExempt: boolean
+  ficaExempt: boolean
+}
+
 export interface PaycheckInput {
   gross: number
-  /** Pre-tax 401k this check. */
-  pre: number
-  /** Roth 401k this check. */
-  roth: number
+  /** Payroll contributions this check (401k, HSA). */
+  deferrals: Deferral[]
   job: Job
   /** 1-based position of this check within its month. */
   paycheckOfMonth: number
@@ -49,8 +54,8 @@ export interface PaycheckInput {
 
 export interface PaycheckBreakdown {
   gross: number
-  pre: number
-  roth: number
+  /** All payroll contributions taken off this check. */
+  deferred: number
   pretaxDeductions: number
   postTaxDeductions: number
   federal: number
@@ -70,7 +75,15 @@ export function appliesTo(d: Deduction, paycheckOfMonth: number): boolean {
 }
 
 export function paycheck(input: PaycheckInput): PaycheckBreakdown {
-  const { gross, pre, roth, job } = input
+  const { gross, job } = input
+  let deferred = 0
+  let deferredPretax = 0
+  let deferredFica = 0
+  for (const d of input.deferrals) {
+    deferred += d.amount
+    if (d.incomeTaxExempt) deferredPretax += d.amount
+    if (d.ficaExempt) deferredFica += d.amount
+  }
   const w = job.withholding
   const P = periodsPerYear(job.schedule.frequency)
 
@@ -86,13 +99,13 @@ export function paycheck(input: PaycheckInput): PaycheckBreakdown {
     if (d.sleeve) toSleeves[d.sleeve] = (toSleeves[d.sleeve] ?? 0) + d.amount
   }
 
-  const taxable = gross - pre - pretaxDed
+  const taxable = gross - deferredPretax - pretaxDed
   const fedBrackets: Bracket[] = w.filing === "joint" ? FED_JOINT : FED_SINGLE
   const federal =
     bracketTax(Math.max(0, taxable * P - w.federalStd), fedBrackets) / P
   const state = STATE_WITHHOLDING[w.state](taxable * P, w.stateStd) / P
 
-  const ficaWages = Math.max(0, gross - ficaDed)
+  const ficaWages = Math.max(0, gross - ficaDed - deferredFica)
   const ssWages = Math.max(
     0,
     Math.min(ficaWages, w.ssWageBase - input.ytdSsWages)
@@ -109,8 +122,7 @@ export function paycheck(input: PaycheckInput): PaycheckBreakdown {
 
   const net =
     gross -
-    pre -
-    roth -
+    deferred -
     pretaxDed -
     postDed -
     statePayroll -
@@ -119,8 +131,7 @@ export function paycheck(input: PaycheckInput): PaycheckBreakdown {
     fica
   return {
     gross,
-    pre,
-    roth,
+    deferred,
     pretaxDeductions: pretaxDed,
     postTaxDeductions: postDed,
     federal,

@@ -2,9 +2,13 @@
 // person and one job scenario. Pure and deterministic; no React.
 //
 // Two passes, in this order (the order matters, the numbers depend on it):
-//   1. Paychecks. Walk every pay date, pick the employer and gross, apply the
-//      401k election under the annual limit, the employer match, payroll
-//      withholding, and tally net pay, 401k and match per month.
+//   1. Paychecks and deposits. Walk the calendar month by month. On every pay
+//      date pick the employer and gross, take each payroll contribution
+//      stream (401k, HSA) under its pool's annual limit, add the employer
+//      match and payroll withholding, and tally net pay per month. After the
+//      month's paychecks, make the direct deposits (IRA, direct HSA) from
+//      cash. Streams in one account share one running total per year, which
+//      a job switch does not reset.
 //   2. Balances. Month by month: growth, 401k and match (with vesting and
 //      forfeiture), pay minus outflows into checking, top checking up from the
 //      reserve then the emergency fund then the core, sweep extra cash to the
@@ -14,7 +18,16 @@
 //
 // The play and gold sleeves get no new money; they only grow.
 
-import { paycheck } from "./paycheck"
+import {
+  ACCOUNT_LABEL,
+  directWant,
+  payrollWant,
+  phaseAt,
+  poolLimit,
+  tierAt,
+  treatment,
+} from "./contributions"
+import { type Deferral, paycheck } from "./paycheck"
 import {
   endOfMonth,
   isoDate,
@@ -24,41 +37,21 @@ import {
   ym,
 } from "./schedule"
 import type {
-  Election,
+  ContributionAccount,
+  HsaCoverage,
   Job,
   JobScenario,
   Match,
   MonthRow,
   PaycheckRow,
+  PoolYear,
   RunwayInputs,
   RunwayResult,
   SleeveKey,
 } from "./types"
+import { CONTRIBUTION_ACCOUNTS } from "./types"
 
 const EQUITY_SLEEVES: SleeveKey[] = ["core", "play", "ira", "k401", "hsa"]
-
-/** Limit for a year, reusing the closest earlier year when it is missing. */
-export function limitFor(limits: Record<string, number>, year: number): number {
-  if (limits[year] != null) return limits[year]
-  const known = Object.keys(limits)
-    .map(Number)
-    .filter((y) => Number.isFinite(y))
-    .sort((a, b) => a - b)
-  const earlier = known.filter((y) => y <= year).at(-1)
-  const pick = earlier ?? known[0]
-  return pick != null ? limits[pick] : 0
-}
-
-/** The latest election whose `from` month is on or before `month`. */
-export function electionAt(
-  elections: Election[],
-  month: string
-): Election | null {
-  let best: Election | null = null
-  for (const e of elections)
-    if (e.from <= month && (!best || e.from >= best.from)) best = e
-  return best
-}
 
 export function matchFor(match: Match, gross: number, contrib: number): number {
   if (gross <= 0) return 0
@@ -144,10 +137,24 @@ export function simulate(
 
   const vestMonth = p.job.vesting ? p.job.vesting.date.slice(0, 7) : null
 
-  // ---- pass 1: paychecks
+  // HDHP coverage for this scenario: a new job can change it from its start.
+  const coverage: HsaCoverage[] =
+    newJob?.hsaTier && newStart
+      ? [
+          ...(p.hsaCoverage.length
+            ? p.hsaCoverage.filter((c) => c.from < newStart)
+            : [{ from: "0000-01", tier: "self" as const }]),
+          { from: newStart, tier: newJob.hsaTier },
+        ]
+      : p.hsaCoverage
+
+  // ---- pass 1: paychecks and deposits
   const pay: Record<string, number> = {}
   const k4: Record<string, number> = {}
   const mt: Record<string, number> = {}
+  const hsaIn: Record<string, number> = {}
+  const hsaOut: Record<string, number> = {}
+  const iraOut: Record<string, number> = {}
   const nChecks: Record<string, number> = {}
   const toSleeve: Record<string, Partial<Record<string, number>>> = {}
   const events: Record<string, string[]> = {}
@@ -156,111 +163,275 @@ export function simulate(
     if (!list.includes(e)) list.push(e)
     events[m] = list
   }
+  const add = (o: Record<string, number>, m: string, v: number) => {
+    o[m] = (o[m] ?? 0) + v
+  }
   const paychecks: PaycheckRow[] = []
-  const limitHit: Record<string, string> = {}
   let forfeitMonth: string | null = null
   let prevEmployer: "current" | "new" | null = null
   let year = 0
-  let ytd = 0
   let ytdSs = 0
   let ytdSp = 0
 
+  // One running total per account and year, shared by every stream in it.
+  interface Pool {
+    total: number
+    before: number
+    streams: Record<string, number>
+    employer: number
+    hitDate: string | null
+    clippedDate: string | null
+    cut: number
+    overNoted: boolean
+  }
+  const poolState: Record<string, Record<ContributionAccount, Pool>> = {}
+  const poolOf = (y: number, a: ContributionAccount): Pool => {
+    poolState[y] ??= {} as Record<ContributionAccount, Pool>
+    const byAccount = poolState[y]
+    if (!byAccount[a]) {
+      const before = p.contributions
+        .filter((c) => c.account === a)
+        .reduce((sum, c) => sum + Math.max(0, c.ytd[y] ?? 0), 0)
+      byAccount[a] = {
+        total: before,
+        before,
+        streams: {},
+        employer: 0,
+        hitDate: null,
+        clippedDate: null,
+        cut: 0,
+        overNoted: false,
+      }
+    }
+    return byAccount[a]
+  }
+  /** The limit as it stands in month `m`: an HSA assumes that month's
+   * coverage lasts the year, as payroll would. */
+  const limitIn = (a: ContributionAccount, y: number, m: string) =>
+    poolLimit(a, p.limits, coverage, y, m)
+  const roomIn = (a: ContributionAccount, y: number, m: string) =>
+    Math.max(0, limitIn(a, y, m) - poolOf(y, a).total)
+  const take = (
+    a: ContributionAccount,
+    y: number,
+    id: string,
+    amount: number
+  ) => {
+    const pool = poolOf(y, a)
+    pool.total += amount
+    pool.streams[id] = (pool.streams[id] ?? 0) + amount
+  }
+  const noteHit = (
+    a: ContributionAccount,
+    y: number,
+    m: string,
+    when: string,
+    announce: boolean
+  ) => {
+    const pool = poolOf(y, a)
+    const limit = limitIn(a, y, m)
+    if (limit <= 0 || pool.hitDate || pool.total < limit - 0.005) return
+    pool.hitDate = when
+    if (announce) addEvent(m, `${ACCOUNT_LABEL[a]} limit reached`)
+  }
+
+  const byMonth: Record<string, Date[]> = {}
   for (const d of dates) {
     const m = ym(d)
-    const y = d.getUTCFullYear()
+    byMonth[m] ??= []
+    byMonth[m].push(d)
+  }
+  const lastYear = Number(lastMonth.slice(0, 4))
+  const walk = [...new Set([...Object.keys(byMonth), ...months])].sort()
+
+  for (const m of walk) {
+    const y = Number(m.slice(0, 4))
+    const monthOfYear = Number(m.slice(5))
     if (y !== year) {
       year = y
-      ytd = p.k401.ytd[y] ?? 0
       ytdSs = 0
       ytdSp = 0
     }
-    const employer = isNew(m) ? "new" : "current"
-    const job = jobAt(m)
-    if (
-      prevEmployer === "current" &&
-      employer === "new" &&
-      vestMonth &&
-      m < vestMonth
-    )
-      forfeitMonth = m
-    if (prevEmployer === "current" && employer === "new")
-      addEvent(m, "New job starts")
-    prevEmployer = employer
+    const inHorizon = m >= h.start
+    const covered = tierAt(coverage, m) !== "none"
 
-    const gross = grossFor(
-      job,
-      employer === "new" && newStart && newStart > h.start ? newStart : h.start,
-      m
-    )
-    const limit = limitFor(p.k401.limits, y)
-    const room = Math.max(0, limit - ytd)
-    const e = electionAt(p.k401.elections, m)
-    let pre = 0
-    let roth = 0
-    if (e?.mode === "fixed") {
-      pre = Math.min(e.pretax, room)
-      roth = Math.min(e.roth, room - pre)
-    } else if (e?.mode === "percent") {
-      pre = Math.min(gross * e.pretaxPct, room)
-      roth = Math.min(gross * e.rothPct, room - pre)
-    } else if (e?.mode === "max_spread") {
+    // Coverage that ended after the money went in leaves an excess.
+    const hsaPool = poolOf(y, "hsa")
+    if (
+      inHorizon &&
+      !hsaPool.overNoted &&
+      hsaPool.total > limitIn("hsa", y, m) + 0.005
+    ) {
+      hsaPool.overNoted = true
+      addEvent(m, "HSA over its limit")
+    }
+
+    const employerHsa = jobAt(m).hsaEmployer
+    if (
+      inHorizon &&
+      covered &&
+      employerHsa &&
+      employerHsa.month === monthOfYear &&
+      employerHsa.amount > 0
+    ) {
+      hsaPool.total += employerHsa.amount
+      hsaPool.employer += employerHsa.amount
+      add(hsaIn, m, employerHsa.amount)
+      noteHit("hsa", y, m, m, false)
+    }
+
+    for (const d of byMonth[m] ?? []) {
+      const employer = isNew(m) ? "new" : "current"
+      const job = jobAt(m)
+      if (
+        prevEmployer === "current" &&
+        employer === "new" &&
+        vestMonth &&
+        m < vestMonth
+      )
+        forfeitMonth = m
+      if (prevEmployer === "current" && employer === "new")
+        addEvent(m, "New job starts")
+      prevEmployer = employer
+
+      const gross = grossFor(
+        job,
+        employer === "new" && newStart && newStart > h.start
+          ? newStart
+          : h.start,
+        m
+      )
+      const nth = (nChecks[m] ?? 0) + 1
+      nChecks[m] = nth
       const t = d.getTime()
       const left = countDates.filter(
         (x) => x.getUTCFullYear() === y && x.getTime() >= t
       ).length
-      const x = Math.max(
-        0,
-        Math.min(room / Math.max(1, left), gross * e.capPct)
-      )
-      pre = x * (1 - e.rothShare)
-      roth = x * e.rothShare
-    }
-    pre = Math.max(0, pre)
-    roth = Math.max(0, roth)
-    ytd += pre + roth
-    if (limit > 0 && ytd >= limit - 0.005 && !limitHit[y]) {
-      limitHit[y] = isoDate(d)
-      if (e?.mode !== "max_spread") addEvent(m, "401k limit reached")
+      const roomStart = {
+        k401: roomIn("k401", y, m),
+        hsa: roomIn("hsa", y, m),
+        ira: 0,
+      }
+
+      const deferrals: Deferral[] = []
+      const announce = { k401: false, hsa: false, ira: false }
+      let pre = 0
+      let roth = 0
+      let hsa = 0
+      for (const c of p.contributions) {
+        if (c.channel !== "payroll" || c.account === "ira") continue
+        const ph = phaseAt(c.schedule, m)
+        if (!ph || ph.pace === "off") continue
+        if (c.account === "hsa" && !covered) continue
+        // Spreading evenly lands on the limit by design; any other pace
+        // reaching it is worth a marker.
+        if (ph.pace !== "even") announce[c.account] = true
+        const want = payrollWant(ph, {
+          gross,
+          paycheckOfMonth: nth,
+          roomStart: roomStart[c.account],
+          left,
+        })
+        const room = roomIn(c.account, y, m)
+        const pool = poolOf(y, c.account)
+        if (
+          want > room + 0.005 &&
+          (ph.pace === "fixed" || ph.pace === "percent")
+        ) {
+          pool.clippedDate ??= isoDate(d)
+          pool.cut += want - room
+        }
+        const amount = Math.min(want, room)
+        if (amount <= 0) continue
+        take(c.account, y, c.id, amount)
+        deferrals.push({ amount, ...treatment(c) })
+        if (c.account === "hsa") hsa += amount
+        else if (c.tax === "roth") roth += amount
+        else pre += amount
+      }
+      noteHit("k401", y, m, isoDate(d), announce.k401)
+      noteHit("hsa", y, m, isoDate(d), announce.hsa)
+
+      const match = matchFor(job.match, gross, pre + roth)
+      const pc = paycheck({
+        gross,
+        deferrals,
+        job,
+        paycheckOfMonth: nth,
+        ytdStatePayroll: ytdSp,
+        ytdSsWages: ytdSs,
+      })
+      ytdSs += pc.ssWages
+      ytdSp += pc.statePayroll - job.withholding.statePayroll.flatPerPaycheck
+
+      add(pay, m, pc.net)
+      add(k4, m, pre + roth)
+      add(mt, m, match)
+      add(hsaIn, m, hsa)
+      const ts = toSleeve[m] ?? {}
+      for (const [k, v] of Object.entries(pc.toSleeves))
+        ts[k] = (ts[k] ?? 0) + (v ?? 0)
+      toSleeve[m] = ts
+      paychecks.push({
+        date: isoDate(d),
+        month: m,
+        employer,
+        gross,
+        pre,
+        roth,
+        hsa,
+        pretaxDeductions: pc.pretaxDeductions,
+        postTaxDeductions: pc.postTaxDeductions,
+        federal: pc.federal,
+        state: pc.state,
+        fica: pc.fica,
+        statePayroll: pc.statePayroll,
+        net: pc.net,
+        match,
+      })
     }
 
-    const match = matchFor(job.match, gross, pre + roth)
-    const nth = (nChecks[m] ?? 0) + 1
-    nChecks[m] = nth
-    const pc = paycheck({
-      gross,
-      pre,
-      roth,
-      job,
-      paycheckOfMonth: nth,
-      ytdStatePayroll: ytdSp,
-      ytdSsWages: ytdSs,
-    })
-    ytdSs += pc.ssWages
-    ytdSp += pc.statePayroll - job.withholding.statePayroll.flatPerPaycheck
-
-    pay[m] = (pay[m] ?? 0) + pc.net
-    k4[m] = (k4[m] ?? 0) + pre + roth
-    mt[m] = (mt[m] ?? 0) + match
-    const ts = toSleeve[m] ?? {}
-    for (const [k, v] of Object.entries(pc.toSleeves))
-      ts[k] = (ts[k] ?? 0) + (v ?? 0)
-    toSleeve[m] = ts
-    paychecks.push({
-      date: isoDate(d),
-      month: m,
-      employer,
-      gross,
-      pre,
-      roth,
-      pretaxDeductions: pc.pretaxDeductions,
-      postTaxDeductions: pc.postTaxDeductions,
-      federal: pc.federal,
-      state: pc.state,
-      fica: pc.fica,
-      statePayroll: pc.statePayroll,
-      net: pc.net,
-      match,
-    })
+    // Direct deposits, paid from cash after the month's paychecks.
+    if (!inHorizon) continue
+    const monthsLeft =
+      h.spreadThrough === "horizon" && y === lastYear
+        ? Number(lastMonth.slice(5)) - monthOfYear + 1
+        : 13 - monthOfYear
+    const directRoom = {
+      k401: 0,
+      hsa: roomIn("hsa", y, m),
+      ira: roomIn("ira", y, m),
+    }
+    for (const c of p.contributions) {
+      if (c.channel !== "direct" || c.account === "k401") continue
+      const ph = phaseAt(c.schedule, m)
+      if (!ph || ph.pace === "off") continue
+      if (c.account === "hsa" && !covered) continue
+      const want = directWant(ph, {
+        monthOfYear,
+        roomStart: directRoom[c.account],
+        left: monthsLeft,
+      })
+      const room = roomIn(c.account, y, m)
+      const pool = poolOf(y, c.account)
+      if (want > room + 0.005 && ph.pace === "fixed") {
+        pool.clippedDate ??= m
+        pool.cut += want - room
+      }
+      const amount = Math.min(want, room)
+      if (amount <= 0) continue
+      take(c.account, y, c.id, amount)
+      if (c.account === "hsa") {
+        add(hsaOut, m, amount)
+        add(hsaIn, m, amount)
+        addEvent(m, "HSA deposit")
+      } else {
+        add(iraOut, m, amount)
+        addEvent(m, "IRA deposit")
+      }
+    }
+    noteHit("ira", y, m, m, false)
+    noteHit("hsa", y, m, m, false)
   }
   if (forfeitMonth) addEvent(forfeitMonth, "Match forfeited")
 
@@ -278,24 +449,20 @@ export function simulate(
   // ---- outflows
   const spending = Math.max(0, p.spendingMonthly)
   const spendOut: Record<string, number> = {}
-  const iraOut: Record<string, number> = {}
   const taxOut: Record<string, number> = {}
   const out: Record<string, number> = {}
   const need: Record<string, number> = {}
   months.forEach((m, i) => {
     spendOut[m] = spending * (i === 0 ? h.firstMonthSpendFraction : 1)
-    iraOut[m] =
-      p.ira && Number(m.slice(5)) === p.ira.month
-        ? Math.max(0, p.ira.amount)
-        : 0
-    if (iraOut[m] > 0) addEvent(m, "IRA deposit")
+    iraOut[m] ??= 0
+    hsaOut[m] ??= 0
     taxOut[m] = 0
     for (const o of p.oneOffs)
       if (o.month === m) {
         taxOut[m] += o.amount
         if (o.amount !== 0) addEvent(m, o.label || "Tax due")
       }
-    out[m] = spendOut[m] + iraOut[m] + taxOut[m]
+    out[m] = spendOut[m] + iraOut[m] + hsaOut[m] + taxOut[m]
     need[m] = Math.max(0, out[m] - (pay[m] ?? 0))
   })
 
@@ -361,6 +528,7 @@ export function simulate(
 
     b.checking += (pay[m] ?? 0) - out[m]
     b.ira += iraOut[m]
+    b.hsa += hsaIn[m] ?? 0
 
     if (b.checking < buf) {
       let gap = buf - b.checking
@@ -420,8 +588,10 @@ export function simulate(
       shortfall: need[m],
       spendOut: spendOut[m],
       iraOut: iraOut[m],
+      hsaOut: hsaOut[m],
       taxOut: taxOut[m],
       k401In: k4[m] ?? 0,
+      hsaIn: hsaIn[m] ?? 0,
       match: mt[m] ?? 0,
       reserveToCore: moved,
       paychecks: nChecks[m] ?? 0,
@@ -444,8 +614,35 @@ export function simulate(
     })
   })
 
+  // Sums over the horizon's months only (a pay date before `start` counts
+  // toward its pool but is not part of the plan).
   const sum = (o: Record<string, number>) =>
-    Object.values(o).reduce((a, v) => a + v, 0)
+    months.reduce((a, m) => a + (o[m] ?? 0), 0)
+
+  const pools: RunwayResult["pools"] = {}
+  const limitHit: Record<string, string> = {}
+  for (const yy of new Set(months.map((m) => Number(m.slice(0, 4))))) {
+    const byAccount = {} as Record<ContributionAccount, PoolYear>
+    for (const a of CONTRIBUTION_ACCOUNTS) {
+      const pool = poolOf(yy, a)
+      const limit = poolLimit(a, p.limits, coverage, yy)
+      const excess = pool.total - limit
+      byAccount[a] = {
+        limit,
+        before: pool.before,
+        streams: pool.streams,
+        employer: pool.employer,
+        contributed: pool.total,
+        excess: excess > 0.005 ? excess : 0,
+        hitDate: pool.hitDate,
+        clippedDate: pool.clippedDate,
+        cut: pool.cut,
+        complete: `${yy}-12` <= lastMonth,
+      }
+    }
+    pools[yy] = byAccount
+    if (byAccount.k401.hitDate) limitHit[yy] = byAccount.k401.hitDate
+  }
   return {
     rows,
     paychecks,
@@ -462,6 +659,9 @@ export function simulate(
     unfundedPeak,
     unfundedPeakMonth,
     k401Contributed: sum(k4),
+    hsaContributed: sum(hsaIn),
+    iraContributed: sum(iraOut),
+    pools,
     matchTotal: sum(mt),
     shortfallTotal: months.reduce((a, m) => a + need[m], 0),
     movedToCore: rows.reduce((a, row) => a + row.reserveToCore, 0),

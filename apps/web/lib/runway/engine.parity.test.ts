@@ -55,12 +55,23 @@ test("engine matches the prototype", { skip: !path }, () => {
     person: unknown
     expected: Record<string, Obj>
   }
-  const person = normalizePerson(
+  const parsed = normalizePerson(
     fx.person,
     0,
     fx.horizon.start,
     fx.horizon.asof
   )
+  // The prototype knew one limit, the 401k's. Lift the IRA and HSA limits so
+  // the comparison stays about the arithmetic the two share.
+  const person = {
+    ...parsed,
+    limits: Object.fromEntries(
+      Object.entries(parsed.limits).map(([y, l]) => [
+        y,
+        { ...l, ira: 1e9, hsaSelf: 1e9, hsaFamily: 1e9 },
+      ])
+    ),
+  }
   const year2 = String(Number(fx.horizon.start.slice(0, 4)) + 1)
   const top = fx.expected
   const scenarios = (isObj(top.scenarios) ? top.scenarios : top) as Record<
@@ -80,8 +91,9 @@ test("engine matches the prototype", { skip: !path }, () => {
     if (!m) continue
     const pc = paycheck({
       gross: Number(m[1]),
-      pre: Number(m[2]),
-      roth: 0,
+      deferrals: [
+        { amount: Number(m[2]), incomeTaxExempt: true, ficaExempt: false },
+      ],
       job: person.job,
       paycheckOfMonth: 1,
       ytdStatePayroll: 0,

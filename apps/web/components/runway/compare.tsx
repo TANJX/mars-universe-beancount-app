@@ -210,6 +210,16 @@ interface MetricRow {
   text?: (r: RunwayResult) => string
   /** Higher is better (for the best-value marker); null = no marker. */
   better: "high" | "low" | null
+  /** Shown only when some scenario has a value for it. */
+  optional?: boolean
+}
+
+/** Contributions above an annual limit, summed over years and accounts. */
+function excessTotal(r: RunwayResult): number {
+  let total = 0
+  for (const byAccount of Object.values(r.pools))
+    for (const pool of Object.values(byAccount)) total += pool.excess
+  return total
 }
 
 export function ScenarioCompare({
@@ -227,7 +237,7 @@ export function ScenarioCompare({
   const end = first?.rows.at(-1)?.month ?? ""
   const startYear = Number((first?.rows[0]?.month ?? "2000").slice(0, 4))
   const avgYear = String(startYear + 1)
-  const metrics: MetricRow[] = [
+  const all: MetricRow[] = [
     {
       label: `Net worth ${end ? monthLabel(end) : ""}`,
       get: (r) => r.rows.at(-1)?.netWorth ?? 0,
@@ -249,6 +259,24 @@ export function ScenarioCompare({
       better: "high",
     },
     { label: "401k contributed", get: (r) => r.k401Contributed, better: null },
+    {
+      label: "HSA contributed",
+      get: (r) => r.hsaContributed,
+      better: null,
+      optional: true,
+    },
+    {
+      label: "IRA contributed",
+      get: (r) => r.iraContributed,
+      better: null,
+      optional: true,
+    },
+    {
+      label: "Over a contribution limit",
+      get: excessTotal,
+      better: "low",
+      optional: true,
+    },
     { label: "Employer match", get: (r) => r.matchTotal, better: "high" },
     {
       label: `Avg monthly take-home ${avgYear}`,
@@ -271,6 +299,14 @@ export function ScenarioCompare({
       better: null,
     },
   ]
+  const metrics = all.filter(
+    (m) =>
+      !m.optional ||
+      scenarios.some((s) => {
+        const r = results[s.id]
+        return r ? Math.abs(m.get(r) ?? 0) >= 0.5 : false
+      })
+  )
 
   return (
     <SectionCard

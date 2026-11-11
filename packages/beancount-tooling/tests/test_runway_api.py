@@ -199,41 +199,6 @@ def test_map_sleeves_first_match_wins_and_signs():
     assert set(out["sleeves"]) == set(runway.SLEEVES)
 
 
-# ---------- pay dates ----------
-
-
-def test_paydates_semimonthly_weekend_rollback_and_last_weekday():
-    sched = {"frequency": "semimonthly", "anchor": None, "days": [15, -1]}
-    got = runway.paydates(sched, datetime.date(2026, 11, 8), datetime.date(2027, 2, 28))
-    assert [d.isoformat() for d in got] == [
-        "2026-11-13",  # Nov 15 is a Sunday
-        "2026-11-30",
-        "2026-12-15",
-        "2026-12-31",
-        "2027-01-15",
-        "2027-01-29",  # Jan 31 is a Sunday
-        "2027-02-15",
-        "2027-02-26",  # Feb 28 is a Sunday
-    ]
-
-
-def test_paydates_biweekly_anchor_before_and_after_asof():
-    after, through = datetime.date(2026, 11, 8), datetime.date(2026, 12, 31)
-    early = {"frequency": "biweekly", "anchor": "2026-01-09", "days": []}
-    late = {"frequency": "biweekly", "anchor": "2026-11-20", "days": []}
-    assert [d.isoformat() for d in runway.paydates(early, after, through)] == [
-        "2026-11-13",
-        "2026-11-27",
-        "2026-12-11",
-        "2026-12-25",
-    ]
-    assert [d.isoformat() for d in runway.paydates(late, after, through)] == [
-        "2026-11-20",
-        "2026-12-04",
-        "2026-12-18",
-    ]
-
-
 # ---------- end to end ----------
 
 
@@ -288,6 +253,11 @@ def test_build_end_to_end(tmp_path, ledger):
     }
     assert alex["cash"]["cardPayoff"] == {"checking": 1.0}
     assert alex["ira"] == {"amount": 7000.0, "month": 1}
+    # the older shape passes through untouched; nothing is written as streams
+    assert alex["contributions"] == []
+    assert alex["limits"] == {}
+    assert alex["hsaCoverage"] == []
+    assert alex["birthYear"] is None
 
     # scenarios: stay first; a switch inherits schedule/withholding, not vesting
     assert [s["id"] for s in alex["scenarios"]] == ["stay", "next"]
@@ -301,9 +271,6 @@ def test_build_end_to_end(tmp_path, ledger):
 
     msgs = [(w["personId"], w["message"]) for w in data["warnings"]]
     assert ("alex", "No 401k limit for 2028; reusing 2027") in msgs
-    assert any(
-        pid == "alex" and "2027 limit" in m and "2027-05-14" in m for pid, m in msgs
-    )
     assert any(pid == "alex" and "matches no sleeve rule" in m for pid, m in msgs)
 
 
@@ -318,12 +285,43 @@ def test_build_partner_include_static_and_inline_override(tmp_path, ledger):
     assert sam["starting"]["cards"] == 2000.0
     assert sam["starting"]["unvested"] == 300.0
     assert sam["job"]["vesting"] == {"date": "2027-05-01", "unvestedStart": 300.0}
-    assert sam["k401"]["elections"][1] == {
-        "from": "2027-01",
-        "mode": "max_spread",
-        "capPct": 0.8,
-        "rothShare": 0.0,
+    # contribution streams: ids default from (account, tax), phases sort by month
+    assert sam["k401"]["elections"] == []  # defaults.k401_limits still apply
+    assert sam["ira"] is None
+    assert [c["id"] for c in sam["contributions"]] == [
+        "k401-pretax",
+        "k401-roth",
+        "hsa-payroll",
+        "ira-roth",
+    ]
+    pretax, roth, hsa, ira = sam["contributions"]
+    assert pretax == {
+        "id": "k401-pretax",
+        "account": "k401",
+        "tax": "traditional",
+        "channel": "payroll",
+        "ytd": {"2026": 1000.0},
+        "schedule": [
+            {"from": "2026-11", "pace": "percent", "pct": 0.5},
+            {"from": "2027-01", "pace": "even", "share": 1.0, "capPct": 0.8},
+        ],
     }
+    assert roth["schedule"][1] == {"from": "2027-01", "pace": "off"}
+    assert hsa["channel"] == "payroll"
+    assert hsa["schedule"] == [
+        {"from": "2026-11", "pace": "fixed", "amount": 150.0, "per": "month", "paycheckOfMonth": 2},
+        {"from": "2027-01", "pace": "front_load", "share": 1.0, "capPct": 0.25},
+    ]
+    assert ira["channel"] == "direct"
+    assert ira["schedule"] == [{"from": "2026-11", "pace": "lump", "month": 1, "amount": None}]
+    assert sam["limits"] == {"2027": {"hsaSelf": 4500.0}}
+    assert sam["hsaCoverage"] == [
+        {"from": "2026-01", "tier": "self"},
+        {"from": "2027-06", "tier": "none"},
+    ]
+    assert sam["job"]["hsaEmployer"] == {"amount": 500.0, "month": 1}
+    assert sam["job"]["hsaTier"] is None
+    assert sam["scenarios"][1]["job"]["hsaTier"] == "none"
     assert sam["cash"]["cardPayoff"] == {"checking": 0.5, "ef": 0.5}
     assert sam["scenarios"][1]["job"]["vesting"] is None
 
@@ -391,6 +389,29 @@ BASE_PERSON = """
          "cash.card_payoff", "sum to 1"),
         (("monthly: 1000 }", "monthly: 1000 }\n    k401: { elections: [ { from: 2026-11, mode: yolo } ] }"),
          "k401.elections[0].mode", "unknown election"),
+        (("monthly: 1000 }", "monthly: 1000 }\n    contributions: [ { account: roth } ]"),
+         "contributions[0].account", "unknown account"),
+        (("monthly: 1000 }", "monthly: 1000 }\n    contributions: [ { account: ira, channel: payroll } ]"),
+         "contributions[0].channel", "must be direct"),
+        (("monthly: 1000 }", "monthly: 1000 }\n    contributions: [ { account: hsa, tax: roth } ]"),
+         "contributions[0].tax", "an HSA has none"),
+        (("monthly: 1000 }",
+          "monthly: 1000 }\n    contributions: [ { account: ira, schedule: [ { from: 2026-11, pace: percent } ] } ]"),
+         "contributions[0].schedule[0].pace", "unknown pace"),
+        (("monthly: 1000 }",
+          ("monthly: 1000 }\n    contributions: [ { account: k401, schedule: "
+           "[ { from: 2026-11, pace: off }, { from: 2026-11, pace: max } ] } ]")),
+         "contributions[0].schedule[1].from", "already starts"),
+        (("monthly: 1000 }",
+          ("monthly: 1000 }\n    contributions: [ { account: k401 } ]"
+           "\n    k401: { elections: [ { from: 2026-11, mode: max } ] }")),
+         "k401.elections", "keep one"),
+        (("monthly: 1000 }", "monthly: 1000 }\n    contributions: [ { account: ira } ]\n    ira: { amount: 1 }"),
+         "ira", "keep one"),
+        (("monthly: 1000 }", "monthly: 1000 }\n    hsa_coverage: [ { from: 2026-11, tier: plus } ]"),
+         "hsa_coverage[0].tier", "tier must be"),
+        (("monthly: 1000 }", "monthly: 1000 }\n    limits: { 2026: { roth: 1 } }"),
+         "limits.2026.roth", "unknown limit"),
         (("gross_annual: 50000\n", "gross_annual: 50000\n      match: { type: magic }\n"),
          "job.match.type", "unknown match"),
         (("schedule:", "withholding: { state: ca }\n      schedule:"), "job.withholding.state", "unknown state"),
@@ -446,6 +467,18 @@ def test_fire_limit_fallback_and_warnings(tmp_path, ledger):
     assert "earmarks are larger than the starting reserve" in messages
 
 
+def test_no_limits_configured_leaves_them_to_the_page(tmp_path, ledger):
+    root = make_root(tmp_path)
+    _write(root, "asof: 2026-11-08\npeople:" + BASE_PERSON)
+    data = build(root, ledger, fire={"people": [{"id": "p", "birth_year": 1970}]})
+    person = data["people"][0]
+    assert person["k401"]["limits"] == {}
+    assert person["limits"] == {}
+    assert person["birthYear"] == 1970  # inherited: drives catch-up on the page
+    assert "birthYear" in person["inherited"]
+    assert data["warnings"] == []
+
+
 def test_example_config_resolves_cleanly(tmp_path):
     """apps/web/lib/runway/runway.example.yaml parses with no errors against a
     ledger that has its accounts."""
@@ -471,6 +504,13 @@ def test_example_config_resolves_cleanly(tmp_path):
     assert data["errors"] == []
     person = data["people"][0]
     assert person["id"] == "alex"
+    assert [(c["account"], c["tax"], c["channel"]) for c in person["contributions"]] == [
+        ("k401", "traditional", "payroll"),
+        ("k401", "roth", "payroll"),
+        ("hsa", "traditional", "payroll"),
+        ("ira", "roth", "direct"),
+    ]
+    assert data["warnings"] == []
     assert [s["id"] for s in person["scenarios"]] == ["stay", "new-job"]
     assert person["starting"]["sleeves"]["reserve"] == 30000.0
     assert data["spreadThrough"] == "year_end"

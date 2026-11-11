@@ -16,9 +16,11 @@ returns one camelCase payload:
 
 - `asof`, `fromConfig`, `start` (YYYY-MM), `months`, `firstMonthSpendFraction`,
   `spreadThrough` (`horizon` | `year_end`), `reserveLookahead`, `playCap`, `defaults`
-- `people`: fully resolved people (job, 401k limits and elections, spending, IRA, one-offs,
-  cash rules, returns, scenarios with `stay` first, starting balances per sleeve, and an
-  `inherited` list of fields filled from `config/fire.yaml`)
+- `people`: fully resolved people (job, `contributions` streams into the 401k, IRA and HSA,
+  per-year `limits`, `hsaCoverage`, spending, one-offs, cash rules, returns, scenarios with
+  `stay` first, starting balances per sleeve, and an `inherited` list of fields filled from
+  `config/fire.yaml`). The older `k401` (limits, elections) and `ira` keys are still passed
+  through; the page converts them to streams.
 - `roster`: every configured person with `status` `ok` | `locked` | `missing` | `error`, so a
   person whose file is git-crypt encrypted still shows up
 - `errors` / `warnings`: `{personId, path, message}`. Errors drop a person; warnings keep it.

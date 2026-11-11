@@ -17,9 +17,15 @@ months: 24                       # horizon
 
 defaults:                        # deep-merged under every person; person keys win
   returns: { equity: 0.07, reserve: 0.039, ef: 0.0365, gold: 0.03 }   # per year
-  k401_limits: { 2026: 24500, 2027: 24500, 2028: 25000 }   # else fire.yaml k401_limit
+  # Annual limits by year. Leave a year (or a key) out to use the bundled IRS
+  # table; a later year reuses the closest earlier one. Catch-up amounts are
+  # added from birth_year (age 50 for the 401k and IRA, 55 for the HSA), so a
+  # limit given here is taken as final.
+  limits:
+    2028: { k401: 25000 }        # an assumption for a year the IRS has not set
+    # 2026: { k401: 24500, ira: 7500, hsa_self: 4400, hsa_family: 8750 }
   reserve_lookahead_months: 12   # the reserve holds earmarks + this many months of shortfall
-  spread_through: year_end       # max_spread: spread the remaining limit over paychecks to
+  spread_through: year_end       # pace even: spread the remaining limit over paychecks to
                                  # Dec 31 (year_end) or only those inside the horizon
   play_cap: 0.10                 # play sleeve cap as a share of invested assets
 
@@ -35,7 +41,7 @@ people:
       deductions:
         # pretax: off federal, state and FICA wages (fica_exempt defaults to pretax).
         # per: paycheck | month; for per: month, `paycheck` picks which one (1-based).
-        # sleeve: credit the amount to a sleeve (an HSA, say).
+        # sleeve: credit the amount to a sleeve. (An HSA is a contribution, below.)
         - { label: Medical, amount: 30, per: paycheck, pretax: true }
         - { label: Commuter, amount: 20, per: paycheck, pretax: true }
         - { label: Life, amount: 1.50, per: paycheck, pretax: false }
@@ -50,15 +56,64 @@ people:
       match: { type: threshold, min_pct: 0.04, pct: 0.02 }
       vesting: { date: 2027-09-01, unvested_start: 500 }   # unvested match is forfeited
                                                            # on leaving before this date
-    k401:
-      ytd: { 2026: 0 }           # employee deferrals already made this year
-      elections:                 # the latest `from` on or before a paycheck wins
-        - { from: 2026-11, mode: percent, pretax_pct: 0.10, roth_pct: 0 }
-        - { from: 2027-01, mode: max_spread, cap_pct: 0.5, roth_share: 0 }
-        # - { from: 2027-01, mode: fixed, pretax: 1000, roth: 0 }   # $ per paycheck,
-        #                                                           # clipped at the limit
+      hsa_employer: { amount: 500, month: 1 }   # employer HSA money, once a year;
+                                                # counts toward the HSA limit
+    # birth_year: 1990           # for catch-up limits; else inherited from fire.yaml
+
+    # HDHP coverage on the first of each month. The HSA limit is one twelfth of
+    # the tier's limit per covered month; nothing goes in while it is `none`.
+    # Omit the list for self-only coverage throughout.
+    hsa_coverage:
+      - { from: 2026-01, tier: self }          # self | family | none
+
+    # Money into tax-advantaged accounts. One entry is one stream: an account
+    # (k401 | ira | hsa), a tax treatment (traditional | roth; an HSA has none)
+    # and a channel (payroll: off the paycheck; direct: paid from cash). A 401k
+    # is always payroll, an IRA always direct, an HSA either. Streams in the
+    # same account share that account's annual limit, and a job change does not
+    # reset the year's running total.
+    #
+    # `schedule` is a list of dated changes; the latest `from` on or before a
+    # date wins. Paces:
+    #   off                                     nothing from this month
+    #   fixed    amount [per, paycheck]         $ per paycheck, or per: month on
+    #                                           paycheck N; $ per month when direct
+    #   percent  pct                            share of gross pay (payroll only)
+    #   even     [share, cap_pct]               `share` of the limit's remaining
+    #                                           room, spread over the periods left
+    #                                           in the year, at most cap_pct of a
+    #                                           check
+    #   front_load [share, cap_pct]             the same room as early as cap_pct
+    #                                           of each check allows (payroll only)
+    #   lump     month, amount                  once a year when direct; amount
+    #                                           is $ or `max`
+    # fixed and percent stop at the limit; the page warns when they reach it.
+    contributions:
+      - id: k401-pretax
+        account: k401
+        tax: traditional
+        ytd: { 2026: 0 }         # already contributed this year, before asof
+        schedule:
+          - { from: 2026-11, pace: percent, pct: 0.10 }
+          - { from: 2027-01, pace: even, share: 0.6, cap_pct: 0.30 }
+      - id: k401-roth
+        account: k401
+        tax: roth
+        schedule:
+          - { from: 2027-01, pace: even, share: 0.4, cap_pct: 0.20 }
+      - id: hsa
+        account: hsa
+        channel: payroll         # exempt from income tax and FICA; `direct` is
+                                 # paid from take-home cash instead
+        schedule:
+          - { from: 2026-11, pace: fixed, amount: 150 }
+          - { from: 2027-01, pace: even }
+      - id: ira-roth
+        account: ira
+        tax: roth
+        schedule:
+          - { from: 2026-11, pace: lump, month: 1, amount: max }   # each January
     spending: { monthly: 4200 }
-    ira: { amount: 7500, month: 1 }    # deposited each January; null = none
     one_offs:                          # negative = refund
       - { month: 2027-04, amount: 1500, label: "April tax due" }
     cash:
@@ -72,7 +127,10 @@ people:
         label: New job $110k
         job: { start: 2027-07, gross_annual: 110000, match: { type: flat, pct: 0.04 } }
         # omitted job fields (schedule, deductions, withholding, raise) carry over;
-        # vesting starts over unless given
+        # vesting starts over unless given. Contribution streams carry over too.
+        # Add `hsa_coverage: none` (or self | family) when the new job changes
+        # the health plan: with `none`, HSA money stops and the year's limit is
+        # prorated, so anything front-loaded above it shows as an excess.
     starting:
       source: ledger             # balances from the ledger at asof
       rules:                     # ordered; the first regex matching the account wins
@@ -94,7 +152,8 @@ people:
   #
   # partner/runway.yaml holds a whole person mapping, for example:
   #   job: { gross_annual: 70000, schedule: { frequency: semimonthly, days: [15, -1] } }
-  #   k401: { elections: [ { from: 2026-11, mode: max_spread } ] }
+  #   contributions:
+  #     - { account: k401, tax: traditional, schedule: [ { from: 2026-11, pace: even } ] }
   #   spending: { monthly: 3500 }
   #   starting:
   #     source: static

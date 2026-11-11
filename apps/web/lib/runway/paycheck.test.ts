@@ -20,6 +20,8 @@ const job = (over: Partial<Job> = {}): Job => ({
   },
   match: { type: "none" },
   vesting: null,
+  hsaEmployer: null,
+  hsaTier: null,
   ...over,
 })
 
@@ -31,8 +33,7 @@ test("annualized federal withholding plus FICA, no state", () => {
   // 12,400 x 10% + 23,500 x 12% = 1,240 + 2,820 = 4,060 / 26.
   const p = paycheck({
     gross: 2000,
-    pre: 0,
-    roth: 0,
+    deferrals: [],
     job: job(),
     paycheckOfMonth: 1,
     ytdStatePayroll: 0,
@@ -50,11 +51,39 @@ test("pre-tax 401k lowers income tax but not FICA; Roth lowers neither", () => {
     ytdStatePayroll: 0,
     ytdSsWages: 0,
   }
-  const pre = paycheck({ ...base, gross: 2000, pre: 200, roth: 0 })
-  const roth = paycheck({ ...base, gross: 2000, pre: 0, roth: 200 })
+  const pre = paycheck({
+    ...base,
+    gross: 2000,
+    deferrals: [{ amount: 200, incomeTaxExempt: true, ficaExempt: false }],
+  })
+  const roth = paycheck({
+    ...base,
+    gross: 2000,
+    deferrals: [{ amount: 200, incomeTaxExempt: false, ficaExempt: false }],
+  })
   near(pre.fica, roth.fica)
   assert.ok(pre.federal < roth.federal)
   assert.ok(pre.net > roth.net)
+})
+
+test("a payroll HSA is exempt from income tax and FICA", () => {
+  const base = {
+    job: job(),
+    gross: 2000,
+    paycheckOfMonth: 1,
+    ytdStatePayroll: 0,
+    ytdSsWages: 0,
+  }
+  const none = paycheck({ ...base, deferrals: [] })
+  const hsa = paycheck({
+    ...base,
+    deferrals: [{ amount: 200, incomeTaxExempt: true, ficaExempt: true }],
+  })
+  near(hsa.fica, 1800 * 0.0765)
+  assert.ok(hsa.federal < none.federal)
+  near(hsa.deferred, 200)
+  // Take-home falls by less than the 200 that went in.
+  assert.ok(none.net - hsa.net < 200)
 })
 
 test("per-month deductions land on their paycheck only; sleeve tallies", () => {
@@ -73,8 +102,7 @@ test("per-month deductions land on their paycheck only; sleeve tallies", () => {
   })
   const base = {
     gross: 2000,
-    pre: 0,
-    roth: 0,
+    deferrals: [],
     job: j,
     ytdStatePayroll: 0,
     ytdSsWages: 0,
@@ -96,8 +124,7 @@ test("state payroll stops at its annual cap; SS stops at the wage base", () => {
   })
   const p = paycheck({
     gross: 2000,
-    pre: 0,
-    roth: 0,
+    deferrals: [],
     job: j,
     paycheckOfMonth: 1,
     ytdStatePayroll: 95,

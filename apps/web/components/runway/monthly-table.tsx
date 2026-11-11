@@ -21,6 +21,8 @@ const FLOW_COLS: { key: keyof MonthRow; label: string }[] = [
   { key: "outflows", label: "Outflows" },
   { key: "shortfall", label: "Short" },
   { key: "k401In", label: "401k in" },
+  { key: "hsaIn", label: "HSA in" },
+  { key: "iraOut", label: "IRA in" },
   { key: "match", label: "Match" },
   { key: "reserveToCore", label: "To core" },
 ]
@@ -31,10 +33,14 @@ const BAL_COLS: SleeveId[] = [
   "core",
   "ira",
   "k401",
+  "hsa",
   "gold",
   "play",
   "other",
 ]
+
+/** Flow columns that only earn their place when money moves through them. */
+const OPTIONAL_FLOWS: (keyof MonthRow)[] = ["hsaIn", "iraOut"]
 
 interface TableRow {
   key: string
@@ -45,7 +51,10 @@ interface TableRow {
   yearStart: boolean
 }
 
-function annual(rows: MonthRow[]): TableRow[] {
+function annual(
+  rows: MonthRow[],
+  flowCols: { key: keyof MonthRow }[]
+): TableRow[] {
   const byYear = new Map<string, MonthRow[]>()
   for (const r of rows) {
     const y = r.month.slice(0, 4)
@@ -53,7 +62,7 @@ function annual(rows: MonthRow[]): TableRow[] {
   }
   return [...byYear.entries()].map(([y, list]) => {
     const flows: Record<string, number> = {}
-    for (const c of FLOW_COLS)
+    for (const c of flowCols)
       flows[c.key] = list.reduce((a, r) => a + (r[c.key] as number), 0)
     const last = list[list.length - 1]
     return {
@@ -75,16 +84,25 @@ export function MonthlyTable({
   showOther: boolean
 }) {
   const [mode, setMode] = React.useState<Mode>("monthly")
-  const cols = BAL_COLS.filter((c) => c !== "other" || showOther)
+  const used = (id: SleeveId) =>
+    rows.some((r) => Math.abs(sleeveValue(r, id)) >= 0.5)
+  const cols = BAL_COLS.filter(
+    (c) => (c !== "other" || showOther) && (c !== "hsa" || used("hsa"))
+  )
+  const flowCols = FLOW_COLS.filter(
+    (c) =>
+      !OPTIONAL_FLOWS.includes(c.key) ||
+      rows.some((r) => Math.abs(r[c.key] as number) >= 0.5)
+  )
   const table: TableRow[] =
     mode === "annual"
-      ? annual(rows)
+      ? annual(rows, flowCols)
       : rows.map((r, i) => ({
           key: r.month,
           label: monthLabel(r.month),
           row: r,
           flows: Object.fromEntries(
-            FLOW_COLS.map((c) => [c.key, r[c.key] as number])
+            flowCols.map((c) => [c.key, r[c.key] as number])
           ),
           events: r.events,
           yearStart: i > 0 && r.month.endsWith("-01"),
@@ -125,7 +143,7 @@ export function MonthlyTable({
               <thead>
                 <tr>
                   <Th sticky>{mode === "annual" ? "Year" : "Month"}</Th>
-                  {FLOW_COLS.map((c) => (
+                  {flowCols.map((c) => (
                     <Th key={c.key}>{c.label}</Th>
                   ))}
                   {cols.map((id, i) => (
@@ -170,7 +188,7 @@ export function MonthlyTable({
                         ) : null}
                       </span>
                     </td>
-                    {FLOW_COLS.map((c) => (
+                    {flowCols.map((c) => (
                       <Td key={c.key} yearStart={t.yearStart}>
                         {money(t.flows[c.key], c.key === "shortfall")}
                       </Td>

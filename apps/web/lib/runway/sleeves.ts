@@ -1,10 +1,10 @@
 // The one place sleeve order, labels and colors are defined. The chart,
 // legend, tooltip, table headers and explainer all read from here.
 
-import type { MonthRow, SleeveKey } from "./types"
+import type { MonthRow } from "./types"
 
-/** Sleeves as charted. "other" folds the HSA and anything held flat (a
- * ninth hue would be a generated color; it gets a neutral instead). */
+/** Sleeves as charted. "other" is anything held flat (receivables, gift
+ * cards); it gets a neutral so it never competes with the named sleeves. */
 export type SleeveId =
   | "other"
   | "checking"
@@ -14,6 +14,7 @@ export type SleeveId =
   | "ira"
   | "gold"
   | "k401"
+  | "hsa"
   | "play"
 
 export interface SleeveDef {
@@ -31,10 +32,10 @@ export interface SleeveDef {
 export const SLEEVES: SleeveDef[] = [
   {
     id: "other",
-    label: "HSA and other",
+    label: "Other",
     short: "Other",
     token: "--sleeve-other",
-    flow: 9,
+    flow: 10,
   },
   {
     id: "checking",
@@ -65,14 +66,15 @@ export const SLEEVES: SleeveDef[] = [
     flow: 4,
   },
   { id: "ira", label: "IRA", short: "IRA", token: "--sleeve-ira", flow: 5 },
-  { id: "gold", label: "Gold", short: "Gold", token: "--sleeve-gold", flow: 8 },
+  { id: "gold", label: "Gold", short: "Gold", token: "--sleeve-gold", flow: 9 },
   { id: "k401", label: "401k", short: "401k", token: "--sleeve-k401", flow: 6 },
+  { id: "hsa", label: "HSA", short: "HSA", token: "--sleeve-hsa", flow: 7 },
   {
     id: "play",
     label: "Play sleeve",
     short: "Play",
     token: "--sleeve-play",
-    flow: 7,
+    flow: 8,
   },
 ]
 
@@ -81,7 +83,7 @@ export const SLEEVE_BY_ID = Object.fromEntries(
 ) as Record<SleeveId, SleeveDef>
 
 export function sleeveValue(row: MonthRow, id: SleeveId): number {
-  return id === "other" ? row.hsa + row.other : row[id]
+  return row[id]
 }
 
 /** Whether a sleeve ever holds money in this run (empty ones stay out of the
@@ -111,11 +113,15 @@ export const SLEEVE_TEXT: Record<SleeveId, { title: string; body: string }> = {
   },
   ira: {
     title: "IRA",
-    body: "One deposit each year, paid from cash in the deposit month.",
+    body: "Deposits paid from cash, up to the year's IRA limit (Roth and traditional share it).",
   },
   k401: {
     title: "401k",
-    body: "Payroll deferrals and the employer match. Unvested match is lost if the job ends before the vesting date.",
+    body: "Payroll deferrals, pre-tax and Roth under one annual limit, plus the employer match. Unvested match is lost if the job ends before the vesting date.",
+  },
+  hsa: {
+    title: "HSA",
+    body: "Payroll, direct and employer money, up to a limit prorated by the months covered by an HDHP. Payroll money skips income tax and FICA.",
   },
   play: {
     title: "Play sleeve",
@@ -126,8 +132,8 @@ export const SLEEVE_TEXT: Record<SleeveId, { title: string; body: string }> = {
     body: "A small hedge, held as is. No new money in this plan.",
   },
   other: {
-    title: "HSA and other",
-    body: "HSA contributions taken from pay, plus balances held flat (receivables, gift cards).",
+    title: "Other",
+    body: "Balances held flat and counted in net worth (receivables, gift cards).",
   },
 }
 
@@ -135,11 +141,8 @@ export const NOT_MODELED_DEFAULT: string[] = [
   "Market swings: returns are smooth averages, so a bad year lowers the invested sleeves while the cash plan stays the same.",
   "Taxes on the taxable sleeves (dividends, realized gains) and the yearly return's true-up beyond the one-off bills listed.",
   "Bonuses, equity grants and side income.",
+  "The tax saved at filing by a direct HSA or deductible traditional IRA deposit, and income limits on Roth IRA deposits.",
+  "Taking out an excess contribution, the 6% excise on one left in, and the HSA last-month rule.",
   "Selling play-sleeve positions to bring it under its cap.",
   "Card rewards, refunds and irregular spending beyond the monthly average.",
 ]
-
-/** Map an engine sleeve key to its charted sleeve. */
-export function chartSleeveOf(k: SleeveKey): SleeveId {
-  return k === "hsa" ? "other" : k
-}

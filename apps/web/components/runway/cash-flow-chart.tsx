@@ -214,6 +214,7 @@ export function CashFlowTooltip({
   if (!active || !row) return null
   const parts: [string, number][] = [["Spending", row.spendOut]]
   if (row.iraOut) parts.push(["IRA deposit", row.iraOut])
+  if (row.hsaOut) parts.push(["HSA deposit", row.hsaOut])
   if (row.taxOut) parts.push(["One-off bills", row.taxOut])
   return (
     <div className="grid min-w-48 gap-1 rounded-lg border bg-background px-2.5 py-1.5 text-xs shadow-xl">

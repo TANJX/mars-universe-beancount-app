@@ -13,7 +13,8 @@ resolves its inputs into one JSON payload:
             the inline keys.
   fire      `config/fire.yaml`: when a runway person's id matches a fire
             person, missing fields (label, gross salary, work state, monthly
-            spending, 401k limit) are inherited instead of duplicated.
+            spending, birth year, 401k limit) are inherited instead of
+            duplicated.
   ledger    `starting.source: ledger` fills starting balances from the ledger
             at `asof`, mapping each account to a sleeve by ordered regex rules.
 
@@ -68,6 +69,24 @@ ELECTION_MODES = {
     "max_spread": "max_spread",
     "max": "max_spread",
 }
+#: Contribution streams: one account, one tax treatment, one channel.
+ACCOUNTS = ("k401", "ira", "hsa")
+#: Channels an account allows; the first is its default.
+CHANNELS = {"k401": ("payroll",), "hsa": ("payroll", "direct"), "ira": ("direct",)}
+PACES = {
+    "payroll": ("off", "fixed", "percent", "even", "front_load"),
+    "direct": ("off", "fixed", "even", "lump"),
+}
+#: Accepted pace spellings (the old election modes and the page's names).
+PACE_ALIASES = {
+    "per_paycheck": "fixed",
+    "max": "even",
+    "max_spread": "even",
+    "early": "front_load",
+}
+HSA_TIERS = ("self", "family", "none")
+#: YAML limit key -> payload key.
+LIMIT_KEYS = {"k401": "k401", "ira": "ira", "hsa_self": "hsaSelf", "hsa_family": "hsaFamily"}
 GITCRYPT_MAGIC = b"\x00GITCRYPT"
 DEFAULT_RETURNS = {"equity": 0.07, "reserve": 0.039, "ef": 0.0365, "gold": 0.03}
 DEFAULT_STATE_STD = {"ny": 8000, "ny_nonresident": 8000, "nj": 1000, "none": 0}
@@ -355,48 +374,6 @@ def map_sleeves(
     }
 
 
-# ---------- pay dates (for limit warnings; the engine has its own copy) ----------
-
-
-def _roll_back_weekend(d: datetime.date) -> datetime.date:
-    if d.weekday() >= 5:
-        return d - datetime.timedelta(days=d.weekday() - 4)
-    return d
-
-
-def paydates(schedule: dict, after: datetime.date, through: datetime.date) -> list[datetime.date]:
-    """Pay dates strictly after `after` and on or before `through`.
-
-    biweekly: every 14 days from `anchor` (either side of it).
-    semimonthly: each `days` entry per month; d > 0 is that day (clamped to
-    the month end) rolled back to Friday on a weekend; -1 is the last weekday.
-    """
-    out: list[datetime.date] = []
-    if schedule["frequency"] == "biweekly":
-        d = datetime.date.fromisoformat(schedule["anchor"])
-        step = datetime.timedelta(days=14)
-        if d <= after:
-            d += step * ((after - d).days // 14 + 1)
-        else:
-            while d - step > after:
-                d -= step
-        while d <= through:
-            out.append(d)
-            d += step
-        return out
-    month = after.strftime("%Y-%m")
-    last = through.strftime("%Y-%m")
-    while month <= last:
-        end = _month_end(month)
-        for day in schedule["days"]:
-            raw = end if day == -1 else end.replace(day=min(day, end.day))
-            d = _roll_back_weekend(raw)
-            if after < d <= through:
-                out.append(d)
-        month = _add_months(month, 1)
-    return sorted(set(out))
-
-
 # ---------- person normalization ----------
 
 
@@ -559,6 +536,21 @@ def _norm_job(ctx: _Ctx, raw: Any, path: str, default_employer: str) -> dict | N
             "date": _date(ctx, v.get("date"), f"{path}.vesting.date", required=True),
             "unvestedStart": _num(ctx, v.get("unvested_start"), f"{path}.vesting.unvested_start", 0.0, 0),
         }
+    hsa_employer = None
+    if raw.get("hsa_employer") is not None:
+        he = _dict(ctx, raw["hsa_employer"], f"{path}.hsa_employer")
+        month = he.get("month", 1)
+        if isinstance(month, bool) or not isinstance(month, int) or not 1 <= month <= 12:
+            ctx.err(f"{path}.hsa_employer.month", f"month must be 1..12, got {month!r}")
+        else:
+            hsa_employer = {
+                "amount": _num(ctx, he.get("amount"), f"{path}.hsa_employer.amount", 0.0, 0),
+                "month": month,
+            }
+    hsa_tier = raw.get("hsa_coverage")
+    if hsa_tier is not None and hsa_tier not in HSA_TIERS:
+        ctx.err(f"{path}.hsa_coverage", f"hsa_coverage must be one of {' | '.join(HSA_TIERS)}")
+        hsa_tier = None
     job = {
         "employer": str(raw.get("employer") or default_employer),
         "grossAnnual": _num(ctx, gross, f"{path}.gross_annual", 0.0, minimum=0),
@@ -568,6 +560,8 @@ def _norm_job(ctx: _Ctx, raw: Any, path: str, default_employer: str) -> dict | N
         "withholding": _norm_withholding(ctx, raw.get("withholding"), f"{path}.withholding"),
         "match": _norm_match(ctx, raw.get("match"), f"{path}.match"),
         "vesting": vesting,
+        "hsaEmployer": hsa_employer,
+        "hsaTier": hsa_tier,
     }
     return job if schedule is not None else None
 
@@ -616,6 +610,148 @@ def _norm_elections(ctx: _Ctx, raw: Any, path: str) -> list[dict]:
     return sorted(out, key=lambda e: e["from"])
 
 
+def _norm_phase(ctx: _Ctx, e: Any, p: str, channel: str) -> dict | None:
+    if not isinstance(e, dict):
+        ctx.err(p, "expected a mapping")
+        return None
+    raw_pace = e.get("pace")
+    if raw_pace is False:  # YAML reads a bare `off` as a boolean
+        raw_pace = "off"
+    pace = PACE_ALIASES.get(raw_pace, raw_pace)
+    if pace not in PACES[channel]:
+        ctx.err(f"{p}.pace", f"unknown pace {raw_pace!r} for a {channel} stream ({' | '.join(PACES[channel])})")
+        return None
+    start = _month(ctx, e.get("from"), f"{p}.from", required=True)
+    if start is None:
+        return None
+    out: dict = {"from": start, "pace": pace}
+    if pace == "fixed":
+        per = "month" if channel == "direct" else e.get("per", "paycheck")
+        if per not in ("paycheck", "month"):
+            ctx.err(f"{p}.per", f"per must be paycheck or month, got {per!r}")
+            return None
+        paycheck = None
+        if per == "month" and channel == "payroll":
+            paycheck = e.get("paycheck", 1)
+            if isinstance(paycheck, bool) or not isinstance(paycheck, int) or paycheck < 1:
+                ctx.err(f"{p}.paycheck", "paycheck must be a 1-based integer")
+                return None
+        out.update(
+            amount=_num(ctx, e.get("amount"), f"{p}.amount", 0.0, 0),
+            per=per,
+            paycheckOfMonth=paycheck,
+        )
+    elif pace == "percent":
+        out["pct"] = _num(ctx, e.get("pct"), f"{p}.pct", 0.0, 0)
+    elif pace in ("even", "front_load"):
+        share = _num(ctx, e.get("share"), f"{p}.share", 1.0, 0)
+        if share > 1:
+            ctx.err(f"{p}.share", "share must be between 0 and 1")
+            share = 1.0
+        out.update(share=share, capPct=_num(ctx, e.get("cap_pct"), f"{p}.cap_pct", 1.0, 0))
+    elif pace == "lump":
+        month = e.get("month", 1)
+        if isinstance(month, bool) or not isinstance(month, int) or not 1 <= month <= 12:
+            ctx.err(f"{p}.month", f"month must be 1..12, got {month!r}")
+            return None
+        amount = e.get("amount")
+        out.update(
+            month=month,
+            # `max` (or nothing) deposits whatever room the limit leaves.
+            amount=None if amount in (None, "max") else _num(ctx, amount, f"{p}.amount", 0.0, 0),
+        )
+    return out
+
+
+def _norm_contributions(ctx: _Ctx, raw: Any, path: str) -> list[dict]:
+    """Contribution streams: {id, account, tax, channel, ytd, schedule}."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for i, c in enumerate(_list(ctx, raw, path)):
+        p = f"{path}[{i}]"
+        if not isinstance(c, dict):
+            ctx.err(p, "expected a mapping")
+            continue
+        account = c.get("account")
+        if account not in ACCOUNTS:
+            ctx.err(f"{p}.account", f"unknown account {account!r} ({' | '.join(ACCOUNTS)})")
+            continue
+        channel = c.get("channel", CHANNELS[account][0])
+        if channel not in CHANNELS[account]:
+            ctx.err(f"{p}.channel", f"a {account} stream must be {' or '.join(CHANNELS[account])}")
+            continue
+        tax = c.get("tax", "traditional")
+        if tax not in ("traditional", "roth") or (account == "hsa" and tax != "traditional"):
+            ctx.err(f"{p}.tax", f"tax must be traditional or roth (an HSA has none), got {tax!r}")
+            continue
+        default_id = f"hsa-{channel}" if account == "hsa" else f"{account}-{tax}"
+        cid = str(c.get("id") or default_id)
+        if cid in seen:
+            ctx.err(f"{p}.id", f"duplicate contribution id {cid!r}")
+            continue
+        seen.add(cid)
+        ytd = {
+            str(y): _num(ctx, v, f"{p}.ytd.{y}", 0.0, 0)
+            for y, v in _dict(ctx, c.get("ytd"), f"{p}.ytd").items()
+        }
+        schedule = []
+        starts: set[str] = set()
+        for j, e in enumerate(_list(ctx, c.get("schedule"), f"{p}.schedule")):
+            phase = _norm_phase(ctx, e, f"{p}.schedule[{j}]", channel)
+            if phase is None:
+                continue
+            if phase["from"] in starts:
+                ctx.err(f"{p}.schedule[{j}].from", f"another change already starts {phase['from']}")
+                continue
+            starts.add(phase["from"])
+            schedule.append(phase)
+        out.append(
+            {
+                "id": cid,
+                "account": account,
+                "tax": tax,
+                "channel": channel,
+                "ytd": ytd,
+                "schedule": sorted(schedule, key=lambda e: e["from"]),
+            }
+        )
+    return out
+
+
+def _norm_hsa_coverage(ctx: _Ctx, raw: Any, path: str) -> list[dict]:
+    """HDHP coverage on the first of each month: [{from, tier}]."""
+    out = []
+    for i, e in enumerate(_list(ctx, raw, path)):
+        p = f"{path}[{i}]"
+        if not isinstance(e, dict):
+            ctx.err(p, "expected a mapping")
+            continue
+        tier = e.get("tier")
+        if tier not in HSA_TIERS:
+            ctx.err(f"{p}.tier", f"tier must be one of {' | '.join(HSA_TIERS)}, got {tier!r}")
+            continue
+        start = _month(ctx, e.get("from"), f"{p}.from", required=True)
+        if start:
+            out.append({"from": start, "tier": tier})
+    return sorted(out, key=lambda e: e["from"])
+
+
+def _norm_year_limits(ctx: _Ctx, raw: Any, path: str) -> dict[str, dict[str, float]]:
+    """`limits: { 2026: { k401, ira, hsa_self, hsa_family } }`. Only what the
+    config gives; the page fills the rest from its bundled IRS table."""
+    out: dict[str, dict[str, float]] = {}
+    for y, row in _dict(ctx, raw, path).items():
+        row = _dict(ctx, row, f"{path}.{y}")
+        vals = {}
+        for key, value in row.items():
+            if key not in LIMIT_KEYS:
+                ctx.err(f"{path}.{y}.{key}", f"unknown limit {key!r} ({' | '.join(LIMIT_KEYS)})")
+                continue
+            vals[LIMIT_KEYS[key]] = _num(ctx, value, f"{path}.{y}.{key}", 0.0, 0)
+        out[str(y)] = vals
+    return dict(sorted(out.items()))
+
+
 def _horizon_years(start: str, months: int) -> list[str]:
     end = _add_months(start, months - 1)
     return [str(y) for y in range(int(start[:4]), int(end[:4]) + 1)]
@@ -635,8 +771,8 @@ def _norm_limits(
         given = {y: float(fire_limit) for y in years}
         inherited = True
     if not given:
-        ctx.warn(path, "no 401k limits configured; contributions are capped at 0")
-        return {y: 0.0 for y in years}, False
+        # Nothing configured: the page falls back to its bundled IRS table.
+        return {}, False
     out = dict(given)
     for y in years:
         if y in out:
@@ -775,40 +911,6 @@ def _norm_cash(ctx: _Ctx, raw: Any, path: str) -> dict:
     }
 
 
-def _limit_warnings(ctx: _Ctx, person: dict, horizon: dict) -> None:
-    """Warn when a fixed election would hit the annual limit inside the
-    horizon (the engine clips there; a real plan may not stop on its own)."""
-    job = person["job"]
-    elections = person["k401"]["elections"]
-    if not any(e["mode"] == "fixed" for e in elections):
-        return
-    after = datetime.date.fromisoformat(horizon["asof"])
-    through = _month_end(_add_months(horizon["start"], horizon["months"] - 1))
-    limits = person["k401"]["limits"]
-    ytd: dict[str, float] = {}
-    warned: set[str] = set()
-    for d in paydates(job["schedule"], after, through):
-        month = d.strftime("%Y-%m")
-        year = str(d.year)
-        active = [e for e in elections if e["from"] <= month]
-        if not active or active[-1]["mode"] != "fixed":
-            continue
-        e = active[-1]
-        if year not in ytd:
-            ytd[year] = float(person["k401"]["ytd"].get(year, 0.0))
-        limit = limits.get(year, 0.0)
-        want = e["pretax"] + e["roth"]
-        room = max(0.0, limit - ytd[year])
-        ytd[year] += min(want, room)
-        if want > room and year not in warned:
-            warned.add(year)
-            ctx.warn(
-                "k401.elections",
-                f"Fixed ${want:,.0f} per paycheck reaches the {year} limit of "
-                f"${limit:,.0f} on {d.isoformat()}; later {year} paychecks are clipped",
-            )
-
-
 def resolve_person(
     raw: dict,
     *,
@@ -846,6 +948,9 @@ def resolve_person(
             candidates.append(
                 (("job", "withholding", "state"), "job.withholding.state", FIRE_STATE[ws])
             )
+        by = fire_person.get("birth_year")
+        if isinstance(by, int) and not isinstance(by, bool):
+            candidates.append((("birth_year",), "birthYear", by))
         gross = _fire_gross(fire_person, int(horizon["start"][:4]))
         if gross is not None:
             candidates.append((("job", "gross_annual"), "job.grossAnnual", gross))
@@ -872,6 +977,21 @@ def resolve_person(
         for y, v in _dict(ctx, k401_raw.get("ytd"), "k401.ytd").items()
     }
     elections = _norm_elections(ctx, k401_raw.get("elections"), "k401.elections")
+
+    contributions = _norm_contributions(ctx, merged.get("contributions"), "contributions")
+    year_limits = _norm_year_limits(ctx, merged.get("limits"), "limits")
+    hsa_coverage = _norm_hsa_coverage(ctx, merged.get("hsa_coverage"), "hsa_coverage")
+    birth_year = merged.get("birth_year")
+    if birth_year is not None and (isinstance(birth_year, bool) or not isinstance(birth_year, int)):
+        ctx.err("birth_year", f"birth_year must be a year, got {birth_year!r}")
+        birth_year = None
+    # The old keys still work, but one account may not be described both ways:
+    # the money would be counted twice.
+    streamed = {c["account"] for c in contributions}
+    if "k401" in streamed and elections:
+        ctx.err("k401.elections", "401k is set in both contributions and k401.elections; keep one")
+    if "ira" in streamed and merged.get("ira") is not None:
+        ctx.err("ira", "IRA is set in both contributions and ira; keep one")
 
     spending = _dict(ctx, merged.get("spending"), "spending")
     spend_monthly = _num(ctx, spending.get("monthly"), "spending.monthly", None, 0)
@@ -902,6 +1022,14 @@ def resolve_person(
                 }
             )
 
+    if "hsa" in streamed and job is not None:
+        for i, d in enumerate(job["deductions"]):
+            if d["sleeve"] == "hsa":
+                ctx.err(
+                    f"job.deductions[{i}]",
+                    "HSA is set in both contributions and a paycheck deduction; keep one",
+                )
+
     cash = _norm_cash(ctx, merged.get("cash"), "cash")
 
     returns_raw = _dict(ctx, merged.get("returns"), "returns")
@@ -926,6 +1054,12 @@ def resolve_person(
         "name": str(label),
         "status": "ok",
         "job": job,
+        # Streams into the 401k, IRA and HSA. `k401` and `ira` below are the
+        # older shape; the page converts whatever is still written that way.
+        "contributions": contributions,
+        "limits": year_limits,
+        "hsaCoverage": hsa_coverage,
+        "birthYear": birth_year,
         "k401": {"limits": limits, "ytd": ytd, "elections": elections},
         "spendingMonthly": spend_monthly,
         "ira": ira,
@@ -940,7 +1074,6 @@ def resolve_person(
         person["sleeveInfo"] = _jsonable(merged["sleeve_info"])
     if isinstance(merged.get("not_modeled"), list):
         person["notModeled"] = [str(s) for s in merged["not_modeled"]]
-    _limit_warnings(ctx, person, horizon)
     return person, ctx.errors, ctx.warnings
 
 
