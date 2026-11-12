@@ -14,6 +14,10 @@ from beancount_tooling.importer.apple import AppleImporter
 from beancount_tooling.importer.apple_saving import AppleSavingImporter
 from beancount_tooling.importer.bilt import BiltImporter
 from beancount_tooling.importer.bofa import BofAImporter
+from beancount_tooling.importer.bofa_checking import (
+    BofACheckingImporter,
+    strip_memo_quotes,
+)
 from beancount_tooling.importer.chase import ChaseImporter
 from beancount_tooling.importer.chase_checking import ChaseCheckingImporter
 from beancount_tooling.importer.citi_checking import CitiCheckingImporter
@@ -565,3 +569,53 @@ def test_checking_debit_is_a_merchant_row(merchant_map):
         {"Description": "DEMO MART #12", "Amount": "-5.00"}
     )
     assert (payee, merchant.payee) == ("Demo Mart", "Demo Mart")
+
+
+# --- BofA checking: a quoted Zelle memo ----------------------------------------
+
+
+def test_bofa_checking_drops_the_stray_quotes_of_a_zelle_memo(tmp_path):
+    """BofA does not escape the quotes around a Zelle memo, so the csv module
+    leaves two stray quotes in the description. The payee loses them; the
+    parsed row, and with it the `ref:`, stays what it always was."""
+    path = tmp_path / "checking" / "Demo" / "stmt.csv"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "Description,,Summary Amt.\n"
+        'Beginning balance as of 01/01/2030,,"100.00"\n'
+        "\n"
+        "Date,Description,Amount,Running Bal.\n"
+        '01/02/2030,"Zelle payment from PAT EXAMPLE for "pizza night"; Conf# abc123xyz","25.00","125.00"\n'
+        '01/03/2030,"Zelle payment from PAT EXAMPLE for tacos; Conf# def456uvw","10.00","135.00"\n'
+        '01/04/2030,"Zelle payment to SAM SAMPLE Conf# ghi789rst","-5.00","130.00"\n'
+    )
+    importer = BofACheckingImporter("Demo")
+    quoted, plain, no_memo = importer.extract(str(path), [])
+
+    assert quoted.payee == "Zelle Payment From Pat Example for Pizza Night; Conf# Abc123xyz"
+    assert plain.payee == "Zelle Payment From Pat Example for Tacos; Conf# Def456uvw"
+    assert no_memo.payee == "Zelle Payment to Sam Sample Conf# Ghi789rst"
+    assert all('"' not in t.payee for t in (quoted, plain, no_memo))
+
+    # The ref is still the hash of the row as the csv module parsed it.
+    row = {
+        "Date": "01/02/2030",
+        "Description": 'Zelle payment from PAT EXAMPLE for pizza night"; Conf# abc123xyz"',
+        "Amount": "25.00",
+        "Running Bal.": "125.00",
+    }
+    assert quoted.postings[0].meta["ref"] == importer.get_trans_ref(
+        row, ",".join(row.values())
+    )
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        'Demo Store "Open Late" 123',  # quotes that are not a memo's leftovers
+        "Zelle Payment From Pat Example Conf# Abc123xyz",
+        'Say "Hi"; Conf# Abc "Xyz"',
+    ],
+)
+def test_strip_memo_quotes_leaves_other_text_alone(description):
+    assert strip_memo_quotes(description) == description

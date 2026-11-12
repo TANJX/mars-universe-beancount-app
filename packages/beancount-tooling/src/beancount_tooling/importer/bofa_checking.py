@@ -1,5 +1,7 @@
 # importers located in the importers directory
 import os
+import re
+
 from titlecase import titlecase
 
 from beancount.core.number import D
@@ -7,6 +9,24 @@ from beancount.core import amount
 from beancount.core import flags
 from beancount.core import data
 from beancount_tooling.importer.general_importer import GeneralImporter
+
+
+# BofA exports a Zelle memo in quotes it does not escape, inside a field that is
+# itself quoted:
+#     "Zelle payment from A NAME for "dinner"; Conf# abc123"
+# The csv module ends the quoted field at the memo's opening quote and keeps the
+# rest as typed, so the description arrives as
+#     Zelle payment from A NAME for dinner"; Conf# abc123"
+# with two stray quotes. The parsed row feeds the `ref:` hash, so the row is left
+# as parsed (re-parsing it would re-stamp every such row) and only the payee is
+# repaired, to the form BofA itself uses for a one-word memo: `for dinner; Conf# ...`.
+_STRAY_MEMO_QUOTES = re.compile(r'^(?P<head>[^"]*)"(?P<conf>; Conf# [^"]*)"$')
+
+
+def strip_memo_quotes(description: str) -> str:
+    """Drops the two stray quotes a quoted Zelle memo leaves in a description."""
+    m = _STRAY_MEMO_QUOTES.match(description)
+    return m["head"] + m["conf"] if m else description
 
 
 class BofACheckingImporter(GeneralImporter):
@@ -33,7 +53,7 @@ class BofACheckingImporter(GeneralImporter):
         return lines[split_index + 1 :]
 
     def handle_transaction(self, row, line):
-        trans_desc = titlecase(row["Description"].lower())
+        trans_desc = strip_memo_quotes(titlecase(row["Description"].lower()))
         trans_amt = row["Amount"]
 
         postings = []
