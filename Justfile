@@ -34,6 +34,11 @@ format:
 normalize-payees *args:
     uv run normalize-payees {{args}}
 
+# Write the mobile snapshot (phone app data) to $LEDGER_DIR/mobile/snapshot.json.
+# Personal inputs: $LEDGER_DIR/config/mobile.yaml. Flags: --asof YYYY-MM-DD, --out PATH.
+mobile-snapshot *args:
+    uv run mobile-snapshot {{args}}
+
 # Stock price updater
 prices:
     uv run update-stock-price

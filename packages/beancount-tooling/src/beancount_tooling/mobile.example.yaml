@@ -1,0 +1,107 @@
+# Mobile snapshot inputs: everything personal behind `just mobile-snapshot`.
+# Copy to <LEDGER_DIR>/config/mobile.yaml. Without that file the snapshot still has
+# balances, spending and activity, but no goals, key dates or labelled plan events.
+#
+# `just mobile-snapshot [--asof YYYY-MM-DD] [--out PATH]` writes <LEDGER_DIR>/mobile/snapshot.json.
+# Every section below is optional. All names and numbers here are invented.
+
+# Account prefixes that map the chart of accounts onto the snapshot's groups.
+# These are the defaults; list only the ones your ledger spells differently.
+accounts:
+  checking: ["Assets:Checking"]
+  savings: ["Assets:Saving"]
+  cards: ["Liabilities:Credit"]
+  investments: ["Assets:Investment"]
+  loans: ["Liabilities:Loan"]
+  receivables: ["Assets:Receivable"]
+  payables: ["Liabilities:Payable"]
+  salary: ["Income:Salary"]
+  clearing: ["Assets:Pending-Transfer"]            # transfers pass through these
+  paying: ["Assets:Transit", "Assets:Gift-Card"]   # can pay for an expense, after cards and checking
+
+plan:
+  # Last day the plan covers: `until` while it is still ahead, else `days` past
+  # the as-of date. Either key may be left out (days defaults to 50).
+  horizon: { until: 2030-12-31, days: 50 }
+  # Relabel future-dated (forecast) entries, first match wins. Conditions:
+  # payee_prefix, payee_contains (both test the payee, or the narration when there
+  # is no payee) and narration_contains. All given conditions must hold.
+  # Unmatched entries show their narration (or payee) and the account they hit.
+  events:
+    - match: { payee_prefix: "Acme Corp" }
+      label: "Paycheck"
+      note: "Acme, after 401k"
+      kind: pay          # pay | bill; default is by sign
+      merge: true        # same-day matches add up to one event (deposit splits)
+      paycheck: true     # the first such event is plan.nextPay
+    - match: { payee_prefix: "Auto Finance" }
+      label: "Car loan"
+      kind: bill
+    - match: { narration_contains: "Commuter" }
+      label: "Commuter benefit"
+
+activity:
+  days: 90               # how far back activity.transactions goes
+
+spending:
+  # Top-level expense categories left out of "day-to-day" spending (spend.flex).
+  day_to_day_exclude: [Home]
+
+# Becomes the goal with id "ef"; its balance is float.reserve.
+emergency_fund:
+  account: "Assets:Saving:Harbor"
+  target: 15000
+  note: "3 months of outflow"
+
+goals:
+  # measure.type:
+  #   balance        current balance of `account` (and its sub-accounts)
+  #   contributions  USD paid into `account` during `year` (default: the as-of
+  #                  year) from salary, checking, savings or a clearing account
+  #   card_spend     charges on the card `account` since `since`, skipping payees
+  #                  containing any exclude_payee_contains (case-insensitive) and
+  #                  entries that post to any exclude_accounts
+  - id: ira
+    name: "Roth IRA 2030"
+    target: 7500
+    due: 2031-04-15
+    measure: { type: contributions, account: "Assets:Investment:Northwind:Roth-IRA", year: 2030 }
+  - id: bonus
+    name: "Card bonus spend"
+    target: 4000
+    due: 2030-09-30
+    note: "60k points"
+    measure:
+      type: card_spend
+      account: "Liabilities:Credit:Summit"
+      since: 2030-06-01
+      exclude_payee_contains: [fee]
+      exclude_accounts: ["Expenses:Fee"]
+
+# The first loan is the snapshot's top-level `loan`. original / payment / payoff
+# are optional facts the ledger does not hold.
+loans:
+  - account: "Liabilities:Loan:Car"
+    name: "Car loan"
+    original: 30000
+    payment: 550.25
+    payoff: 2032-06-15
+
+key_dates:
+  - { date: 2030-08-01, label: "Insurance renews", note: "about $900 for 6 months" }
+  - { date: 2032-06-15, label: "Car loan paid off" }
+
+investments:
+  # How investment account paths roll up into the accounts the app lists. First
+  # matching prefix wins: `name` is a fixed name, `component` takes the path
+  # component at that index (Assets is 0). Unlisted paths roll up by component 2.
+  accounts:
+    - { prefix: "Assets:Investment:Meridian", name: "401k" }
+    - { prefix: "Assets:Investment:Northwind", component: 3 }
+
+# Full account path -> name shown in the app. A key ending in ":*" names a whole
+# subtree, with {name} standing for the rest of the path. Anything not listed shows
+# its path tail with dashes as spaces.
+display_names:
+  "Liabilities:Credit:Summit": "Summit Rewards"
+  "Assets:Gift-Card:*": "{name} gift card"

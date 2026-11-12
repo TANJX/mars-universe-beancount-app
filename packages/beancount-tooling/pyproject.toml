@@ -22,6 +22,7 @@ backfill-prices = "beancount_tooling.__main__:run_backfill_prices"
 generate-forecast = "beancount_tooling.__main__:run_generate_forecast"
 bean-format-compat = "beancount_tooling.format_compat:main"
 normalize-payees = "beancount_tooling.__main__:run_normalize_payees"
+mobile-snapshot = "beancount_tooling.__main__:run_mobile"
 
 [build-system]
 requires = ["hatchling"]

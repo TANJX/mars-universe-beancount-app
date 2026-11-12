@@ -36,3 +36,9 @@ def run_normalize_payees():
     from beancount_tooling.normalize_payees import main
 
     raise SystemExit(main())
+
+
+def run_mobile():
+    from beancount_tooling.mobile.cli import main
+
+    raise SystemExit(main())
