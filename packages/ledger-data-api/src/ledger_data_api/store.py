@@ -4,7 +4,12 @@ File layout under <ledger_dir>/plan/:
     plans.jsonl           one event per line: {"op": "save"|"delete", ...}
     transfers.jsonl       one event per line: same shape
     cc-cards.json         atomic JSON object keyed by account path
+    cc-expected.json      atomic JSON object keyed by account path (at most one
+                          expected statement per card)
     settings.json         atomic JSON object
+
+Read-only here, under <ledger_dir>/statements/billing/credit/:
+    <CardName>.jsonl      closed card statements, written by the fetch command
 
 Plus user-facing config under <ledger_dir>/config/:
     ui.yaml               UI customization (branding, accounts, merchants, sidebar)
@@ -15,14 +20,23 @@ import json
 import logging
 import os
 import tempfile
+import threading
 from pathlib import Path
+from typing import Optional
 from uuid import uuid4
 
 import yaml
 
-from .models import CCCardRecord, Plan, PlanSettings, Transfer
+from . import billing
+from .billing import Statement
+from .models import CCCardRecord, ExpectedStatement, Plan, PlanSettings, Transfer
 
 log = logging.getLogger(__name__)
+
+PLAN_LOCK = threading.RLock()
+"""Held around every read-modify-write that touches both plans.jsonl and
+cc-expected.json (promotion, expected save/delete). Re-entrant so the
+reconcile step can call the expected-statement writers while holding it."""
 
 
 def now_iso() -> str:
@@ -99,26 +113,54 @@ def delete_plan(ledger_file_path: str, plan_id: str) -> None:
     _append_jsonl(path, event)
 
 
+def append_plan_events(ledger_file_path: str, events: list[dict]) -> None:
+    """Append several plan events in one open-and-write."""
+    if not events:
+        return
+    path = plan_dir(ledger_file_path) / "plans.jsonl"
+    _ensure_dir(path.parent)
+    with path.open("a") as f:
+        f.write("".join(json.dumps(event) + "\n" for event in events))
+
+
 def replace_cc_override(
     ledger_file_path: str,
     card_account_path: str,
-    cycle_month: str,
     plans: list[Plan],
+    *,
+    statement_id: Optional[str] = None,
+    cycle_month: Optional[str] = None,
+    existing_ids: Optional[set[str]] = None,
 ) -> list[Plan]:
-    """Atomically replace the override plan-set for one (card, cycle) pair.
+    """Atomically replace the override plan-set for one card statement.
 
-    Reads existing plans, appends delete events for any plan with the given
-    ccCardRef + ccCycleMonth that's not in the new set, then save events for
-    the new set. All in one open-and-write so the on-disk view never shows
-    a half-applied state.
+    Exactly one of `statement_id` / `cycle_month` is given.
+
+    `statement_id`: each plan is tagged with the statement and no cycle
+    month. The set being replaced is `existing_ids`, supplied by the caller
+    from the read-time resolution (it can include legacy rows that map to
+    this statement).
+
+    `cycle_month` (legacy, cards with no statement records): the set being
+    replaced is every plan of the card tagged with that month and no
+    statement id.
+
+    Delete events for plans missing from the new set and save events for the
+    new set go out in one write, so the on-disk view never shows a
+    half-applied state.
     """
-    path = plan_dir(ledger_file_path) / "plans.jsonl"
-    existing = list_plans(ledger_file_path)
-    existing_ids = {
-        p.id
-        for p in existing
-        if p.ccCardRef == card_account_path and p.ccCycleMonth == cycle_month
-    }
+    if (statement_id is None) == (cycle_month is None):
+        raise ValueError("exactly one of statement_id / cycle_month is required")
+    if statement_id is not None:
+        existing = set(existing_ids or ())
+    else:
+        existing = {
+            p.id
+            for p in list_plans(ledger_file_path)
+            if p.ccCardRef == card_account_path
+            and p.ccCycleMonth == cycle_month
+            and p.ccStatementId is None
+        }
     incoming_ids = {p.id for p in plans if p.id}
 
     saved: list[Plan] = []
@@ -131,19 +173,14 @@ def replace_cc_override(
         plan.updatedAt = now_iso()
         plan.ccCardRef = card_account_path
         plan.ccCycleMonth = cycle_month
+        plan.ccStatementId = statement_id
         events.append({"op": "save", **plan.to_dict()})
         saved.append(plan)
 
-    for stale_id in existing_ids - incoming_ids:
+    for stale_id in sorted(existing - incoming_ids):
         events.append({"op": "delete", "id": stale_id, "deletedAt": now_iso()})
 
-    if not events:
-        return saved
-
-    _ensure_dir(path.parent)
-    with path.open("a") as f:
-        for event in events:
-            f.write(json.dumps(event) + "\n")
+    append_plan_events(ledger_file_path, events)
     return saved
 
 
@@ -223,6 +260,108 @@ def delete_cc_card_record(ledger_file_path: str, account_path: str) -> None:
     if account_path in raw:
         del raw[account_path]
         _write_json_atomic(path, raw)
+
+
+# ---------- card statements (facts, read-only) ----------
+
+
+def statements_dir(ledger_file_path: str) -> Path:
+    """<ledger_dir>/statements, sibling of journal/."""
+    return Path(ledger_file_path).parent.parent / "statements"
+
+
+def list_statements(ledger_file_path: str) -> dict[str, list[Statement]]:
+    """Closed statements per card account, ascending by closing date."""
+    return billing.read_all(statements_dir(ledger_file_path))
+
+
+# ---------- cc-expected.json (atomic JSON, one expected statement per card) ----------
+
+
+def _expected_path(ledger_file_path: str) -> Path:
+    return plan_dir(ledger_file_path) / "cc-expected.json"
+
+
+PROMOTED_KEY = "_promoted"
+"""Reserved key in cc-expected.json: the last promotion per card, as
+{account: {"from": expected id, "to": closed id, "at": timestamp}}. It lets a
+request that still names the old expected id (a dialog opened before the
+statement closed) be mapped to the closed statement that claimed it."""
+
+
+def list_expected_statements(ledger_file_path: str) -> dict[str, ExpectedStatement]:
+    raw = _read_json_object(_expected_path(ledger_file_path), {})
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, ExpectedStatement] = {}
+    for account, payload in raw.items():
+        if account == PROMOTED_KEY or not isinstance(payload, dict):
+            continue
+        rec = ExpectedStatement.from_dict(account, payload)
+        if not billing._is_date(rec.id):
+            continue
+        out[account] = rec
+    return out
+
+
+def save_expected_statement(
+    ledger_file_path: str, rec: ExpectedStatement
+) -> ExpectedStatement:
+    if not rec.createdAt:
+        rec.createdAt = now_iso()
+    rec.updatedAt = now_iso()
+    path = _expected_path(ledger_file_path)
+    with PLAN_LOCK:
+        raw = _read_json_object(path, {})
+        if not isinstance(raw, dict):
+            raw = {}
+        raw[rec.account] = rec.to_storage_dict()
+        _write_json_atomic(path, raw)
+    return rec
+
+
+def delete_expected_statement(ledger_file_path: str, account: str) -> None:
+    path = _expected_path(ledger_file_path)
+    with PLAN_LOCK:
+        raw = _read_json_object(path, {})
+        if isinstance(raw, dict) and account in raw:
+            del raw[account]
+            _write_json_atomic(path, raw)
+
+
+def promote_expected_statement(
+    ledger_file_path: str, account: str, expected_id: str, closed_id: str
+) -> None:
+    """Drop a card's expected statement and remember which closed statement
+    claimed it, in one atomic write."""
+    path = _expected_path(ledger_file_path)
+    with PLAN_LOCK:
+        raw = _read_json_object(path, {})
+        if not isinstance(raw, dict):
+            raw = {}
+        raw.pop(account, None)
+        promoted = raw.get(PROMOTED_KEY)
+        if not isinstance(promoted, dict):
+            promoted = {}
+        promoted[account] = {"from": expected_id, "to": closed_id, "at": now_iso()}
+        raw[PROMOTED_KEY] = promoted
+        _write_json_atomic(path, raw)
+
+
+def list_promotions(ledger_file_path: str) -> dict[str, tuple[str, str]]:
+    """account -> (expected id, closed id) of the card's last promotion."""
+    raw = _read_json_object(_expected_path(ledger_file_path), {})
+    promoted = raw.get(PROMOTED_KEY) if isinstance(raw, dict) else None
+    if not isinstance(promoted, dict):
+        return {}
+    out: dict[str, tuple[str, str]] = {}
+    for account, payload in promoted.items():
+        if not isinstance(payload, dict):
+            continue
+        old, new = payload.get("from"), payload.get("to")
+        if billing._is_date(old) and billing._is_date(new):
+            out[account] = (old, new)
+    return out
 
 
 # ---------- settings.json ----------

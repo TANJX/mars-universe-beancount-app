@@ -7,6 +7,12 @@ just fetch --login               # open the profile for first-time login, no fet
 just fetch --keep-open           # leave the browser open at the end
 just fetch --find-credentials bofa   # list Dashlane item titles and ids
 just fetch --set-credentials bofa    # store a keychain credential (no-echo prompt)
+just fetch --statements-only     # ask for missing card statements only; no browser
+just fetch --no-prompt           # never ask for card statements at the terminal
+
+After the banks run, cards with a closing-day hint (journal/plan/cc-cards.json)
+whose latest statement is not in statements/billing/ are asked about at the
+terminal. Nothing is asked when stdin is not a terminal.
 """
 
 from __future__ import annotations
@@ -14,6 +20,7 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
+from collections.abc import Collection
 
 from beancount_tooling.fetch.config import ConfigError, FetchConfig, load_config
 from beancount_tooling.fetch.credentials import (
@@ -55,6 +62,11 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="BANK",
         help="store BANK's login in the macOS keychain (source: keychain)",
     )
+    mode.add_argument(
+        "--statements-only",
+        action="store_true",
+        help="ask for missing card statements only; no browser",
+    )
     parser.add_argument(
         "--keep-open",
         action="store_true",
@@ -64,6 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-shortcut",
         action="store_true",
         help="always export, even when the site balance equals the ledger",
+    )
+    parser.add_argument(
+        "--no-prompt",
+        action="store_true",
+        help="never ask for card statements at the terminal",
     )
     return parser
 
@@ -166,6 +183,55 @@ def cmd_login(config: FetchConfig, keys: list[str]) -> int:
     return 0
 
 
+def cmd_statements(
+    *,
+    dry_run: bool,
+    no_prompt: bool,
+    skip_accounts: Collection[str] = (),
+    standalone: bool = False,
+) -> int:
+    """Ask for the card statements no bank adapter returned and record them.
+
+    `skip_accounts` are the cards whose statement an adapter read in this run.
+    When prompts are off (--no-prompt, stdin not a terminal, or a dry run of a
+    normal fetch) the missing statements are only listed. Always returns 0.
+    """
+    from beancount_tooling.fetch import statements
+    from beancount_tooling.fetch.browser import new_york_today
+    from beancount_tooling.paths import get_ledger_dir, get_statements_dir
+
+    statements_dir = get_statements_dir()
+    today = new_york_today()
+    candidates = statements.manual_candidates(
+        statements.load_card_hints(get_ledger_dir()),
+        statements_dir,
+        today,
+        skip_accounts=skip_accounts,
+        include_new=standalone,
+    )
+    if not candidates:
+        if standalone:
+            print("No card statements are missing.")
+        return 0
+    if not standalone:
+        print()
+    if not statements.prompts_enabled(no_prompt) or (dry_run and not standalone):
+        for c in candidates:
+            since = (
+                "no statement on file"
+                if c.expected_close is None
+                else f"statement expected since {c.expected_close}, not recorded"
+            )
+            print(f"{c.card}: {since} (run `just fetch --statements-only`)")
+        return 0
+    print("Card statements")
+    for line in statements.run_manual_prompts(
+        candidates, statements_dir, today, dry_run=dry_run, ask=input, out=print
+    ):
+        print(line)
+    return 0
+
+
 def cmd_fetch(
     config: FetchConfig,
     keys: list[str],
@@ -173,6 +239,7 @@ def cmd_fetch(
     dry_run: bool,
     keep_open: bool,
     shortcut: bool = True,
+    no_prompt: bool = False,
 ) -> int:
     from beancount_tooling.fetch.browser import (
         first_page,
@@ -188,6 +255,7 @@ def cmd_fetch(
     statements_dir = get_statements_dir()
     ledger = LedgerBalances(get_journal_file(), new_york_today()) if shortcut else None
     outcomes = []
+    seen: set[str] = set()
     with open_context(config.profile_dir) as context:
         page = first_page(context)
         for key in keys:
@@ -199,6 +267,7 @@ def cmd_fetch(
                 statements_dir,
                 dry_run=dry_run,
                 ledger=ledger,
+                statements_seen=seen,
             )
         if keep_open:
             _wait_for_close(context, "Browser left open; close the window to finish.")
@@ -212,6 +281,7 @@ def cmd_fetch(
         print(f"\nStaged files kept in {run_dir}")
     else:
         shutil.rmtree(run_dir, ignore_errors=True)
+    cmd_statements(dry_run=dry_run, no_prompt=no_prompt, skip_accounts=seen)
     return 1 if failed else 0
 
 
@@ -224,6 +294,12 @@ def main(argv: list[str] | None = None) -> int:
         except ConfigError:
             config = None
         return cmd_find_credentials(args.find_credentials, config)
+
+    if args.statements_only:
+        # Before load_config(): works without config/fetch.yaml.
+        return cmd_statements(
+            dry_run=args.dry_run, no_prompt=args.no_prompt, standalone=True
+        )
 
     try:
         config = load_config()
@@ -248,4 +324,5 @@ def main(argv: list[str] | None = None) -> int:
         dry_run=args.dry_run,
         keep_open=args.keep_open,
         shortcut=not args.no_shortcut,
+        no_prompt=args.no_prompt,
     )

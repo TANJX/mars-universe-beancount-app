@@ -76,6 +76,16 @@ export function CcStripA({
 function nextDueRank(card: CCCard, todayIso: string): number {
   // Returns days-until-next-payment as the sort key. Cards without a due day
   // get a large sentinel so they sink to the end of their group.
+  // A card with statement records ranks by the due date of its active
+  // statement (or the predicted next due date while none is active).
+  const statementDue =
+    card.activeStatement?.effectiveDueDate ??
+    (card.hasStatements ? card.nextDueDate : null)
+  if (statementDue) {
+    const dueT = new Date(`${statementDue}T00:00:00`).getTime()
+    const todayT = new Date(`${todayIso}T00:00:00`).getTime()
+    return Math.round((dueT - todayT) / 86_400_000)
+  }
   if (!card.paymentDueDay) return Number.MAX_SAFE_INTEGER
   const [y, m] = todayIso.split("-").map(Number)
   const todayDay = Number(todayIso.slice(8, 10))

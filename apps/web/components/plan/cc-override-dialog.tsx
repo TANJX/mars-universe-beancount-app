@@ -10,9 +10,25 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { useSaveCcOverride } from "@/hooks/use-plan"
+import { useSaveCcExpected, useSaveCcOverride } from "@/hooks/use-plan"
 import { parseAmount } from "@/lib/plan/format"
-import type { BankInfo, CCCard, PlanGridResponse } from "@/lib/plan/schemas"
+import type {
+  BankInfo,
+  CCCard,
+  CcOverrideSavePlan,
+  PlanGridResponse,
+} from "@/lib/plan/schemas"
+import {
+  type CcOverrideTarget,
+  defaultPayTotal,
+  findClosedStatement,
+  findExpectedStatement,
+  isActiveTarget,
+  normalizeEstimate,
+  overrideKey,
+  planMatchesTarget,
+  statementLabel,
+} from "@/lib/plan/statements"
 import { cn } from "@/lib/utils"
 
 interface SplitDraft {
@@ -27,7 +43,9 @@ interface CcOverrideDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   card: CCCard
-  cycleMonth: string // "YYYY-MM"
+  // The statement being paid (closed or expected), or a legacy cycle month
+  // for a card with no statement records.
+  target: CcOverrideTarget
   paymentDate: string // default date for new splits
   banks: BankInfo[]
   rows: PlanGridResponse["rows"] // for balance lookups
@@ -37,7 +55,7 @@ export function CcOverrideDialog({
   open,
   onOpenChange,
   card,
-  cycleMonth,
+  target,
   paymentDate,
   banks,
   rows,
@@ -48,7 +66,7 @@ export function CcOverrideDialog({
         {open && (
           <CcOverrideEditor
             card={card}
-            cycleMonth={cycleMonth}
+            target={target}
             paymentDate={paymentDate}
             banks={banks}
             rows={rows}
@@ -62,7 +80,7 @@ export function CcOverrideDialog({
 
 interface CcOverrideEditorProps {
   card: CCCard
-  cycleMonth: string
+  target: CcOverrideTarget
   paymentDate: string
   banks: BankInfo[]
   rows: PlanGridResponse["rows"]
@@ -72,7 +90,7 @@ interface CcOverrideEditorProps {
 function gatherExistingPlans(
   rows: PlanGridResponse["rows"],
   cardPath: string,
-  cycleMonth: string
+  target: CcOverrideTarget
 ) {
   const out: Array<{
     id: string
@@ -84,11 +102,7 @@ function gatherExistingPlans(
   for (const row of rows) {
     for (const [account, entries] of Object.entries(row.entries)) {
       for (const e of entries) {
-        if (
-          e.kind === "plan" &&
-          e.ccCardRef === cardPath &&
-          e.ccCycleMonth === cycleMonth
-        ) {
+        if (planMatchesTarget(e, cardPath, target)) {
           out.push({
             id: e.id,
             date: row.date,
@@ -105,29 +119,58 @@ function gatherExistingPlans(
 
 function CcOverrideEditor({
   card,
-  cycleMonth,
+  target,
   paymentDate,
   banks,
   rows,
   onClose,
 }: CcOverrideEditorProps) {
   const save = useSaveCcOverride()
-  const stmtBalance = parseAmount(card.statementBalance ?? "") ?? 0
+  const saveExpected = useSaveCcExpected()
+  const isLegacy = target.mode === "legacy"
+  const closed =
+    target.mode === "statement" && target.kind === "closed"
+      ? findClosedStatement(card, target.statementId)
+      : null
+  const isExpected = target.mode === "statement" && target.kind === "expected"
+  const expected =
+    target.mode === "statement" && target.kind === "expected"
+      ? findExpectedStatement(card, target.statementId)
+      : null
+
+  // Optional balance the owner expects the unclosed statement to land at.
+  // Blank means "use the ledger forecast".
+  // What is typed is normalised (no "$" or commas, formulas evaluated, 2
+  // decimals) so the preview here and the value the server stores agree.
+  const storedEstimate = expected?.estimatedBalance ?? ""
+  const [estimate, setEstimate] = React.useState(storedEstimate)
+  const estimateInput = normalizeEstimate(estimate)
+  const estimateValid = estimateInput.ok
+  const estimateValue = estimateInput.ok ? estimateInput.value : null
+  const estimateChanged =
+    isExpected && estimateInput.ok && estimateValue !== (storedEstimate || null)
+
+  const stmtBalance = closed
+    ? (parseAmount(closed.statementBalance) ?? 0)
+    : (parseAmount(card.statementBalance ?? "") ?? 0)
   const paidThisCycle = parseAmount(card.paidThisCycle ?? "") ?? 0
 
-  // `card.remaining` describes the *active* cycle on the server. When the
-  // modal opens for the active cycle, prefer it as the default — that's
-  // the post-payment balance. For non-active cycles (e.g., a cc-forecast
-  // row) fall back to the raw statement.
-  const isActiveCycle = card.cycleMonth === cycleMonth
-  const remaining =
-    isActiveCycle && card.remaining != null
-      ? (parseAmount(card.remaining) ?? stmtBalance)
-      : stmtBalance
+  // `remaining` is what the dialog proposes to pay. For the active closed
+  // statement (or the active legacy cycle) that is the amount still owed
+  // after payments since close (the minimum on a minimum-payment-only
+  // card); for the expected statement it is the estimate, else the ledger
+  // forecast.
+  const isActiveCycle = isActiveTarget(card, target)
+  const defaultTotal = defaultPayTotal(card, target)
+  const remaining = isExpected
+    ? ((estimateInput.ok ? estimateInput.amount : null) ??
+      parseAmount(card.computedForecast ?? "") ??
+      0)
+    : defaultTotal
   const showPaidLine = isActiveCycle && paidThisCycle > 0.005
 
   const [payTotal, setPayTotal] = React.useState<string>(() => {
-    const existing = gatherExistingPlans(rows, card.accountPath, cycleMonth)
+    const existing = gatherExistingPlans(rows, card.accountPath, target)
     if (existing.length > 0) {
       const total = existing.reduce(
         (acc, p) => acc + Math.abs(parseAmount(p.amount) ?? 0),
@@ -135,10 +178,10 @@ function CcOverrideEditor({
       )
       return total.toFixed(2)
     }
-    return remaining.toFixed(2)
+    return defaultTotal.toFixed(2)
   })
   const [splits, setSplits] = React.useState<SplitDraft[]>(() => {
-    const existing = gatherExistingPlans(rows, card.accountPath, cycleMonth)
+    const existing = gatherExistingPlans(rows, card.accountPath, target)
     if (existing.length > 0) {
       return existing.map((p) => ({
         id: p.id,
@@ -152,14 +195,14 @@ function CcOverrideEditor({
       {
         account: card.fundingAccount ?? "",
         date: paymentDate,
-        amount: remaining.toFixed(2),
+        amount: defaultTotal.toFixed(2),
         description: card.displayName,
       },
     ]
   })
 
   const [hadExistingPlans] = React.useState(
-    () => gatherExistingPlans(rows, card.accountPath, cycleMonth).length > 0
+    () => gatherExistingPlans(rows, card.accountPath, target).length > 0
   )
 
   const total = parseAmount(payTotal) ?? 0
@@ -200,6 +243,47 @@ function CcOverrideEditor({
     })
   }
 
+  const key = overrideKey(target)
+
+  // `expectId` names the statement this dialog was opened for: if it closed
+  // meanwhile the server refuses, instead of putting the estimate on the
+  // following cycle.
+  const saveEstimate = () =>
+    saveExpected.mutateAsync({
+      accountPath: card.accountPath,
+      estimatedBalance: estimateValue,
+      ...(target.mode === "statement" ? { expectId: target.statementId } : {}),
+    })
+
+  // For an expected statement, persist an edited estimate before the plans.
+  const saveEstimateIfChanged = async () => {
+    if (!estimateChanged) return
+    await saveEstimate()
+  }
+
+  const saveOverride = async (plans: CcOverrideSavePlan[]) => {
+    try {
+      await saveEstimateIfChanged()
+      await save.mutateAsync({
+        cardAccountPath: card.accountPath,
+        ...key,
+        plans,
+      })
+      onClose()
+    } catch {
+      // The mutation keeps the error; it is shown above the footer.
+    }
+  }
+
+  const handleSaveEstimate = async () => {
+    try {
+      await saveEstimate()
+      onClose()
+    } catch {
+      // shown above the footer
+    }
+  }
+
   const handleSave = () => {
     if (splits.length === 0) return
     const out = splits.map((s, i) => {
@@ -216,48 +300,29 @@ function CcOverrideEditor({
         state: null,
       }
     })
-    save.mutate(
-      {
-        cardAccountPath: card.accountPath,
-        cycleMonth,
-        plans: out,
-      },
-      { onSuccess: () => onClose() }
-    )
+    void saveOverride(out)
   }
 
   const handleSkip = () => {
-    save.mutate(
+    void saveOverride([
       {
-        cardAccountPath: card.accountPath,
-        cycleMonth,
-        plans: [
-          {
-            date: paymentDate,
-            account: card.fundingAccount ?? splits[0]?.account ?? "",
-            amount: "0.00",
-            description: card.displayName,
-            state: null,
-          },
-        ],
+        date: paymentDate,
+        account: card.fundingAccount ?? splits[0]?.account ?? "",
+        amount: "0.00",
+        description: card.displayName,
+        state: null,
       },
-      { onSuccess: () => onClose() }
-    )
+    ])
   }
 
   const handleClear = () => {
     // Clear all overrides → projection comes back.
-    save.mutate(
-      {
-        cardAccountPath: card.accountPath,
-        cycleMonth,
-        plans: [],
-      },
-      { onSuccess: () => onClose() }
-    )
+    void saveOverride([])
   }
 
-  const cycleLabel = formatCycleMonth(cycleMonth)
+  const busy = save.isPending || saveExpected.isPending
+  const errorMessage = save.error?.message ?? saveExpected.error?.message
+  const cycleLabel = statementLabel(target)
   // "Off" compares against `remaining` (statement net of paidThisCycle on
   // the active cycle; raw statement otherwise) so paying $502.10 against a
   // $1,492.11 statement where $990.01 already cleared shows as on-target,
@@ -272,6 +337,22 @@ function CcOverrideEditor({
           <span className="text-xs font-normal text-muted-foreground">
             {cycleLabel}
           </span>
+          {!isLegacy &&
+            (isExpected ? (
+              <span
+                className="rounded-sm bg-muted px-1 py-px text-[9px] font-medium text-muted-foreground"
+                title="This statement has not closed yet. Its dates and balance are predictions."
+              >
+                Expected
+              </span>
+            ) : (
+              <span
+                className="rounded-sm bg-emerald-500/10 px-1 py-px text-[9px] font-medium text-emerald-700 dark:text-emerald-400"
+                title="A closed statement on record"
+              >
+                Closed
+              </span>
+            ))}
         </DialogTitle>
       </DialogHeader>
 
@@ -292,28 +373,97 @@ function CcOverrideEditor({
             </div>
           </label>
           <div className="flex flex-col gap-1">
-            <span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-              Statement
-            </span>
+            {isExpected ? (
+              <label
+                htmlFor="cc-estimated-balance"
+                className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase"
+              >
+                Estimated balance
+              </label>
+            ) : (
+              <span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+                {closed ? "Balance at close" : "Statement"}
+              </span>
+            )}
             <div className="flex h-7 items-center justify-between gap-2">
-              <Money
-                value={stmtBalance}
-                tone="none"
-                className="text-sm font-medium"
-              />
+              {isExpected ? (
+                <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                  <span className="text-sm text-muted-foreground">$</span>
+                  <input
+                    id="cc-estimated-balance"
+                    type="text"
+                    inputMode="decimal"
+                    value={estimate}
+                    placeholder={card.computedForecast ?? "0.00"}
+                    onChange={(e) => setEstimate(e.target.value)}
+                    aria-invalid={!estimateValid || undefined}
+                    aria-describedby="cc-estimated-balance-hint"
+                    className={cn(
+                      "h-7 w-full min-w-0 rounded-sm bg-background px-2 text-right text-sm font-medium tabular-nums ring-1 ring-foreground/10 focus:ring-primary/40 focus:outline-none",
+                      !estimateValid && "text-rose-600 ring-rose-500/60"
+                    )}
+                  />
+                </div>
+              ) : (
+                <Money
+                  value={stmtBalance}
+                  tone="none"
+                  className="text-sm font-medium"
+                />
+              )}
               {offFromTarget && (
-                <span className="rounded-sm bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                <span className="shrink-0 rounded-sm bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
                   off ${Math.abs(total - remaining).toFixed(2)}
                 </span>
               )}
             </div>
+            {closed && (
+              <span className="text-[10px] text-muted-foreground tabular-nums">
+                closed {closed.id} · due {closed.effectiveDueDate}
+                {closed.dueDate == null && " (predicted)"}
+                {closed.minimumPayment != null &&
+                  ` · minimum $${closed.minimumPayment}`}
+              </span>
+            )}
+            {isExpected && (
+              <>
+                <span className="text-[10px] text-muted-foreground tabular-nums">
+                  closes ~{target.statementId}
+                  {expected?.dueDate ? ` · due ~${expected.dueDate}` : ""}
+                </span>
+                <div className="flex items-center justify-between gap-2">
+                  <span
+                    id="cc-estimated-balance-hint"
+                    className={cn(
+                      "text-[10px]",
+                      estimateValid
+                        ? "text-muted-foreground/70"
+                        : "text-rose-600 dark:text-rose-400"
+                    )}
+                  >
+                    {estimateValid
+                      ? "blank uses the ledger forecast"
+                      : "enter an amount above 0, or leave blank"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleSaveEstimate}
+                    disabled={busy || !estimateChanged || !estimateValid}
+                    className="rounded-sm px-1.5 py-0.5 text-[10px] font-medium text-foreground/80 ring-1 ring-foreground/10 hover:bg-muted/50 disabled:opacity-40"
+                    title="Save only the estimate, without planning a payment"
+                  >
+                    Save estimate
+                  </button>
+                </div>
+              </>
+            )}
             {showPaidLine && (
               <span className="text-[10px] text-muted-foreground">
                 paid ${paidThisCycle.toFixed(2)} → due $
                 {Math.max(0, remaining).toFixed(2)}
               </span>
             )}
-            {card.statementBalanceStale && (
+            {isLegacy && card.statementBalanceStale && (
               <span className="text-[10px] text-amber-700 dark:text-amber-400">
                 statement may be out of date — last close{" "}
                 {card.lastClosedDate ?? "—"}
@@ -416,6 +566,15 @@ function CcOverrideEditor({
           </button>
         </div>
 
+        {errorMessage && (
+          <p
+            role="alert"
+            className="text-[11px] text-rose-600 dark:text-rose-400"
+          >
+            {errorMessage}
+          </p>
+        )}
+
         <div className="mt-1 flex items-center justify-between gap-2 border-t border-border/50 pt-2">
           <div className="flex gap-2">
             {hadExistingPlans && (
@@ -434,7 +593,7 @@ function CcOverrideEditor({
               className="text-[11px] text-muted-foreground hover:underline"
               title="Save a $0 plan to suppress this cycle"
             >
-              Skip this month
+              {isLegacy ? "Skip this month" : "Skip this statement"}
             </button>
           </div>
           <div className="flex gap-2">
@@ -448,10 +607,12 @@ function CcOverrideEditor({
             <button
               type="button"
               onClick={handleSave}
-              disabled={save.isPending || splits.some((s) => !s.account)}
+              disabled={
+                busy || !estimateValid || splits.some((s) => !s.account)
+              }
               className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
-              {save.isPending ? "Saving…" : "Save"}
+              {busy ? "Saving…" : "Save"}
             </button>
           </div>
         </div>
@@ -472,26 +633,6 @@ function lookupBalance(
   if (raw == null) return null
   const n = parseFloat(raw)
   return Number.isFinite(n) ? n : null
-}
-
-function formatCycleMonth(cycleMonth: string): string {
-  const [y, m] = cycleMonth.split("-").map(Number)
-  if (!y || !m) return cycleMonth
-  const months = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-  ]
-  return `${months[m - 1]} ${y}`
 }
 
 function formatShort(iso: string): string {

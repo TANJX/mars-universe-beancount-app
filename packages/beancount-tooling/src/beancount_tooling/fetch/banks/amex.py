@@ -29,6 +29,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from beancount_tooling.billing import StatementInfo
 from beancount_tooling.fetch import browser, guards
 from beancount_tooling.fetch.banks.base import Fetcher, StagedFile
 
@@ -272,6 +273,62 @@ def parse_total_balance(snapshot: str) -> Decimal | None:
         return None
     amount = Decimal(m["amount"].replace(",", ""))
     return -amount if m["neg"] else amount
+
+
+# Closed statement summary (confirmed 2026-11-12 on three cards): with a closed
+# period picked on Statements & Activity, the summary reads
+#   - heading "May 20, 2030 Statement Period" [level=3]
+#   ... - text: Statement Balance ... - heading "$1,234.56" [level=4]
+# That balance is the balance at close; it does not move with later payments.
+STATEMENT_PERIOD_HEADING = re.compile(
+    r'heading "(?P<label>[^"]*?\d{4}) Statement Period"', re.IGNORECASE
+)
+STATEMENT_PERIOD_HEADING_NAME = re.compile(r"\d{4} Statement Period$", re.IGNORECASE)
+STATEMENT_BALANCE_AMOUNT = re.compile(
+    r'Statement Balance.*?heading "(?P<neg>-)?\$(?P<amount>\d[\d,]*\.\d{2})"',
+    re.IGNORECASE | re.DOTALL,
+)
+# Accounts overview (confirmed 2026-11-12): one button per card,
+#   button "<Card name> ••••12345 Total Balance $1.00 Your Payment is Due on Dec 4"
+# or "... Payment not required at this time" once the statement is paid.
+OVERVIEW_DUE = r"[^\n\"]*?Payment is Due on (?P<mon>[A-Za-z]{3,9})\.? (?P<day>\d{1,2})"
+DUE_AFTER_CLOSE_DAYS = (15, 40)
+
+
+def parse_statement_summary(snapshot: str) -> tuple[date, Decimal] | None:
+    """(closing date, statement balance) from the summary of a closed period,
+    both read from the same panel. None when either is missing."""
+    heading = STATEMENT_PERIOD_HEADING.search(snapshot)
+    if not heading:
+        return None
+    period = parse_period_label(heading["label"])
+    balance = STATEMENT_BALANCE_AMOUNT.search(snapshot, heading.end())
+    if period is None or not balance:
+        return None
+    amount = Decimal(balance["amount"].replace(",", ""))
+    return period[1], -amount if balance["neg"] else amount
+
+
+def parse_overview_due(snapshot: str, last5: str, closing: date) -> date | None:
+    """The due date the overview shows for the card ending in `last5`, when it
+    belongs to the statement that closed on `closing` (the first such day
+    after it, DUE_AFTER_CLOSE_DAYS later). None when no payment is due or the
+    date is some other statement's."""
+    m = re.search(rf"(?<!\d){re.escape(last5)}(?!\d){OVERVIEW_DUE}", snapshot)
+    if not m:
+        return None
+    month = _MONTHS.get(m["mon"].lower()) or _MONTHS.get(m["mon"][:3].lower())
+    if month is None:
+        return None
+    low, high = DUE_AFTER_CLOSE_DAYS
+    for year in (closing.year, closing.year + 1):
+        try:
+            due = date(year, month, int(m["day"]))
+        except ValueError:
+            continue
+        if due > closing:
+            return due if low <= (due - closing).days <= high else None
+    return None
 
 
 def archive_period(closing: date) -> tuple[int, int]:
@@ -522,6 +579,53 @@ class AmexFetcher(Fetcher):
                 if found is not None:
                     return found
         return None
+
+    def read_statement(
+        self, page: Page, account: AccountConfig
+    ) -> StatementInfo | None:
+        last5 = require_last5(account)
+        self._open_activity(page)
+        self._select_card(page, last5)
+        self._assert_card(page, last5)
+        with step("open the statement period selector", "PERIOD_SELECTOR_TEST_ID"):
+            _period_selector(page).click(timeout=STEP_TIMEOUT_MS)
+        with step("read the statement periods", "PERIOD_OPTION_ROLE"):
+            options = page.get_by_role(PERIOD_OPTION_ROLE, name=PERIOD_OPTION_NAME)
+            options.first.wait_for(state="visible", timeout=STEP_TIMEOUT_MS)
+            labels = [accessible_name(options.nth(i)) for i in range(options.count())]
+        picked = latest_closed_period(labels, self._today())
+        if picked is None:
+            page.keyboard.press("Escape")
+            return None  # a new card with no closed statement yet
+        index, (_, closing) = picked
+        with step("select the closed statement", "PERIOD_OPTION_ROLE"):
+            options.nth(index).click(timeout=STEP_TIMEOUT_MS)
+        with step("read the statement summary", "STATEMENT_PERIOD_HEADING"):
+            page.get_by_role(
+                "heading", name=STATEMENT_PERIOD_HEADING_NAME
+            ).first.wait_for(state="visible", timeout=STEP_TIMEOUT_MS)
+            self._assert_card(page, last5)
+            summary = parse_statement_summary(
+                page.locator("body").aria_snapshot(timeout=STEP_TIMEOUT_MS)
+            )
+        if summary is None or summary[0] != closing:
+            raise AmexStepError(
+                "read the statement summary",
+                "STATEMENT_PERIOD_HEADING / STATEMENT_BALANCE_AMOUNT",
+                f"summary does not show the statement closed {closing}",
+            )
+        due = None
+        with suppress(Exception):  # the due date is optional
+            page.goto(OVERVIEW_URL)
+            page.get_by_text(re.compile(rf"(?<!\d){last5}(?!\d)")).first.wait_for(
+                state="visible", timeout=STEP_TIMEOUT_MS
+            )
+            due = parse_overview_due(
+                page.locator("body").aria_snapshot(timeout=STEP_TIMEOUT_MS),
+                last5,
+                closing,
+            )
+        return StatementInfo(closing, summary[1], due, None)
 
     def _open_activity(self, page: Page) -> None:
         with step("open Statements & Activity", "ACTIVITY_URL / DOWNLOAD_OPEN_NAME"):

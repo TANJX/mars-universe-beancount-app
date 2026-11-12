@@ -13,10 +13,12 @@ import tempfile
 import traceback
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from beancount_tooling import billing
 from beancount_tooling.fetch import guards
 from beancount_tooling.fetch.banks.base import (
     Fetcher,
@@ -272,6 +274,58 @@ def _read_pending(
     return rows, notes
 
 
+def _read_statement(
+    fetcher: Fetcher,
+    page: Any,
+    account: AccountConfig,
+    statements_dir: Path,
+    *,
+    dry_run: bool,
+    today: date,
+) -> tuple[bool, list[str]]:
+    """Whether the site showed a closed statement for a credit account, and
+    the summary notes. Records it in the billing store (statements/billing/).
+    Statements are extra: no problem here ever fails the account, and a read
+    that differs from an existing record is reported, never written."""
+    name = ledger_account(account)
+    if account.type != "credit" or name is None:
+        return False, []
+    try:
+        info = fetcher.read_statement(page, account)
+        if info is None:
+            return False, []
+        result = billing.record_statement(
+            statements_dir, name, info, source="fetch", today=today, dry_run=dry_run
+        )
+    except Exception as e:  # noqa: BLE001 (statements are extra; never fail the account)
+        return False, [
+            f"statement not read ({type(e).__name__}): kept existing records"
+        ]
+    sid = result.statement_id
+    notes: list[str] = []
+    if result.status == "appended":
+        due = f"due {info.due_date}" if info.due_date else "no due date"
+        verb = "would be recorded" if dry_run else "recorded"
+        notes.append(
+            f"statement {sid} {verb}: balance {info.statement_balance:,.2f}, {due}"
+        )
+        notes += result.notes
+    elif result.status == "conflict":
+        notes.append(
+            f"statement {sid} differs from the record, not written: "
+            + "; ".join(result.notes)
+        )
+    elif result.status == "voided":
+        notes.append(
+            f"statement {sid} is voided on file, not written "
+            "(re-enter it with `just fetch --statements-only` to bring it back)"
+        )
+    elif result.status == "rejected":
+        # Not a usable read: leave the card to the terminal prompt.
+        return False, ["statement not recorded: " + "; ".join(result.errors)]
+    return True, notes
+
+
 def _balance_shortcut(
     fetcher: Fetcher,
     page: Any,
@@ -326,6 +380,8 @@ def run_bank(
     fetcher: Fetcher | None = None,
     log: Callable[[str], None] = print,
     ledger: LedgerBalances | None = None,
+    today: date | None = None,
+    statements_seen: set[str] | None = None,
 ) -> list[Outcome]:
     from beancount_tooling.fetch.browser import (
         LoginTimeout,
@@ -333,7 +389,10 @@ def run_bank(
         SiteStepError,
         account_staging_dir,
         failure_screenshot,
+        new_york_today,
     )
+
+    today = today or new_york_today()
 
     try:
         fetcher = fetcher or get_fetcher(bank.key)(config.login_timeout_minutes)
@@ -385,6 +444,13 @@ def run_bank(
         pending, pending_notes[account.path] = _read_pending(
             fetcher, page, account, statements_dir, dry_run=dry_run
         )
+        # Before the balance shortcut, which skips the rest of the loop body.
+        seen, statement_notes = _read_statement(
+            fetcher, page, account, statements_dir, dry_run=dry_run, today=today
+        )
+        pending_notes[account.path] += statement_notes
+        if seen and statements_seen is not None:
+            statements_seen.add(ledger_account(account))
         if ledger is not None:
             matched = _balance_shortcut(fetcher, page, account, ledger, log, pending)
             if matched is not None:

@@ -33,6 +33,7 @@ from beancount_tooling.importer.wells_fargo_checking import WellsFargoCheckingIm
 from beancount_tooling.importer.td_checking import TDCheckingImporter
 from beancount_tooling.importer.robinhood import RobinhoodImporter
 from beancount_tooling.importer.robinhood_investment import RobinhoodInvestmentImporter
+from beancount_tooling import billing
 from beancount_tooling import pending
 from beancount_tooling import merchants
 
@@ -259,6 +260,16 @@ def apply_pending(accounts, new_refs, data_dir, output_path):
     return report
 
 
+def skipped_roots(data_dir) -> tuple[str, ...]:
+    """Directories under statements/ that no importer may read: the pending
+    snapshots (booked by apply_pending) and the card billing records."""
+    root = os.path.realpath(data_dir)
+    return (
+        os.path.join(root, pending.PENDING_DIR, ""),
+        os.path.join(root, billing.BILLING_DIR, ""),
+    )
+
+
 def main():
     # Load data from journal
     bank_refs = read_all_ref()
@@ -288,7 +299,7 @@ def main():
             }
         )
 
-    pending_root = os.path.join(os.path.realpath(data_dir), pending.PENDING_DIR, "")
+    skipped = skipped_roots(data_dir)
     new_refs = set()
 
     # Track statistics for delta reporting
@@ -305,8 +316,9 @@ def main():
         new_entries_list = []
         # iterate over all files in data_dir
         for filename in walk([os.path.realpath(data_dir)]):
-            # Pending snapshots are booked by apply_pending, not the importers.
-            if filename.startswith(pending_root):
+            # Pending snapshots are booked by apply_pending, not the importers;
+            # billing records are card statement facts, not transactions.
+            if filename.startswith(skipped):
                 continue
             importer = identify.identify([account["importer"]], filename)
             if importer:

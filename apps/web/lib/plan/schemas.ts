@@ -12,6 +12,44 @@ export const EntryKind = z.enum([
   "cc-forecast",
 ])
 
+export const CcStatementKind = z.enum([
+  "closed",
+  "expected",
+  "legacy",
+  "orphan",
+])
+
+// A closed card statement: a fact recorded by the fetch command. Identity is
+// (account, id) where id is the closing date.
+export const CcStatementSchema = z
+  .object({
+    kind: z.literal("closed"),
+    account: z.string(),
+    id: z.string(),
+    statementBalance: z.string(),
+    dueDate: z.string().nullable(),
+    minimumPayment: z.string().nullable(),
+    source: z.string(),
+    capturedAt: z.string(),
+    effectiveDueDate: z.string(),
+  })
+  .loose()
+
+// The next statement of a card, not closed yet: planner intent. id and
+// dueDate are predictions.
+export const CcExpectedStatementSchema = z
+  .object({
+    kind: z.literal("expected"),
+    account: z.string(),
+    id: z.string(),
+    dueDate: z.string().nullable(),
+    estimatedBalance: z.string().nullable(),
+    afterId: z.string().nullable().optional(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .loose()
+
 export const PlanSchema = z
   .object({
     id: z.string(),
@@ -23,6 +61,7 @@ export const PlanSchema = z
     transferId: z.string().nullable().optional(),
     ccCardRef: z.string().nullable().optional(),
     ccCycleMonth: z.string().nullable().optional(),
+    ccStatementId: z.string().nullable().optional(),
     createdAt: z.string(),
     updatedAt: z.string(),
   })
@@ -68,6 +107,19 @@ export const CCCardSchema = CCCardRecordSchema.extend({
   cycleEndDate: z.string().nullable().optional(),
   cycleMonth: z.string().nullable().optional(),
   statementBalanceStale: z.boolean().nullable().optional(),
+  // Statement-mode fields. All optional so the page still parses against an
+  // API that has not been restarted.
+  hasStatements: z.boolean().optional(),
+  activeStatement: CcStatementSchema.nullable().optional(),
+  expectedStatement: CcExpectedStatementSchema.nullable().optional(),
+  statements: z.array(CcStatementSchema).optional(),
+  nextCloseDate: z.string().nullable().optional(),
+  nextDueDate: z.string().nullable().optional(),
+  statementExpectedSince: z.string().nullable().optional(),
+  lockedAmount: z.string().nullable().optional(),
+  lockedSource: z.enum(["minimum", "balance"]).nullable().optional(),
+  overrideTotal: z.string().nullable().optional(),
+  computedForecast: z.string().nullable().optional(),
 })
 
 export const PlanSettingsSchema = z
@@ -87,6 +139,7 @@ export const MatchedCcPlanSchema = z
   .object({
     ccCardRef: z.string(),
     ccCycleMonth: z.string().nullable().optional(),
+    ccStatementId: z.string().nullable().optional(),
     displayName: z.string(),
   })
   .loose()
@@ -102,6 +155,8 @@ export const GridEntrySchema = z
     pastState: PastState.optional(),
     ccCardRef: z.string().nullable().optional(),
     ccCycleMonth: z.string().nullable().optional(),
+    ccStatementId: z.string().nullable().optional(),
+    ccStatementKind: CcStatementKind.nullable().optional(),
     // Set on a cleared bean entry when a CC-override plan claimed it during
     // match — lets the UI badge the bank txn with the card it pays.
     matchedCcPlan: MatchedCcPlanSchema.nullable().optional(),
@@ -124,6 +179,17 @@ export const FloatingProjectionSchema = z
     amount: z.string(),
     kind: z.enum(["cc-locked", "cc-forecast"]),
     cycleMonth: z.string(),
+    statementId: z.string().nullable().optional(),
+    statementKind: z.enum(["closed", "expected", "legacy"]).optional(),
+  })
+  .loose()
+
+export const CcStatementsResponseSchema = z
+  .object({
+    account: z.string(),
+    hasStatements: z.boolean(),
+    statements: z.array(CcStatementSchema),
+    expectedStatement: CcExpectedStatementSchema.nullable(),
   })
   .loose()
 
@@ -160,6 +226,9 @@ export type GridEntry = z.infer<typeof GridEntrySchema>
 export type BankInfo = z.infer<typeof BankInfoSchema>
 export type FloatingProjection = z.infer<typeof FloatingProjectionSchema>
 export type PlanGridResponse = z.infer<typeof PlanGridResponseSchema>
+export type CcStatement = z.infer<typeof CcStatementSchema>
+export type CcExpectedStatement = z.infer<typeof CcExpectedStatementSchema>
+export type CcStatementsResponse = z.infer<typeof CcStatementsResponseSchema>
 
 export interface CcOverrideSavePlan {
   id?: string

@@ -1,8 +1,10 @@
 """Pure parts of the Amex fetcher. All card digits and dates are synthetic."""
 
 from datetime import date
+from decimal import Decimal
 
 import pytest
+
 from beancount_tooling.fetch.banks import amex
 from beancount_tooling.fetch.banks.base import Fetcher, get_fetcher
 from beancount_tooling.fetch.config import AccountConfig, load_config
@@ -314,3 +316,59 @@ def test_latest_closed_period_on_closing_date_labels():
     assert amex.PERIOD_OPTION_NAME.match("Sep 9, 2030")
     assert not amex.PERIOD_OPTION_NAME.match("Last 30 Days")
     assert not amex.PERIOD_OPTION_NAME.match("2025")
+
+
+# --- card statement (closed period summary + accounts overview) ----------------
+
+CLOSED_PERIOD = """
+  - button "Download"
+  - heading "May 20, 2030 Statement Period" [level=3]
+  - text: Apr 21 - May 20, 2030 Posted Charges
+  - button "Info"
+  - heading "$1,250.00" [level=4]
+  - text: Statement Balance
+  - button "Info"
+  - heading "$1,234.56" [level=4]
+  - button "Download Statement":
+"""
+
+OVERVIEW = """
+  - button "Demo Gold Card ••••11111 Total Balance $1,300.00 Your Payment is Due on Jun 14": x
+  - link "Your Payment is Due on Jun 14":
+  - button "Demo Blue Card ••••22222 Total Balance $0.00 Payment not required at this time": y
+  - text: Payment not required at this time
+"""
+
+
+def test_parse_statement_summary_reads_close_and_balance_from_one_panel():
+    assert amex.parse_statement_summary(CLOSED_PERIOD) == (
+        date(2030, 5, 20),
+        Decimal("1234.56"),
+    )
+    credit = CLOSED_PERIOD.replace('"$1,234.56"', '"-$12.00"')
+    assert amex.parse_statement_summary(credit)[1] == Decimal("-12.00")
+    # The open period ("Since Last Statement") has no statement balance.
+    open_period = """
+  - heading "Since Last Statement" [level=3]
+  - text: May 21 - Present (Closing Jun 20, 2030) Pending Charges
+  - heading "$5.00" [level=4]
+  - text: Total Balance
+  - heading "$40.00" [level=4]
+"""
+    assert amex.parse_statement_summary(open_period) is None
+    assert amex.parse_statement_summary("- text: nothing") is None
+
+
+def test_parse_overview_due_matches_the_card_and_the_statement():
+    closing = date(2030, 5, 20)
+    assert amex.parse_overview_due(OVERVIEW, "11111", closing) == date(2030, 6, 14)
+    # Paid, or another card's line: no due date.
+    assert amex.parse_overview_due(OVERVIEW, "22222", closing) is None
+    assert amex.parse_overview_due(OVERVIEW, "33333", closing) is None
+    # A due date that cannot belong to this statement is not used.
+    assert amex.parse_overview_due(OVERVIEW, "11111", date(2030, 6, 10)) is None
+    # Across a year end.
+    year_end = OVERVIEW.replace("Due on Jun 14", "Due on Jan 14")
+    assert amex.parse_overview_due(year_end, "11111", date(2030, 12, 20)) == date(
+        2031, 1, 14
+    )

@@ -3,9 +3,12 @@ only (no browser, no real site)."""
 
 import re
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
+
+from beancount_tooling.billing import StatementInfo
 from beancount_tooling.fetch.banks import bofa
 from beancount_tooling.fetch.banks.base import Fetcher, get_fetcher
 from beancount_tooling.fetch.config import AccountConfig, load_config
@@ -351,3 +354,61 @@ def test_no_hardcoded_account_files():
     # File names and digits come from fetch.yaml, never from the module.
     assert not re.search(r"\d{4,5}\.csv", source)
     assert chr(0x2014) not in source  # no em-dash
+
+
+# --- card statement (activity page snapshot) -----------------------------------
+
+CARD_PAGE = """
+- heading "Account Summary" [level=2]
+- text: "Current balance:"
+- text: "$512.30 Total credit available: $4,487.70 Cash credit line available: $100.00"
+- text: "Next closing date: 06/20/2030 Last payment date: 04/15/2030 Last payment: $80.00"
+- heading "Pay This Card" [level=2]
+- text: "Total Min Payment Due:"
+- 'link "Total Min Payment Due: layer"':
+  - img "Total Min Payment Due:"
+- text: "$35.00 due Jun 15 Statement Balance:"
+- 'link "Statement Balance: layer"':
+  - img "Statement Balance:"
+- text: $1,234.56
+- 'combobox "Go to: Click to expand transaction menu"':
+  - option "Current transactions" [selected]
+  - option "April 20, 2030"
+  - option "May 20, 2030"
+"""
+
+
+def test_parse_card_statement_reads_newest_close_balance_due_and_minimum():
+    info = bofa.parse_card_statement(CARD_PAGE)
+    assert info == StatementInfo(
+        date(2030, 5, 20), Decimal("1234.56"), date(2030, 6, 15), Decimal("35.00")
+    )
+
+
+def test_parse_card_statement_due_date_rolls_into_next_year():
+    page = CARD_PAGE.replace("May 20, 2030", "December 20, 2030").replace(
+        "due Jun 15", "due Jan 15"
+    )
+    assert bofa.parse_card_statement(page).due_date == date(2031, 1, 15)
+
+
+def test_parse_card_statement_without_due_or_closed_statement():
+    # Nothing owed: a minimum with no due date.
+    page = CARD_PAGE.replace("$35.00 due Jun 15", "$0.00").replace("$1,234.56", "$0.00")
+    assert bofa.parse_card_statement(page) == StatementInfo(
+        date(2030, 5, 20), Decimal("0.00"), None, Decimal("0.00")
+    )
+    # A new card with no closed statement yet, or a page without the panel.
+    no_close = CARD_PAGE.replace('  - option "April 20, 2030"\n', "").replace(
+        '  - option "May 20, 2030"\n', ""
+    )
+    assert bofa.parse_card_statement(no_close) is None
+    assert bofa.parse_card_statement("- text: nothing here") is None
+
+
+def test_parse_card_statement_refuses_a_due_date_from_another_statement():
+    # Just after a close: the combobox already lists the new statement while
+    # the panel still shows the previous one's due date.
+    page = CARD_PAGE.replace("May 20, 2030", "June 20, 2030")
+    with pytest.raises(ValueError, match="does not follow"):
+        bofa.parse_card_statement(page)

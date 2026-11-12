@@ -63,6 +63,33 @@ uv run update-stock-price
 
 ---
 
+### fetch - Card statement records
+
+`just fetch` also keeps a record of every closed card statement in
+`$LEDGER_DIR/statements/billing/credit/<CardName>.jsonl` (append-only, one JSON
+object per line: closing date as `id`, `statementBalance`, `dueDate`,
+`minimumPayment`, `source`, `capturedAt`). The last line per closing date wins,
+and a line with `"void": true` removes a record. `just extract` never reads
+this directory.
+
+Bank adapters supply the statement through the optional
+`Fetcher.read_statement` hook, which runs before the balance shortcut so a
+quiet day still records a new statement. BofA and Amex implement it; the
+values are read from the site, never typed.
+
+Cards no adapter reads (any card in `journal/plan/cc-cards.json`) are asked
+about at the terminal after the banks run. History leads: once a card has a
+statement on file, the next one is expected one month after the last real
+closing date. A card with none falls back to its `statementCloseDay` hint, and
+with no hint either it is only asked about by `--statements-only`. The prompt
+asks closing date, balance, due date, then minimum payment; Enter on an empty
+balance (or an empty closing date with no default) skips the card.
+
+```bash
+just fetch --statements-only   # only ask for missing statements; no browser
+just fetch --no-prompt         # never ask (also the case when stdin is not a terminal)
+```
+
 ## Configuration Files
 
 ### templates.yaml - Forecast Configuration

@@ -415,12 +415,20 @@ dependencies = [
     { name = "pyyaml" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "beanquery", specifier = ">=0.1.dev0" },
     { name = "fava", git = "https://github.com/TANJX/fava.git?rev=2d2d482a1c9b2d22858fa85b97082804cdaa4bc3" },
     { name = "pyyaml", specifier = ">=6.0.3" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.1.1" }]
 
 [[package]]
 name = "lxml"

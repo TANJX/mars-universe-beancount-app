@@ -1,0 +1,303 @@
+{
+  "account": "Liabilities:Credit:DemoCard",
+  "vectors": [
+    { "name": "empty_file", "lines": [], "expected": [] },
+    {
+      "name": "single_full",
+      "lines": [
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-05-20",
+          "statementBalance": "1234.56",
+          "dueDate": "2030-06-15",
+          "minimumPayment": "40.00",
+          "source": "fetch",
+          "capturedAt": "2030-05-21T13:00:00+00:00"
+        }
+      ],
+      "expected": [
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-05-20",
+          "statementBalance": "1234.56",
+          "dueDate": "2030-06-15",
+          "minimumPayment": "40.00",
+          "source": "fetch",
+          "capturedAt": "2030-05-21T13:00:00+00:00"
+        }
+      ]
+    },
+    {
+      "name": "last_line_wins",
+      "lines": [
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-05-20",
+          "statementBalance": "1234.56",
+          "dueDate": "2030-06-15",
+          "minimumPayment": "40.00",
+          "source": "fetch",
+          "capturedAt": "2030-05-21T13:00:00+00:00"
+        },
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-05-20",
+          "statementBalance": "1300.00",
+          "dueDate": "2030-06-15",
+          "minimumPayment": "40.00",
+          "source": "manual",
+          "capturedAt": "2030-05-22T09:00:00+00:00"
+        }
+      ],
+      "expected": [
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-05-20",
+          "statementBalance": "1300.00",
+          "dueDate": "2030-06-15",
+          "minimumPayment": "40.00",
+          "source": "manual",
+          "capturedAt": "2030-05-22T09:00:00+00:00"
+        }
+      ]
+    },
+    {
+      "name": "void_removes",
+      "lines": [
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-05-20",
+          "statementBalance": "1234.56",
+          "dueDate": "2030-06-15",
+          "minimumPayment": "40.00",
+          "source": "fetch",
+          "capturedAt": "2030-05-21T13:00:00+00:00"
+        },
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-05-20",
+          "void": true,
+          "source": "manual",
+          "capturedAt": "2030-05-23T09:00:00+00:00"
+        }
+      ],
+      "expected": []
+    },
+    {
+      "name": "void_then_reinstated",
+      "lines": [
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-05-20",
+          "statementBalance": "1234.56",
+          "dueDate": "2030-06-15",
+          "minimumPayment": "40.00",
+          "source": "fetch",
+          "capturedAt": "2030-05-21T13:00:00+00:00"
+        },
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-05-20",
+          "void": true,
+          "source": "manual",
+          "capturedAt": "2030-05-23T09:00:00+00:00"
+        },
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-05-20",
+          "statementBalance": "999.00",
+          "dueDate": null,
+          "minimumPayment": null,
+          "source": "manual",
+          "capturedAt": "2030-05-24T09:00:00+00:00"
+        }
+      ],
+      "expected": [
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-05-20",
+          "statementBalance": "999.00",
+          "dueDate": null,
+          "minimumPayment": null,
+          "source": "manual",
+          "capturedAt": "2030-05-24T09:00:00+00:00"
+        }
+      ]
+    },
+    {
+      "name": "sorted_by_id_and_defaults",
+      "lines": [
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-06-20",
+          "statementBalance": "-25.10"
+        },
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-05-20",
+          "statementBalance": "0.00",
+          "dueDate": null
+        }
+      ],
+      "expected": [
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-05-20",
+          "statementBalance": "0.00",
+          "dueDate": null,
+          "minimumPayment": null,
+          "source": "manual",
+          "capturedAt": ""
+        },
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-06-20",
+          "statementBalance": "-25.10",
+          "dueDate": null,
+          "minimumPayment": null,
+          "source": "manual",
+          "capturedAt": ""
+        }
+      ]
+    },
+    {
+      "name": "malformed_lines_skipped",
+      "lines": [
+        "not json",
+        "[1, 2]",
+        "",
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-13-40",
+          "statementBalance": "10.00"
+        },
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "20300320",
+          "statementBalance": "10.00"
+        },
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-03-20",
+          "statementBalance": "abc"
+        },
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-03-20",
+          "statementBalance": 12.5
+        },
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-03-20",
+          "statementBalance": "NaN"
+        },
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-03-20",
+          "statementBalance": "10.00",
+          "dueDate": "soon"
+        },
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-03-20",
+          "statementBalance": "10.00",
+          "minimumPayment": "x"
+        },
+        { "id": "2030-03-20", "statementBalance": "10.00" },
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-04-20",
+          "statementBalance": "50.00",
+          "dueDate": "2030-05-15",
+          "minimumPayment": "25.00",
+          "source": "fetch",
+          "capturedAt": "2030-04-21T13:00:00+00:00"
+        }
+      ],
+      "expected": [
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-04-20",
+          "statementBalance": "50.00",
+          "dueDate": "2030-05-15",
+          "minimumPayment": "25.00",
+          "source": "fetch",
+          "capturedAt": "2030-04-21T13:00:00+00:00"
+        }
+      ]
+    },
+    {
+      "name": "malformed_does_not_replace",
+      "lines": [
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-05-20",
+          "statementBalance": "1234.56",
+          "dueDate": "2030-06-15",
+          "minimumPayment": "40.00",
+          "source": "fetch",
+          "capturedAt": "2030-05-21T13:00:00+00:00"
+        },
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-05-20",
+          "statementBalance": "abc",
+          "source": "manual"
+        }
+      ],
+      "expected": [
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-05-20",
+          "statementBalance": "1234.56",
+          "dueDate": "2030-06-15",
+          "minimumPayment": "40.00",
+          "source": "fetch",
+          "capturedAt": "2030-05-21T13:00:00+00:00"
+        }
+      ]
+    },
+    {
+      "name": "other_account_ignored",
+      "lines": [
+        {
+          "account": "Liabilities:Credit:Other",
+          "id": "2030-05-20",
+          "statementBalance": "77.00"
+        }
+      ],
+      "expected": []
+    },
+    {
+      "name": "void_non_true_is_not_void",
+      "lines": [
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-05-20",
+          "statementBalance": "1234.56",
+          "dueDate": "2030-06-15",
+          "minimumPayment": "40.00",
+          "source": "fetch",
+          "capturedAt": "2030-05-21T13:00:00+00:00"
+        },
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-05-20",
+          "void": "yes",
+          "statementBalance": "5.00"
+        }
+      ],
+      "expected": [
+        {
+          "account": "Liabilities:Credit:DemoCard",
+          "id": "2030-05-20",
+          "statementBalance": "5.00",
+          "dueDate": null,
+          "minimumPayment": null,
+          "source": "manual",
+          "capturedAt": ""
+        }
+      ]
+    }
+  ]
+}

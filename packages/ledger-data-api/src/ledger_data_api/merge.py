@@ -3,14 +3,19 @@
 Produces the day-by-day grid the planner page renders. Combines:
   - cleared (*) and scheduled (!) transactions from the .bean file (via Fava)
   - Plans and Transfers from plan/plans.jsonl + plan/transfers.jsonl
-  - CC payment projections from plan/cc-cards.json
+  - CC payment projections from closed card statements
+    (statements/billing/credit/*.jsonl) and the expected statement
+    (plan/cc-expected.json), or from plan/cc-cards.json for a card that has
+    no statement records (legacy mode)
   - Past-plan match status (realized / unrealized)
 
 This is mirrored on the client (lib/plan/merge.ts) for instant updates as the
 user types; the server response is the source of truth.
 """
 
+import dataclasses
 import datetime
+import logging
 import re
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
@@ -19,14 +24,23 @@ from typing import Optional
 from beancount.core import data
 
 from . import store
+from .billing import Statement
 from .cc_cycle import (
     SETTLEMENT_GRACE_DAYS,
     Cycle,
     active_cycle,
     cycle_payment_window,
 )
-from .cc_projection import project_payments
-from .models import CCCardRecord, Plan, Transfer
+from .cc_projection import card_amounts, project_payments
+from .cc_statements import (
+    CardState,
+    card_state,
+    card_statement_fields,
+    resolve_plan_statements,
+)
+from .models import CCCardRecord, ExpectedStatement, Plan, Transfer
+
+log = logging.getLogger(__name__)
 
 GridEntry = dict  # kind, id, amount, description, state?, transferId?, pastState?  (pastState: "realized" | "unrealized")
 DayRow = dict  # date, entries: dict[account, list[GridEntry]], balances, total
@@ -145,6 +159,7 @@ def _credit_balance_on(
 def compute_active_cycles(
     cc_records: dict[str, CCCardRecord],
     today: datetime.date,
+    states: Optional[dict[str, CardState]] = None,
 ) -> dict[str, Cycle]:
     """Per card: the cycle whose due date is the next paymentDueDay >= today.
 
@@ -152,9 +167,19 @@ def compute_active_cycles(
     anchor to. `statementCloseDay` is optional (cc_cycle falls back to a
     30-day rolling window). `lastClosedDate`, when present, overrides the
     arithmetic close-date (banks occasionally shift due to weekends).
+
+    A card in statement mode (`states[path].has_statements`) uses its active
+    statement instead: closing date to due date. It has no cycle in the gap
+    after that due date passed and before the next statement closes.
     """
     out: dict[str, Cycle] = {}
+    states = states or {}
+    for path, state in states.items():
+        if state.has_statements and state.active_cycle is not None:
+            out[path] = state.active_cycle
     for path, rec in cc_records.items():
+        if path in states and states[path].has_statements:
+            continue
         if rec.paymentDueDay is None:
             continue
         last_closed: Optional[datetime.date] = None
@@ -198,6 +223,8 @@ def compute_paid_this_cycle(
     realize against an actual cleared txn (not against another forecast).
     """
     out: dict[str, Decimal] = {path: Decimal("0") for path in cc_records}
+    for path in cycles:
+        out.setdefault(path, Decimal("0"))
     if not cycles:
         return out
 
@@ -404,24 +431,33 @@ def auto_clear_pending(
             if matched:
                 break
         if matched:
-            cleared_plan = Plan(
-                id=p.id,
-                date=p.date,
-                account=p.account,
-                amount=p.amount,
-                description=p.description,
-                state=None,
-                transferId=p.transferId,
-                createdAt=p.createdAt,
-                updatedAt=p.updatedAt,
-                ccCardRef=p.ccCardRef,
-                ccCycleMonth=p.ccCycleMonth,
-            )
-            store.save_plan(ledger_file_path, cleared_plan)
+            # Copy every field (card tags included) and only clear the state.
+            cleared_plan = dataclasses.replace(p, state=None)
+            try:
+                _persist_cleared(ledger_file_path, p.id)
+            except OSError as ex:
+                # Read-only mount (NAS replica): show it cleared, persist later.
+                log.warning(
+                    "could not persist auto-cleared plan (%s)", type(ex).__name__
+                )
             out.append(cleared_plan)
         else:
             out.append(p)
     return out
+
+
+def _persist_cleared(ledger_file_path: str, plan_id: str) -> None:
+    """Clear the state of the plan as it is stored NOW, not as this request
+    read it: a statement promotion may have re-pointed its card tags in the
+    meantime, and writing the earlier copy back would undo that. A plan that
+    has been deleted since is not written back either."""
+    with store.PLAN_LOCK:
+        stored = next(
+            (p for p in store.list_plans(ledger_file_path) if p.id == plan_id), None
+        )
+        if stored is None or stored.state != "pending":
+            return
+        store.save_plan(ledger_file_path, dataclasses.replace(stored, state=None))
 
 
 # ---------- past-plan match status ----------
@@ -509,8 +545,12 @@ def build_grid_response(
     end_date: Optional[datetime.date] = None,
     today: Optional[datetime.date] = None,
     ledger_file_path: Optional[str] = None,
+    statements: Optional[dict[str, list[Statement]]] = None,
+    expected: Optional[dict[str, ExpectedStatement]] = None,
 ) -> dict:
     today = today or datetime.date.today()
+    statements = statements or {}
+    expected = expected or {}
 
     # 1. Pick the bank universe — open Assets:Checking + Assets:Saving accounts.
     # Skip explicitly-excluded ones, and skip accounts with a beancount `close`
@@ -614,9 +654,31 @@ def build_grid_response(
     # The user's typed currentBalance (if any) is ignored; we use the ledger
     # balance because it reflects new spend without manual maintenance. The
     # tradeoff is importer lag, which is small relative to the forecast horizon.
-    display_name_for = {p: display_name_from_account(p) for p in cc_records.keys()}
+    #
+    # Card states: a card with closed statements is in statement mode (facts
+    # drive it); every other card is in legacy mode (cc-cards.json drives it).
+    # Statements of an account that is closed or absent in the ledger are
+    # ignored.
+    def _state_for(path: str) -> CardState:
+        open_account = path in ledger.accounts and not _is_closed(path)
+        return card_state(
+            path,
+            statements.get(path, []) if open_account else [],
+            expected.get(path),
+            cc_records.get(path),
+            today,
+        )
+
+    states: dict[str, CardState] = {path: _state_for(path) for path in cc_records}
+    for path in statements:
+        if path not in states:
+            state = _state_for(path)
+            if state.has_statements:
+                states[path] = state
+
+    display_name_for = {p: display_name_from_account(p) for p in states}
     derived_balances: dict[str, Decimal] = {}
-    for path in cc_records:
+    for path in states:
         derived_balances[path] = _credit_balance_on(
             ledger, filtered, conversion, fava_options, path, today
         )
@@ -625,28 +687,47 @@ def build_grid_response(
     # sum of cleared payment postings inside the cycle window — used in step 3
     # to net the `cc-locked` projection (`remaining = stmt − paid`), and
     # exposed on the payload for the modal to default `payTotal` correctly.
-    cycles_by_card = compute_active_cycles(cc_records, today)
+    cycles_by_card = compute_active_cycles(cc_records, today, states)
     paid_this_cycle = compute_paid_this_cycle(
         cc_records, cycles_by_card, today, filtered.entries
     )
 
-    # Suppression: any plan with (ccCardRef, ccCycleMonth) overrides that
-    # card+cycle's projection set. The override plans render as ordinary
-    # plan entries; the projection rows for that cycle are skipped.
-    suppressed_cycles: set[tuple[str, str]] = set()
+    # Suppression: override plans replace a projection; they render as
+    # ordinary plan entries and the projection row is skipped.
+    # - A plan that resolves to a statement (closed or expected) suppresses
+    #   the projection of exactly that statement.
+    # - A legacy plan (only `ccCycleMonth`, no statement to map to) keeps
+    #   suppressing by the old due-month join, but only a projection that has
+    #   no statement record behind it.
+    resolved_plans = resolve_plan_statements(plans, states, cc_records)
+    override_ids: set[tuple[str, str]] = set()
+    legacy_months: set[tuple[str, str]] = set()
     for p in plans:
-        if p.ccCardRef and p.ccCycleMonth:
-            suppressed_cycles.add((p.ccCardRef, p.ccCycleMonth))
+        if not p.ccCardRef:
+            continue
+        sid, kind = resolved_plans.get(p.id, (None, "orphan"))
+        if kind in ("closed", "expected") and sid:
+            override_ids.add((p.ccCardRef, sid))
+        elif kind == "legacy" and p.ccCycleMonth:
+            legacy_months.add((p.ccCardRef, p.ccCycleMonth))
 
     projections = project_payments(
-        cc_records, display_name_for, today, derived_balances, paid_this_cycle
+        cc_records,
+        display_name_for,
+        today,
+        derived_balances,
+        paid_this_cycle,
+        states=states,
     )
     cc_entries_by_date_account: dict[tuple[str, str], list[GridEntry]] = defaultdict(
         list
     )
     floating_projections: list[dict] = []
     for proj in projections:
-        if (proj.cardAccountPath, proj.cycleMonth) in suppressed_cycles:
+        if proj.statementId is not None:
+            if (proj.cardAccountPath, proj.statementId) in override_ids:
+                continue
+        elif (proj.cardAccountPath, proj.cycleMonth) in legacy_months:
             continue
         if proj.fundingAccount and proj.fundingAccount in accounts:
             cc_entries_by_date_account[(proj.date, proj.fundingAccount)].append(
@@ -657,6 +738,8 @@ def build_grid_response(
                     "description": proj.displayName,
                     "ccCardRef": proj.cardAccountPath,
                     "ccCycleMonth": proj.cycleMonth,
+                    "ccStatementId": proj.statementId,
+                    "ccStatementKind": proj.statementKind,
                 }
             )
         else:
@@ -668,6 +751,8 @@ def build_grid_response(
                     "amount": proj.amount,
                     "kind": proj.kind,
                     "cycleMonth": proj.cycleMonth,
+                    "statementId": proj.statementId,
+                    "statementKind": proj.statementKind,
                 }
             )
 
@@ -687,6 +772,8 @@ def build_grid_response(
     for p in plans:
         if p.account not in accounts:
             continue
+        # The RESOLVED statement (read-time mapping), not the raw tag.
+        resolved_id, resolved_kind = resolved_plans.get(p.id, (None, None))
         plan_entries_by_date_account[(p.date, p.account)].append(
             {
                 "id": p.id,
@@ -697,6 +784,8 @@ def build_grid_response(
                 "transferId": p.transferId,
                 "ccCardRef": p.ccCardRef,
                 "ccCycleMonth": p.ccCycleMonth,
+                "ccStatementId": resolved_id,
+                "ccStatementKind": resolved_kind,
             }
         )
         plans_for_status.append(p)
@@ -779,6 +868,7 @@ def build_grid_response(
         cc_match_by_cleared[key] = {
             "ccCardRef": card_path,
             "ccCycleMonth": None,
+            "ccStatementId": None,
             "displayName": display_name_from_account(card_path),
         }
 
@@ -792,6 +882,7 @@ def build_grid_response(
         cc_match_by_cleared[key] = {
             "ccCardRef": plan.ccCardRef,
             "ccCycleMonth": plan.ccCycleMonth,
+            "ccStatementId": resolved_plans.get(plan.id, (None, None))[0],
             "displayName": display_name_from_account(plan.ccCardRef),
         }
 
@@ -927,13 +1018,16 @@ def build_grid_response(
         if _is_closed(path):
             continue
         rec = cc_records.get(path)
+        state = states.get(path) or _state_for(path)
         is_configured = bool(
             rec and rec.paymentDueDay is not None and rec.fundingAccount
         )
         has_inputs = bool(rec and rec.statementBalance)
-        derived_curr = _credit_balance_on(
-            ledger, filtered, conversion, fava_options, path, today
-        )
+        derived_curr = derived_balances.get(path)
+        if derived_curr is None:
+            derived_curr = _credit_balance_on(
+                ledger, filtered, conversion, fava_options, path, today
+            )
 
         cycle = cycles_by_card.get(path)
         paid = paid_this_cycle.get(path, Decimal("0"))
@@ -952,6 +1046,39 @@ def build_grid_response(
             except ValueError:
                 stale = False
 
+        statement_balance = rec.statementBalance if rec else None
+        last_closed_date = rec.lastClosedDate if rec else None
+        locked_amount: Optional[Decimal] = None
+        locked_source: Optional[str] = None
+        override_total: Optional[Decimal] = None
+        computed_forecast: Optional[Decimal] = None
+        if state.has_statements:
+            # Statement mode: the legacy-named fields are filled from facts so
+            # a web build that predates statements keeps working.
+            amounts = card_amounts(
+                rec or CCCardRecord(accountPath=path), state, derived_curr, paid
+            )
+            has_inputs = True
+            statement_balance = state.active.statementBalance if state.active else None
+            last_closed_date = state.statements[-1].id
+            remaining = amounts["remaining"]
+            stale = False
+            locked_amount = amounts["lockedAmount"]
+            locked_source = amounts["lockedSource"]
+            computed_forecast = amounts["computedForecast"]
+            if state.active is not None:
+                overrides = [
+                    eval_amount(p.amount)
+                    for p in plans
+                    if p.ccCardRef == path
+                    and resolved_plans.get(p.id, (None, None))[0] == state.active.id
+                ]
+                if overrides:
+                    override_total = sum((abs(a) for a in overrides), Decimal("0"))
+
+        def _opt(d: Optional[Decimal]) -> Optional[str]:
+            return _decimal_str(d) if d is not None else None
+
         cc_card_payload.append(
             {
                 "accountPath": path,
@@ -961,17 +1088,22 @@ def build_grid_response(
                 "fundingAccount": rec.fundingAccount if rec else None,
                 "statementCloseDay": rec.statementCloseDay if rec else None,
                 "paymentDueDay": rec.paymentDueDay if rec else None,
-                "statementBalance": rec.statementBalance if rec else None,
+                "statementBalance": statement_balance,
                 "currentBalance": _decimal_str(derived_curr),
-                "lastClosedDate": rec.lastClosedDate if rec else None,
+                "lastClosedDate": last_closed_date,
                 "minimumPaymentOnly": rec.minimumPaymentOnly if rec else None,
                 "updatedAt": rec.updatedAt if rec else None,
                 "paidThisCycle": _decimal_str(paid),
-                "remaining": _decimal_str(remaining) if remaining is not None else None,
+                "remaining": _opt(remaining),
                 "cycleStartDate": cycle.start.isoformat() if cycle else None,
                 "cycleEndDate": cycle.end.isoformat() if cycle else None,
                 "cycleMonth": cycle.dueMonth if cycle else None,
                 "statementBalanceStale": stale,
+                **card_statement_fields(state, rec, today, derived_curr),
+                "lockedAmount": _opt(locked_amount),
+                "lockedSource": locked_source,
+                "overrideTotal": _opt(override_total),
+                "computedForecast": _opt(computed_forecast),
             }
         )
 

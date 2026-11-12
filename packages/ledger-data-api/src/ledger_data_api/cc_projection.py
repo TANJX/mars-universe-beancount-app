@@ -20,6 +20,19 @@ Cards with no fundingAccount produce floating projections (no `fundingAccount`
 on the result), to be assigned manually by the user.
 
 Date math (next-due, previous-close, etc.) lives in `cc_cycle.py`.
+
+The above is the LEGACY path: a card with no statement records, driven by
+cc-cards.json. A card in statement mode (see `cc_statements.py`) projects from
+facts instead:
+  - cc-locked    for the active closed statement, on its due date:
+                 max(0, statementBalance − paid since close), or for a
+                 minimum-payment card max(0, minimumPayment − paid since close)
+                 when the statement carries a minimum;
+  - cc-forecast  for the next (expected) statement, on its predicted due date:
+                 the owner's estimatedBalance when set, else
+                 max(0, currentBalance − remaining of the active statement).
+In the gap after a due date passed and before the next statement closes there
+is no cc-locked row, only the forecast.
 """
 
 import datetime
@@ -28,6 +41,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from .cc_cycle import active_cycle, next_cycle
+from .cc_statements import CardState
 from .models import CCCardRecord
 
 
@@ -40,6 +54,10 @@ class ProjectedPayment:
     amount: str  # negative number string (it's an outflow from the funding account)
     kind: str  # "cc-locked" | "cc-forecast"
     cycleMonth: str  # "YYYY-MM" — the payment cycle this projection belongs to
+    # The statement this projection stands for. None for a legacy projection
+    # and for a forecast with no expected-statement record yet.
+    statementId: Optional[str] = None
+    statementKind: str = "legacy"  # "closed" | "expected" | "legacy"
 
 
 def _safe_decimal(value: Optional[str]) -> Optional[Decimal]:
@@ -57,6 +75,8 @@ def project_payments(
     today: datetime.date,
     derived_balances: dict[str, Decimal],
     paid_this_cycle: Optional[dict[str, Decimal]] = None,
+    *,
+    states: Optional[dict[str, CardState]] = None,
 ) -> list[ProjectedPayment]:
     """Build the next-two-payment projection set for each configured card.
 
@@ -68,10 +88,30 @@ def project_payments(
     inside the active cycle window (see `merge.compute_paid_this_cycle`).
     `cc-locked = max(0, statementBalance − paidThisCycle)`. Defaults to 0
     per card when omitted (preserves callers that haven't been updated yet).
+
+    `states[path]` (see `cc_statements.card_state`) switches a card with
+    closed statements to the statement-mode math; such a card needs no
+    cc-cards.json record. Cards without statements run the legacy body.
     """
     out: list[ProjectedPayment] = []
     paid_this_cycle = paid_this_cycle or {}
+    states = states or {}
+    statement_paths = [p for p, s in states.items() if s.has_statements]
+    for path in statement_paths:
+        rec = records.get(path) or CCCardRecord(accountPath=path)
+        out.extend(
+            _project_statement_card(
+                rec,
+                states[path],
+                display_name_for.get(path, path.split(":")[-1]),
+                today,
+                derived_balances.get(path) or Decimal("0"),
+                paid_this_cycle.get(path, Decimal("0")),
+            )
+        )
     for path, rec in records.items():
+        if path in states and states[path].has_statements:
+            continue
         if rec.paymentDueDay is None:
             continue
         # `statementCloseDay` is optional — `cycle_for_due` falls back to a
@@ -142,3 +182,90 @@ def _parse_iso_date(value: Optional[str]) -> Optional[datetime.date]:
         return datetime.date.fromisoformat(value)
     except ValueError:
         return None
+
+
+def card_amounts(
+    rec: CCCardRecord, state: CardState, curr: Decimal, paid: Decimal
+) -> dict:
+    """Statement-mode amounts for one card, computed once for both the
+    projection rows and the card payload. Each value is a Decimal or None.
+
+    - remaining: active statement balance net of payments since close.
+    - lockedAmount / lockedSource: what the cc-locked row shows. "minimum"
+      for a minimum-payment card whose statement carries a minimum (netted by
+      payments since close, so the row disappears once it is paid), else
+      "balance" (= remaining).
+    - computedForecast: ledger forecast of the next statement; None for a
+      minimum-payment card. In the gap (no active statement) it is `curr`.
+    """
+    zero = Decimal("0")
+    active = state.active
+    remaining = max(zero, Decimal(active.statementBalance) - paid) if active else None
+    locked: Optional[Decimal] = remaining
+    source: Optional[str] = "balance" if active else None
+    if active and rec.minimumPaymentOnly and active.minimumPayment is not None:
+        locked = max(zero, Decimal(active.minimumPayment) - paid)
+        source = "minimum"
+    forecast: Optional[Decimal]
+    if rec.minimumPaymentOnly:
+        forecast = None
+    else:
+        forecast = max(zero, curr - (remaining or zero))
+    return {
+        "remaining": remaining,
+        "lockedAmount": locked,
+        "lockedSource": source,
+        "computedForecast": forecast,
+    }
+
+
+def _project_statement_card(
+    rec: CCCardRecord,
+    state: CardState,
+    display: str,
+    today: datetime.date,
+    curr: Decimal,
+    paid: Decimal,
+) -> list[ProjectedPayment]:
+    out: list[ProjectedPayment] = []
+    amounts = card_amounts(rec, state, curr, paid)
+
+    locked = amounts["lockedAmount"]
+    if state.active and state.active_cycle and locked is not None and locked > 0:
+        out.append(
+            ProjectedPayment(
+                cardAccountPath=rec.accountPath,
+                displayName=display,
+                fundingAccount=rec.fundingAccount,
+                date=state.active_cycle.end.isoformat(),
+                amount=f"-{locked}",
+                kind="cc-locked",
+                cycleMonth=state.active_cycle.dueMonth,
+                statementId=state.active.id,
+                statementKind="closed",
+            )
+        )
+
+    expected = state.expected
+    forecast = amounts["computedForecast"]
+    if expected is not None:
+        estimate = _safe_decimal(expected.estimatedBalance)
+        if estimate is not None:
+            forecast = estimate
+    if forecast is not None and forecast > 0 and state.next_due is not None:
+        # A predicted due date that already passed still drives the row,
+        # dated today ("statement expected since" covers the nag).
+        out.append(
+            ProjectedPayment(
+                cardAccountPath=rec.accountPath,
+                displayName=display,
+                fundingAccount=rec.fundingAccount,
+                date=max(state.next_due, today).isoformat(),
+                amount=f"-{forecast}",
+                kind="cc-forecast",
+                cycleMonth=f"{state.next_due.year:04d}-{state.next_due.month:02d}",
+                statementId=expected.id if expected is not None else None,
+                statementKind="expected",
+            )
+        )
+    return out

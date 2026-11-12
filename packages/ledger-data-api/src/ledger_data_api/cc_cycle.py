@@ -166,3 +166,60 @@ def cycle_payment_window(
     """
     end = min(today, cycle.end + datetime.timedelta(days=grace_days))
     return (cycle.start, end)
+
+
+# ---------- statement-date predictions ----------
+
+DEFAULT_DUE_OFFSET_DAYS = 25
+"""Due date guess for a statement with no due date on file and no usable
+`paymentDueDay`: closing date plus this many days."""
+
+STATEMENT_OVERDUE_DAYS = 3
+"""Days past the predicted closing date before "statement expected since"
+is raised for a card that still has no record for it."""
+
+MIN_NEXT_CLOSE_GAP_DAYS = 14
+"""The next close is never predicted sooner than this after the last one, so
+a statement that closed a few days off its usual day does not predict the
+same month again."""
+
+
+def valid_day(day) -> bool:
+    """A usable day-of-month hint: an int (not bool) that is -1 or 1..31."""
+    return (
+        isinstance(day, int)
+        and not isinstance(day, bool)
+        and (day == -1 or 1 <= day <= 31)
+    )
+
+
+def first_day_after(anchor: datetime.date, day: int) -> datetime.date:
+    """The first date strictly after `anchor` that is `day` of its month
+    (clamped to the month length, -1 meaning the last day)."""
+    candidate = _resolve_day(anchor.year, anchor.month, day)
+    if candidate > anchor:
+        return candidate
+    return _add_months(anchor, 1, day)
+
+
+def predict_due(closing: datetime.date, due_day: Optional[int]) -> datetime.date:
+    """Due date for a statement that closed on `closing`."""
+    if valid_day(due_day):
+        return first_day_after(closing, due_day)
+    return closing + datetime.timedelta(days=DEFAULT_DUE_OFFSET_DAYS)
+
+
+def predict_next_close(
+    closed_ids: list[str], close_day: Optional[int]
+) -> datetime.date:
+    """Closing date of the statement after the newest one in `closed_ids`
+    (non-empty, ISO dates): one month after the last real close, on the same
+    day of the month, so the prediction follows a card whose closing date
+    drifts. The closing-day hint never overrides history; it only settles
+    whether a month-end close means "last day of the month" (hint 31 or -1,
+    or no hint) or a fixed day such as the 28th.
+    """
+    last = datetime.date.fromisoformat(max(closed_ids))
+    month_end = last.day == calendar.monthrange(last.year, last.month)[1]
+    sticky = month_end and (not valid_day(close_day) or close_day in (31, -1))
+    return _add_months(last, 1, -1 if sticky else last.day)

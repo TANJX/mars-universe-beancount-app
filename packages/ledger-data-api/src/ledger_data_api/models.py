@@ -16,10 +16,13 @@ class Plan:
     createdAt: str
     updatedAt: str
     # CC override tags. Set by the CC allocation dialog so the merge step can
-    # recognize the plan as part of a (card, cycle) override set and suppress
-    # the corresponding projection.
+    # recognize the plan as part of a card's override set and suppress the
+    # corresponding projection. New saves carry `ccStatementId` (a closed or
+    # expected statement id); `ccCycleMonth` is the legacy due-month tag, still
+    # written for cards that have no statement records.
     ccCardRef: Optional[str] = None
     ccCycleMonth: Optional[str] = None  # "YYYY-MM"
+    ccStatementId: Optional[str] = None  # statement closing date "YYYY-MM-DD"
 
     @classmethod
     def from_dict(cls, d: dict) -> "Plan":
@@ -35,6 +38,7 @@ class Plan:
             updatedAt=d.get("updatedAt", ""),
             ccCardRef=d.get("ccCardRef"),
             ccCycleMonth=d.get("ccCycleMonth"),
+            ccStatementId=d.get("ccStatementId"),
         )
 
     def to_dict(self) -> dict:
@@ -99,6 +103,48 @@ class CCCardRecord:
         out: dict = {}
         for k, v in asdict(self).items():
             if k == "accountPath" or v is None:
+                continue
+            out[k] = v
+        return out
+
+
+@dataclass
+class ExpectedStatement:
+    """A statement that has not closed yet, so a payment can be planned for it.
+
+    At most one per card. `id` is the predicted closing date; `afterId` is the
+    newest closed statement id when this record was created: any closed
+    statement newer than that claims (promotes) this record.
+    """
+
+    account: str
+    id: str
+    dueDate: Optional[str] = None
+    estimatedBalance: Optional[str] = None
+    afterId: Optional[str] = None
+    createdAt: str = ""
+    updatedAt: str = ""
+
+    @classmethod
+    def from_dict(cls, account: str, d: dict) -> "ExpectedStatement":
+        def _str(key: str) -> Optional[str]:
+            v = d.get(key)
+            return v if isinstance(v, str) and v else None
+
+        return cls(
+            account=account,
+            id=_str("id") or "",
+            dueDate=_str("dueDate"),
+            estimatedBalance=_str("estimatedBalance"),
+            afterId=_str("afterId"),
+            createdAt=_str("createdAt") or "",
+            updatedAt=_str("updatedAt") or "",
+        )
+
+    def to_storage_dict(self) -> dict:
+        out: dict = {}
+        for k, v in asdict(self).items():
+            if k == "account" or v is None:
                 continue
             out[k] = v
         return out

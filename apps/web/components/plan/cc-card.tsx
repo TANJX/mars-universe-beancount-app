@@ -63,6 +63,17 @@ function formatShortDate(iso: string): string {
   return `${months[d.getMonth()]} ${d.getDate()}`
 }
 
+function daysUntil(iso: string, today: string): number {
+  const a = new Date(`${today}T00:00:00`).getTime()
+  const b = new Date(`${iso}T00:00:00`).getTime()
+  return Math.round((b - a) / 86_400_000)
+}
+
+// Newest closed statement on record (the API sends them newest first).
+function newestStatement(card: CCCard) {
+  return card.statements?.[0] ?? card.activeStatement ?? null
+}
+
 function bankShort(account: string | null | undefined): string {
   if (!account) return "—"
   return account.split(":").pop() ?? account
@@ -106,17 +117,45 @@ export function CcCardView({
 }
 
 function CardSummary({ card, today }: { card: CCCard; today: string }) {
-  const due = nextDue(card, today)
-  const stale = card.lastClosedDate ? daysSince(card.lastClosedDate, today) : 0
+  // Statement mode: the card has closed statement records, so the summary
+  // shows those facts. Otherwise the legacy cc-cards.json fields drive it.
+  const hasStatements = !!card.hasStatements
+  const active = card.activeStatement ?? null
+  const lastClosed = hasStatements
+    ? (newestStatement(card)?.id ?? card.lastClosedDate)
+    : card.lastClosedDate
+  const due =
+    hasStatements && active
+      ? {
+          date: active.effectiveDueDate,
+          daysAway: daysUntil(active.effectiveDueDate, today),
+        }
+      : hasStatements
+        ? null
+        : nextDue(card, today)
+  const stale = lastClosed ? daysSince(lastClosed, today) : 0
 
   let staleTone: "ok" | "warn" | "bad" | "setup" | "unknown" = "ok"
-  if (!card.isConfigured || !card.hasMonthlyInputs) staleTone = "setup"
+  let staleTitle: string | undefined
+  if (hasStatements) {
+    if (card.statementExpectedSince) {
+      staleTone = "bad"
+      staleTitle = `Statement expected since ${card.statementExpectedSince}`
+    } else if (!card.isConfigured) staleTone = "setup"
+  } else if (!card.isConfigured || !card.hasMonthlyInputs) staleTone = "setup"
   else if (!card.lastClosedDate) staleTone = "unknown"
   else if (stale >= 30) staleTone = "bad"
   else if (stale >= 14) staleTone = "warn"
 
-  const stmt = card.statementBalance ? parseFloat(card.statementBalance) : 0
+  const stmt = hasStatements
+    ? active
+      ? parseFloat(active.statementBalance)
+      : null
+    : card.statementBalance
+      ? parseFloat(card.statementBalance)
+      : 0
   const curr = card.currentBalance ? parseFloat(card.currentBalance) : 0
+  const showBody = hasStatements || (card.isConfigured && card.hasMonthlyInputs)
 
   return (
     <>
@@ -124,15 +163,28 @@ function CardSummary({ card, today }: { card: CCCard; today: string }) {
         <span className="text-xs font-medium tracking-tight">
           {card.displayName}
         </span>
-        <StaleChip tone={staleTone} stale={stale} />
+        <StaleChip tone={staleTone} stale={stale} title={staleTitle} />
       </div>
-      {card.isConfigured && card.hasMonthlyInputs ? (
+      {showBody ? (
         <>
           <div className="mt-0.5 flex items-baseline justify-between gap-2">
             <span className="text-[10px] tracking-wide text-muted-foreground uppercase">
               Stmt
             </span>
-            <Money value={stmt} tone="none" className="text-sm font-semibold" />
+            {stmt == null ? (
+              <span
+                className="text-sm font-semibold text-muted-foreground"
+                title="No statement is due: waiting for the next one to close"
+              >
+                —
+              </span>
+            ) : (
+              <Money
+                value={stmt}
+                tone="none"
+                className="text-sm font-semibold"
+              />
+            )}
           </div>
           <div className="flex items-baseline justify-between gap-2">
             <span className="text-[10px] tracking-wide text-muted-foreground uppercase">
@@ -144,9 +196,17 @@ function CardSummary({ card, today }: { card: CCCard; today: string }) {
             <span>
               {due ? (
                 <>
-                  Pays {formatShortDate(due.date)} · in{" "}
-                  {due.daysAway === 0 ? "today" : `${due.daysAway}d`}
+                  Pays {formatShortDate(due.date)} ·{" "}
+                  {due.daysAway < 0
+                    ? `${-due.daysAway}d ago`
+                    : `in ${due.daysAway === 0 ? "today" : `${due.daysAway}d`}`}
                 </>
+              ) : hasStatements ? (
+                card.nextCloseDate ? (
+                  <>Next closes ~{formatShortDate(card.nextCloseDate)}</>
+                ) : (
+                  <>Waiting for next statement</>
+                )
               ) : (
                 <>No due day set</>
               )}
@@ -195,7 +255,11 @@ function CcCardEditor({
     card.minimumPaymentOnly ?? false
   )
 
+  const hasStatements = !!card.hasStatements
+
   const persist = () => {
+    // With statement records the balance and closing date are facts written
+    // by the fetch command, so they are not sent from here.
     const record: CCCardRecord = {
       accountPath: card.accountPath,
       fundingAccount: fundingAccount || undefined,
@@ -203,14 +267,20 @@ function CcCardEditor({
         ? parseInt(statementCloseDay, 10)
         : undefined,
       paymentDueDay: paymentDueDay ? parseInt(paymentDueDay, 10) : undefined,
-      statementBalance: stmt || undefined,
-      lastClosedDate: closed || undefined,
+      ...(hasStatements
+        ? {}
+        : {
+            statementBalance: stmt || undefined,
+            lastClosedDate: closed || undefined,
+          }),
       minimumPaymentOnly: minimumPaymentOnly || undefined,
     }
     save.mutate(record, { onSuccess: () => onClose() })
   }
 
   const isMonthly = mode === "monthly"
+  // Nothing to edit on the monthly view once statements are recorded facts.
+  const readOnly = isMonthly && hasStatements
 
   return (
     <div className="flex flex-col gap-2">
@@ -236,7 +306,11 @@ function CcCardEditor({
 
       {isMonthly ? (
         <>
-          <Field label="Statement balance" value={stmt} onChange={setStmt} />
+          {hasStatements ? (
+            <StatementFacts card={card} />
+          ) : (
+            <Field label="Statement balance" value={stmt} onChange={setStmt} />
+          )}
           <div className="flex flex-col gap-0.5">
             <span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
               Current balance · from ledger
@@ -250,12 +324,16 @@ function CcCardEditor({
               the importer brings in new txns.
             </span>
           </div>
-          <Field
-            label="Last closed"
-            value={closed}
-            onChange={setClosed}
-            type="date"
-          />
+          {hasStatements ? (
+            <StatementHistory card={card} />
+          ) : (
+            <Field
+              label="Last closed"
+              value={closed}
+              onChange={setClosed}
+              type="date"
+            />
+          )}
         </>
       ) : (
         <>
@@ -338,18 +416,104 @@ function CcCardEditor({
             onClick={onClose}
             className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted/50"
           >
-            Cancel
+            {readOnly ? "Close" : "Cancel"}
           </button>
-          <button
-            type="button"
-            onClick={persist}
-            disabled={save.isPending}
-            className="rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-          >
-            {save.isPending ? "Saving…" : "Save"}
-          </button>
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={persist}
+              disabled={save.isPending}
+              className="rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {save.isPending ? "Saving…" : "Save"}
+            </button>
+          )}
         </div>
       </div>
+    </div>
+  )
+}
+
+const FACT_LABEL =
+  "text-[10px] font-medium tracking-wide text-muted-foreground uppercase"
+
+// Read-only view of the statement the card is on: the active closed one, or
+// in the gap after its due date the newest one on record.
+function StatementFacts({ card }: { card: CCCard }) {
+  const active = card.activeStatement ?? null
+  const shown = active ?? newestStatement(card)
+  const expected = card.expectedStatement ?? null
+  const nextAmount = expected?.estimatedBalance ?? card.computedForecast
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className={FACT_LABEL}>
+        Statement · {shown ? `closed ${shown.id}` : "none on record"}
+      </span>
+      {shown && (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 rounded-sm bg-muted/40 px-2 py-1 text-xs tabular-nums">
+          <dt className="text-muted-foreground">Balance</dt>
+          <dd className="text-right">${shown.statementBalance}</dd>
+          <dt className="text-muted-foreground">Due</dt>
+          <dd className="text-right">
+            {shown.effectiveDueDate}
+            {shown.dueDate == null && (
+              <span className="text-muted-foreground"> predicted</span>
+            )}
+          </dd>
+          {shown.minimumPayment != null && (
+            <>
+              <dt className="text-muted-foreground">Minimum</dt>
+              <dd className="text-right">${shown.minimumPayment}</dd>
+            </>
+          )}
+          <dt className="text-muted-foreground">Source</dt>
+          <dd className="text-right">{shown.source}</dd>
+        </dl>
+      )}
+      {!active && shown && (
+        <span className="text-[10px] text-muted-foreground">
+          past due, waiting for the next statement
+        </span>
+      )}
+      {card.statementExpectedSince && (
+        <span className="text-[10px] text-amber-700 dark:text-amber-400">
+          Statement expected since {card.statementExpectedSince}
+        </span>
+      )}
+      {expected && (
+        <span className="text-[10px] text-muted-foreground tabular-nums">
+          Next (expected): closes ~{expected.id}
+          {expected.dueDate ? `, due ~${expected.dueDate}` : ""}
+          {nextAmount != null ? `, $${nextAmount}` : ""}
+        </span>
+      )}
+      <span className="text-[10px] text-muted-foreground/70">
+        Recorded by the fetch command. Not editable here.
+      </span>
+    </div>
+  )
+}
+
+const HISTORY_ROWS = 6
+
+function StatementHistory({ card }: { card: CCCard }) {
+  const rows = (card.statements ?? []).slice(0, HISTORY_ROWS)
+  if (rows.length === 0) return null
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className={FACT_LABEL}>Statement history</span>
+      <ul className="flex flex-col text-[11px] tabular-nums">
+        {rows.map((s) => (
+          <li
+            key={s.id}
+            className="grid grid-cols-[1fr_auto_3.5rem] items-baseline gap-3 px-2 py-0.5"
+          >
+            <span>{s.id}</span>
+            <span>${s.statementBalance}</span>
+            <span className="text-right text-muted-foreground">{s.source}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
@@ -386,9 +550,11 @@ function Field({
 function StaleChip({
   tone,
   stale,
+  title,
 }: {
   tone: "ok" | "warn" | "bad" | "setup" | "unknown"
   stale: number
+  title?: string
 }) {
   if (tone === "setup") {
     return (
@@ -416,7 +582,7 @@ function StaleChip({
         tone === "warn" && "bg-amber-500/15 text-amber-700 dark:text-amber-400",
         tone === "bad" && "bg-rose-500/15 text-rose-700 dark:text-rose-400"
       )}
-      title={`Closed ${stale} days ago`}
+      title={title ?? `Closed ${stale} days ago`}
     >
       {tone === "ok" && "✓ "}
       {tone === "warn" && "⚠ "}

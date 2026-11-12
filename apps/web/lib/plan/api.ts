@@ -2,6 +2,8 @@ import { z } from "zod"
 
 import {
   CCCardSchema,
+  CcExpectedStatementSchema,
+  CcStatementsResponseSchema,
   PlanGridResponseSchema,
   PlanSettingsSchema,
 } from "@/lib/plan/schemas"
@@ -17,6 +19,21 @@ export class PlannerApiError extends Error {
     super(message)
     this.name = "PlannerApiError"
   }
+}
+
+// Validation errors come back as `{"status": "error", "message": "..."}`.
+// Surface that message when the body carries one.
+async function errorMessage(res: Response, fallback: string): Promise<string> {
+  try {
+    const raw: unknown = JSON.parse(await res.text())
+    if (raw && typeof raw === "object" && "message" in raw) {
+      const message = (raw as { message: unknown }).message
+      if (typeof message === "string" && message) return message
+    }
+  } catch {
+    // not JSON: keep the fallback
+  }
+  return fallback
 }
 
 async function plannerFetch<T>(
@@ -37,7 +54,10 @@ async function plannerFetch<T>(
   }
   if (!res.ok) {
     throw new PlannerApiError(
-      `Planner endpoint returned HTTP ${res.status} for ${url}`,
+      await errorMessage(
+        res,
+        `Planner endpoint returned HTTP ${res.status} for ${url}`
+      ),
       res.status,
       url
     )
@@ -75,6 +95,13 @@ export function fetchCcCards() {
   return plannerFetch("cc_cards", z.array(CCCardSchema))
 }
 
+export function fetchCcStatements(accountPath: string) {
+  return plannerFetch(
+    `cc_statements?account=${encodeURIComponent(accountPath)}`,
+    CcStatementsResponseSchema
+  )
+}
+
 export function fetchPlanSettings() {
   return plannerFetch("plan_settings", PlanSettingsSchema)
 }
@@ -96,7 +123,11 @@ async function plannerPost<T>(
     throw new PlannerApiError(`Network error contacting ${url}`, undefined, url)
   }
   if (!res.ok) {
-    throw new PlannerApiError(`HTTP ${res.status} for ${url}`, res.status, url)
+    throw new PlannerApiError(
+      await errorMessage(res, `HTTP ${res.status} for ${url}`),
+      res.status,
+      url
+    )
   }
   const text = await res.text()
   let raw: unknown
@@ -126,6 +157,7 @@ export interface PlanWriteInput {
   transferId?: string | null
   ccCardRef?: string | null
   ccCycleMonth?: string | null
+  ccStatementId?: string | null
 }
 
 const SaveResponseSchema = z.object({ id: z.string() }).loose()
@@ -171,7 +203,10 @@ export function deleteTransfer(id: string) {
 
 export interface CcOverrideSaveInput {
   cardAccountPath: string
-  cycleMonth: string
+  // Exactly one of the two: statementId for a card with statement records
+  // (a strict foreign key on the server), cycleMonth for a legacy card.
+  statementId?: string
+  cycleMonth?: string
   plans: Array<{
     id?: string
     date: string
@@ -188,4 +223,34 @@ const CcOverrideResponseSchema = z
 
 export function saveCcOverride(input: CcOverrideSaveInput) {
   return plannerPost("cc_override_save", input, CcOverrideResponseSchema)
+}
+
+export interface CcExpectedSaveInput {
+  accountPath: string
+  id?: string | null
+  dueDate?: string | null
+  // Key absent keeps the stored value; null clears it.
+  estimatedBalance?: string | null
+  // The expected statement being edited. The server rejects the save when the
+  // card's expected statement is no longer this one (it closed meanwhile).
+  expectId?: string
+}
+
+const CcExpectedResponseSchema = z
+  .object({ expected: CcExpectedStatementSchema })
+  .loose()
+
+export function saveCcExpected(input: CcExpectedSaveInput) {
+  return plannerPost("cc_expected_save", input, CcExpectedResponseSchema)
+}
+
+export interface CcExpectedDeleteInput {
+  accountPath: string
+  // Remove the record only when it carries no override plans and no estimate
+  // (never an error): cleans up after a dialog closed without saving.
+  onlyIfEmpty?: boolean
+}
+
+export function deleteCcExpected(input: CcExpectedDeleteInput) {
+  return plannerPost("cc_expected_delete", input, EmptyResponseSchema)
 }

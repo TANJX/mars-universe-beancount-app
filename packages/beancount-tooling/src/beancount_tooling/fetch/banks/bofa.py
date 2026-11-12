@@ -30,6 +30,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from beancount_tooling.billing import StatementInfo
 from beancount_tooling.fetch import browser
 from beancount_tooling.fetch.banks.base import Fetcher, NoActivity, StagedFile
 from beancount_tooling.fetch.config import PLACEHOLDER
@@ -200,6 +201,87 @@ def account_link_pattern(digits: str | None) -> re.Pattern[str]:
     return re.compile(
         ACCOUNT_LINK_TEMPLATE.format(digits=re.escape(digits)), re.IGNORECASE
     )
+
+
+# Card activity page, "Pay This Card" panel and the "Go to" period combobox
+# (confirmed 2026-11-12 on three cards, from the accessibility snapshot):
+#   - text: "Total Min Payment Due:" ... - text: "$35.00 due Jun 15 Statement Balance:"
+#   ... - text: $1,234.56
+#   - option "May 20, 2030"          (one per closed statement, newest first)
+# The due date carries no year; it is the first such day after the closing
+# date. The panel shows only the newest statement, so it is paired with the
+# newest closing date in the combobox, and the pair is refused when the due
+# date does not fall DUE_AFTER_CLOSE_DAYS after that close (the two can
+# disagree for a day or two around a statement close).
+STATEMENT_BALANCE_TEXT = re.compile(
+    r"Statement Balance:.*?(?P<neg>-)?\$(?P<amount>\d[\d,]*\.\d{2})",
+    re.IGNORECASE | re.DOTALL,
+)
+MIN_PAYMENT_TEXT = re.compile(
+    r"Total Min Payment Due:.*?(?P<neg>-)?\$(?P<amount>\d[\d,]*\.\d{2})"
+    r"(?:\s+due\s+(?P<month>[A-Za-z]{3,9})\.?\s+(?P<day>\d{1,2}))?",
+    re.IGNORECASE | re.DOTALL,
+)
+CLOSING_DATE_OPTION = re.compile(
+    r'option "(?P<month>'
+    + "|".join(calendar.month_name[1:])
+    + r') (?P<day>\d{1,2}), (?P<year>\d{4})"',
+    re.IGNORECASE,
+)
+DUE_AFTER_CLOSE_DAYS = (15, 40)
+
+
+def _month_number(name: str) -> int | None:
+    key = name[:3].lower()
+    abbrs = [a.lower() for a in calendar.month_abbr]
+    return abbrs.index(key) if key in abbrs[1:] else None
+
+
+def parse_card_statement(snapshot: str) -> StatementInfo | None:
+    """The newest closed statement on a card activity page snapshot: closing
+    date (period combobox), statement balance, and the due date and minimum
+    payment when shown. None when the page shows no closed statement or no
+    statement balance. ValueError when the due date does not belong to that
+    closing date."""
+    closings = []
+    for m in CLOSING_DATE_OPTION.finditer(snapshot):
+        names = [n.lower() for n in calendar.month_name]
+        try:
+            closings.append(
+                date(int(m["year"]), names.index(m["month"].lower()), int(m["day"]))
+            )
+        except ValueError:
+            continue
+    balance = STATEMENT_BALANCE_TEXT.search(snapshot)
+    if not closings or not balance:
+        return None
+    closing = max(closings)
+    amount = Decimal(balance["amount"].replace(",", ""))
+    info = StatementInfo(closing, -amount if balance["neg"] else amount)
+
+    minimum = MIN_PAYMENT_TEXT.search(snapshot)
+    if not minimum:
+        return info
+    due = None
+    month = _month_number(minimum["month"]) if minimum["month"] else None
+    if month:
+        day = int(minimum["day"])
+        for year in (closing.year, closing.year + 1):
+            try:
+                candidate = date(year, month, day)
+            except ValueError:
+                continue
+            if candidate > closing:
+                due = candidate
+                break
+        low, high = DUE_AFTER_CLOSE_DAYS
+        if due is None or not low <= (due - closing).days <= high:
+            raise ValueError(
+                f"due {minimum['month']} {minimum['day']} does not follow the "
+                f"statement closed {closing}"
+            )
+    min_amount = Decimal(minimum["amount"].replace(",", ""))
+    return StatementInfo(closing, info.statement_balance, due, min_amount)
 
 
 def parse_money(text: str) -> Decimal | None:
@@ -534,6 +616,22 @@ class BofAFetcher(Fetcher):
                 for r in rows.all()
             ]
         return [r for r in found if r is not None]
+
+    def read_statement(
+        self, page: Page, account: AccountConfig
+    ) -> StatementInfo | None:
+        if account.kind != "credit":
+            return None
+        try:
+            self.open_account(page, account)
+        except NoActivity:
+            pass  # nothing in the current period; the statement panel is still there
+        with _step("activity: read statement", "STATEMENT_BALANCE_TEXT"):
+            page.get_by_text(
+                re.compile(r"Statement Balance:", re.IGNORECASE)
+            ).first.wait_for(state="attached", timeout=STEP_TIMEOUT_MS)
+            snapshot = page.locator("body").aria_snapshot(timeout=STEP_TIMEOUT_MS)
+        return parse_card_statement(snapshot)
 
     def open_account(self, page: Page, account: AccountConfig) -> None:
         links = self._account_link(page, account)

@@ -20,8 +20,10 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import {
+  useDeleteCcExpected,
   useDeletePlan,
   useDeleteTransfer,
+  useSaveCcExpected,
   useSaveCcOverride,
   useSavePlan,
   useSaveTransfer,
@@ -33,9 +35,21 @@ import type {
   GridEntry,
   PlanGridResponse,
 } from "@/lib/plan/schemas"
+import {
+  type CcOverrideTarget,
+  expectedTarget,
+  isDialogPlan,
+  overrideKey,
+  resolveTarget,
+  targetPaymentDate,
+} from "@/lib/plan/statements"
 import { cn } from "@/lib/utils"
 
 type StateFlag = "todo" | "pending" | null
+
+// The cards of the grid being rendered, for the entry cells (which decide
+// per card whether an override plan opens the dialog or is edited inline).
+const CcCardsContext = React.createContext<CCCard[]>([])
 
 interface EntryPatch {
   amount?: string
@@ -82,6 +96,8 @@ export function PlanGrid({
   const deletePlan = useDeletePlan()
   const deleteTransfer = useDeleteTransfer()
   const saveCcOverride = useSaveCcOverride()
+  const saveCcExpected = useSaveCcExpected()
+  const deleteCcExpected = useDeleteCcExpected()
   const saveTransfer = useSaveTransfer()
 
   const findTransferLegs = React.useCallback(
@@ -120,6 +136,8 @@ export function PlanGrid({
       const row = data.rows.find((r) => r.date === date)
       const original = row?.entries[account]?.find((e) => e.id === entryId)
       if (!original) return
+      // No ccCardRef / ccCycleMonth / ccStatementId here: the server keeps a
+      // plan's stored tags when the keys are absent.
       const merged = {
         id: entryId,
         date,
@@ -154,8 +172,11 @@ export function PlanGrid({
 
   const [ccDialog, setCcDialog] = React.useState<{
     card: CCCard
-    cycleMonth: string
+    target: CcOverrideTarget
     paymentDate: string
+    // The expected statement was created just to open this dialog. If the
+    // dialog closes with nothing saved on it, the record is removed again.
+    createdExpected: boolean
   } | null>(null)
 
   const [transferSeed, setTransferSeed] =
@@ -223,25 +244,47 @@ export function PlanGrid({
   const setEntryState = React.useCallback(
     (entry: GridEntry, date: string, account: string, next: StateFlag) => {
       // CC projection rows have no plan record yet — promote them to a
-      // single-leg override carrying the new state.
-      if (
-        (entry.kind === "cc-locked" || entry.kind === "cc-forecast") &&
-        entry.ccCardRef &&
-        entry.ccCycleMonth
-      ) {
-        saveCcOverride.mutate({
-          cardAccountPath: entry.ccCardRef,
-          cycleMonth: entry.ccCycleMonth,
-          plans: [
-            {
-              date,
-              account,
-              amount: entry.amount,
-              description: entry.description,
-              state: next,
-            },
-          ],
-        })
+      // single-leg override carrying the new state. The override is keyed by
+      // statement for a card with statement records (a forecast row with no
+      // expected statement yet gets one created first), by cycle month for a
+      // legacy card.
+      if (entry.kind === "cc-locked" || entry.kind === "cc-forecast") {
+        const cardAccountPath = entry.ccCardRef
+        if (!cardAccountPath) return
+        const resolved = resolveTarget(
+          entry,
+          data.ccCards.find((c) => c.accountPath === cardAccountPath)
+        )
+        if (!resolved) return
+        const plans = [
+          {
+            date,
+            account,
+            amount: entry.amount,
+            description: entry.description,
+            state: next,
+          },
+        ]
+        if ("target" in resolved) {
+          saveCcOverride.mutate({
+            cardAccountPath,
+            ...overrideKey(resolved.target),
+            plans,
+          })
+          return
+        }
+        saveCcExpected
+          .mutateAsync({ accountPath: cardAccountPath })
+          .then((res) =>
+            saveCcOverride.mutateAsync({
+              cardAccountPath,
+              statementId: res.expected.id,
+              plans,
+            })
+          )
+          .catch(() => {
+            // The mutation keeps the error; it is shown above the grid.
+          })
         return
       }
       if (entry.kind !== "plan") return
@@ -267,25 +310,72 @@ export function PlanGrid({
         description: entry.description,
         state: next,
         transferId: entry.transferId ?? null,
-        ccCardRef: entry.ccCardRef ?? null,
-        ccCycleMonth: entry.ccCycleMonth ?? null,
       })
     },
-    [savePlan, saveCcOverride, saveTransfer, findTransferLegs]
+    [
+      data.ccCards,
+      savePlan,
+      saveCcOverride,
+      saveCcExpected,
+      saveTransfer,
+      findTransferLegs,
+    ]
   )
 
   const handleOpenCcDialog = React.useCallback(
-    (entry: GridEntry, rowDate: string) => {
+    async (entry: GridEntry, rowDate: string) => {
       const ref = entry.ccCardRef
-      const cycle = entry.ccCycleMonth
-      if (!ref || !cycle) return
-      const card = data.ccCards.find((c) => c.accountPath === ref)
-      if (!card) return
-      const paymentDate = paymentDateFor(card, cycle) ?? rowDate
-      setCcDialog({ card, cycleMonth: cycle, paymentDate })
+      if (!ref) return
+      const found = data.ccCards.find((c) => c.accountPath === ref)
+      if (!found) return
+      const resolved = resolveTarget(entry, found)
+      if (!resolved) return
+      let card = found
+      let target: CcOverrideTarget
+      let createdExpected = false
+      if ("target" in resolved) {
+        target = resolved.target
+      } else {
+        // Planning a statement that has not closed: create its expected
+        // statement on demand, then target it.
+        try {
+          const res = await saveCcExpected.mutateAsync({ accountPath: ref })
+          card = { ...found, expectedStatement: res.expected }
+          target = expectedTarget(res.expected, resolved.adoptMonth)
+          createdExpected = true
+        } catch {
+          // The mutation keeps the error; it is shown above the grid.
+          return
+        }
+      }
+      const paymentDate = targetPaymentDate(card, target, rowDate)
+      setCcDialog({ card, target, paymentDate, createdExpected })
     },
-    [data.ccCards]
+    [data.ccCards, saveCcExpected]
   )
+
+  const closeCcDialog = () => {
+    if (ccDialog?.createdExpected) {
+      // Closed without planning or estimating anything: do not leave an
+      // expected statement behind (the server keeps it when it is in use).
+      deleteCcExpected.mutate({
+        accountPath: ccDialog.card.accountPath,
+        onlyIfEmpty: true,
+      })
+    }
+    setCcDialog(null)
+  }
+
+  // Creating the expected statement or promoting a projection row can fail
+  // (read-only replica, API down, a rejected date). Say so instead of doing
+  // nothing.
+  const ccActionError =
+    saveCcExpected.error?.message ??
+    (ccDialog ? undefined : saveCcOverride.error?.message)
+  const dismissCcActionError = () => {
+    saveCcExpected.reset()
+    saveCcOverride.reset()
+  }
 
   const todayRowRef = React.useRef<HTMLTableRowElement>(null)
   const didScrollRef = React.useRef(false)
@@ -304,9 +394,28 @@ export function PlanGrid({
   )
 
   return (
-    <>
+    <CcCardsContext.Provider value={data.ccCards}>
+      {ccActionError && (
+        <div
+          role="alert"
+          className="mb-2 flex items-center justify-between gap-3 rounded-md bg-rose-500/10 px-3 py-1.5 text-xs text-rose-700 dark:text-rose-400"
+        >
+          <span>Card payment not saved: {ccActionError}</span>
+          <button
+            type="button"
+            onClick={dismissCcActionError}
+            className="shrink-0 rounded-sm px-1.5 py-0.5 font-medium hover:bg-rose-500/10"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       <div
-        className="relative min-h-0 flex-1 overflow-auto rounded-md ring-1 ring-foreground/10 select-none"
+        className={cn(
+          "relative min-h-0 flex-1 overflow-auto rounded-md ring-1 ring-foreground/10 select-none",
+          saveCcExpected.isPending && "cursor-progress"
+        )}
+        aria-busy={saveCcExpected.isPending || undefined}
         onContextMenu={(e) => e.preventDefault()}
       >
         <table className="w-full border-collapse text-xs">
@@ -378,10 +487,10 @@ export function PlanGrid({
         <CcOverrideDialog
           open={!!ccDialog}
           onOpenChange={(open) => {
-            if (!open) setCcDialog(null)
+            if (!open) closeCcDialog()
           }}
           card={ccDialog.card}
-          cycleMonth={ccDialog.cycleMonth}
+          target={ccDialog.target}
           paymentDate={ccDialog.paymentDate}
           banks={data.banks}
           rows={data.rows}
@@ -403,18 +512,8 @@ export function PlanGrid({
         banks={data.banks}
         seed={moveSeed}
       />
-    </>
+    </CcCardsContext.Provider>
   )
-}
-
-function paymentDateFor(card: CCCard, cycleMonth: string): string | null {
-  if (!card.paymentDueDay) return null
-  const [y, m] = cycleMonth.split("-").map(Number)
-  if (!y || !m) return null
-  const lastDay = new Date(y, m, 0).getDate()
-  const day =
-    card.paymentDueDay === -1 ? lastDay : Math.min(card.paymentDueDay, lastDay)
-  return `${y}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`
 }
 
 function collapseQuietDays(
@@ -803,8 +902,13 @@ function EntryView({
   const scheduled = entry.kind === "scheduled"
   const ccLocked = entry.kind === "cc-locked"
   const ccForecast = entry.kind === "cc-forecast"
-  const ccTaggedPlan =
-    entry.kind === "plan" && !!entry.ccCardRef && !!entry.ccCycleMonth
+  // Orphans (override plans whose statement is gone) are plain editable
+  // plans, and so is a legacy due-month row the dialog has no statement for.
+  const ccCards = React.useContext(CcCardsContext)
+  const ccTaggedPlan = isDialogPlan(
+    entry,
+    ccCards.find((c) => c.accountPath === entry.ccCardRef)
+  )
   // CC entries — projection rows AND override plans — share one visual style.
   // The override-vs-projection distinction matters in the dialog, not the cell.
   const isCcEntry = ccLocked || ccForecast || ccTaggedPlan

@@ -15,6 +15,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from beancount_tooling.billing import StatementInfo
 from beancount_tooling.pending import PendingRow
 
 if TYPE_CHECKING:
@@ -119,6 +120,14 @@ class Fetcher(ABC):
         """The rows the site lists as pending (in no export yet), signed like
         the ledger (negative leaves a checking account). None when this bank
         or account kind is not supported. May navigate."""
+        return None
+
+    def read_statement(
+        self, page: Page, account: AccountConfig
+    ) -> StatementInfo | None:
+        """The latest closed statement the site shows for a credit `account`
+        (closing date, balance at close, due date, minimum payment). None when
+        this bank does not support it. May navigate."""
         return None
 
 

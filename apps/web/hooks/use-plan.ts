@@ -3,15 +3,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import {
+  type CcExpectedDeleteInput,
+  type CcExpectedSaveInput,
   type CcOverrideSaveInput,
   deleteCcCard,
+  deleteCcExpected,
   deletePlan,
   deleteTransfer,
   fetchCcCards,
+  fetchCcStatements,
   fetchPlanGrid,
   fetchPlanSettings,
   type PlanWriteInput,
   saveCcCard,
+  saveCcExpected,
   saveCcOverride,
   savePlan,
   savePlanSettings,
@@ -33,6 +38,15 @@ export function useCcCards() {
     queryKey: ["cc_cards"],
     queryFn: fetchCcCards,
     staleTime: 30_000,
+  })
+}
+
+export function useCcStatements(accountPath: string, enabled = true) {
+  return useQuery({
+    queryKey: ["cc_statements", accountPath],
+    queryFn: () => fetchCcStatements(accountPath),
+    staleTime: 30_000,
+    enabled,
   })
 }
 
@@ -104,6 +118,31 @@ export function useSaveCcOverride() {
     mutationFn: (input: CcOverrideSaveInput) => saveCcOverride(input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["plan_grid"] })
+      qc.invalidateQueries({ queryKey: ["cc_statements"] })
+    },
+  })
+}
+
+export function useSaveCcExpected() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: CcExpectedSaveInput) => saveCcExpected(input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["plan_grid"] })
+      qc.invalidateQueries({ queryKey: ["cc_cards"] })
+      qc.invalidateQueries({ queryKey: ["cc_statements"] })
+    },
+  })
+}
+
+export function useDeleteCcExpected() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: CcExpectedDeleteInput) => deleteCcExpected(input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["plan_grid"] })
+      qc.invalidateQueries({ queryKey: ["cc_cards"] })
+      qc.invalidateQueries({ queryKey: ["cc_statements"] })
     },
   })
 }
