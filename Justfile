@@ -36,8 +36,9 @@ normalize-payees *args:
 
 # Write the mobile snapshot (phone app data) to $LEDGER_DIR/mobile/snapshot.json.
 # Personal inputs: $LEDGER_DIR/config/mobile.yaml. Flags: --asof YYYY-MM-DD, --out PATH.
+# Merchant logo URLs use the web app's publishable logo token (apps/web/.env.local).
 mobile-snapshot *args:
-    uv run mobile-snapshot {{args}}
+    uv run mobile-snapshot --web-env apps/web/.env.local {{args}}
 
 # Stock price updater
 prices:

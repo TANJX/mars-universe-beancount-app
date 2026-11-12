@@ -18,6 +18,11 @@ accounts:
   salary: ["Income:Salary"]
   clearing: ["Assets:Pending-Transfer"]            # transfers pass through these
   paying: ["Assets:Transit", "Assets:Gift-Card"]   # can pay for an expense, after cards and checking
+  # Checking or savings accounts that are not spendable money (a commuter or benefit
+  # card's balance). They are left out of cash totals, float and projected cash and are
+  # listed under "Other"; net worth still counts them. A forecast deposit into one shows
+  # in the plan as an event that moves no cash. Default: none.
+  cash_exclude: ["Assets:Checking:Commuter"]
 
 plan:
   # Last day the plan covers: `until` while it is still ahead, else `days` past
@@ -34,6 +39,11 @@ plan:
       kind: pay          # pay | bill; default is by sign
       merge: true        # same-day matches add up to one event (deposit splits)
       paycheck: true     # the first such event is plan.nextPay
+      # A paycheck event also lists what the same paycheck pays into retirement and
+      # benefit accounts: forecast entries with a salary posting that land in an asset
+      # account that is not cash (401k, HSA, an excluded benefit account), on payday or
+      # before the next one. A contribution is named by the rule that matches its entry
+      # (the "Commuter benefit" label below), else by its investment account name.
     - match: { payee_prefix: "Auto Finance" }
       label: "Car loan"
       kind: bill
@@ -44,7 +54,8 @@ activity:
   days: 90               # how far back activity.transactions goes
 
 spending:
-  # Top-level expense categories left out of "day-to-day" spending (spend.flex).
+  # Top-level expense categories left out of "day-to-day" spending (spend.flex). They are
+  # the "fixed" part of each month in activity.spendByMonth, and spend.dayToDayExclude lists them.
   day_to_day_exclude: [Home]
 
 # Becomes the goal with id "ef"; its balance is float.reserve.
@@ -87,6 +98,8 @@ loans:
     payment: 550.25
     payoff: 2032-06-15
 
+# Dated reminders. Do not type option vests here: with an `equity` section the snapshot
+# adds the next one itself ("Options vest", the grant ids and "+N shares", no amount).
 key_dates:
   - { date: 2030-08-01, label: "Insurance renews", note: "about $900 for 6 months" }
   - { date: 2032-06-15, label: "Car loan paid off" }
@@ -105,3 +118,55 @@ investments:
 display_names:
   "Liabilities:Credit:Summit": "Summit Rewards"
   "Assets:Gift-Card:*": "{name} gift card"
+
+# Display titles for raw bank payees. The snapshot cleans payees on its own (Zelle,
+# NACHA "Des:" ACH rows, confirmation and account numbers, card-payment and transfer
+# wording, interest, ATM, ALL-CAPS); list here only descriptors it cannot name well,
+# such as an employer's payroll code. First match wins: `match` is a case-insensitive
+# regular expression searched in the ledger payee, `title` replaces it, and `narration`
+# fills the row's narration when it has none (the row's own narration always wins).
+# The ledger is never changed; a row whose title changed keeps the original as
+# `rawPayee`. Keep patterns general: no confirmation numbers or one-off ids.
+payees:
+  - { match: "^C\\d+ ACME CORP\\b", title: "Acme Corp", narration: "Payroll" }
+  - { match: "^Acme Corp Des:expense\\b", title: "Acme Corp", narration: "Expense reimbursement" }
+  - { match: "^Harbor Bank Des:cashreward\\b", title: "Harbor Bank", narration: "Cash rewards" }
+  - { match: "^Zelle Payment (From|to) Jordan A Avery\\b", title: "Jordan" }
+
+# Option grants in a private company. Paper value only: never part of net worth.
+# The snapshot's `equity` section has, as of the snapshot date, vested and unvested
+# shares, the cost to exercise, the value net of strike at `fmv` (and at
+# `preferred_price`), the next vest and the fully-vested date.
+#
+# vesting: one schedule per part of the grant. `shares` vest in `months` equal monthly
+# tranches counted from `start`; with `cliff_months` nothing vests until that many
+# months have passed, then all of those tranches vest at once. A grant's vested count
+# is rounded down to a whole share. The schedules must add up to the grant's `shares`.
+equity:
+  company: "Acme Corp"
+  fmv: 2.00                # fair market value of one common share (409A)
+  fmv_date: 2030-05-01
+  preferred_price: 12.50   # last preferred round, the optimistic secondary line
+  grants:
+    - id: "OPT-1"
+      type: "ISO"
+      grant_date: 2028-04-02
+      shares: 20000
+      strike: 0.20
+      expiration: 2038-03-10
+      exercised: 0         # shares already exercised (default 0)
+      # Two halves on separate clocks: each a 1-year cliff, then monthly to month 48.
+      vesting:
+        - { shares: 10000, start: 2028-03-10, months: 48, cliff_months: 12 }
+        - { shares: 10000, start: 2030-03-10, months: 48, cliff_months: 12 }
+    - id: "OPT-2"
+      shares: 5000
+      strike: 0.50
+      vesting:
+        - { shares: 5000, start: 2029-09-01, months: 48 }   # monthly, no cliff
+
+# Merchant logos need no section here. Rows get a `logoDomain` from the web viewer's
+# config (<LEDGER_DIR>/config/ui.yaml: `merchants:` and `accounts.logos`) plus the
+# bundled universal brands. The image URL template (`logos.urlTemplate`) is written only
+# when the logo service's publishable token is available: the NEXT_PUBLIC_LOGO_DEV_TOKEN
+# environment variable, or `--web-env FILE` (the just recipe passes apps/web/.env.local).

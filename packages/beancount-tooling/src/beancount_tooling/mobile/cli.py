@@ -5,10 +5,19 @@ Usage (from the app repo, ``LEDGER_DIR`` set)::
     just mobile-snapshot [--asof YYYY-MM-DD] [--out PATH] [--config PATH]
 
 Reads ``journal/journal.beancount``, ``config/mobile.yaml`` (personal inputs,
-optional), ``journal/plan/cc-cards.json`` (card due days, optional) and
-``statements/billing/`` (closed card statements, optional), and writes
+optional), ``journal/plan/cc-cards.json`` (card due days, optional),
+``journal/plan/cc-expected.json`` (statements that have not closed, optional),
+``statements/billing/`` (closed card statements, optional) and
+``config/ui.yaml`` (merchant logos, optional), and writes
 ``mobile/snapshot.json`` inside the ledger directory. ``--asof`` builds the
 snapshot as of another day; the default is today.
+
+Merchant logos: rows carry a ``logoDomain``; the image URL needs the logo
+service's publishable token, the one the web viewer uses. It is read from the
+``NEXT_PUBLIC_LOGO_DEV_TOKEN`` environment variable, else from the dotenv
+file given with ``--web-env`` (the just recipe passes the web app's
+``.env.local``). The token is written only into the snapshot and is never
+printed. Without it the snapshot has domains but no URL template.
 
 The file is rewritten on every run. Nothing else in the ledger is touched.
 """
@@ -18,6 +27,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -31,11 +41,14 @@ from beancount_tooling.mobile.config import (
     MobileConfigError,
     load_config,
 )
+from beancount_tooling.mobile.logos import UI_CONFIG_FILENAME, load_resolver
 from beancount_tooling.mobile.snapshot import build_snapshot
 from beancount_tooling.paths import get_config_dir, get_journal_file, get_ledger_dir
 
 OUT_RELATIVE = Path("mobile") / "snapshot.json"
 CC_CARDS_RELATIVE = Path("journal") / "plan" / "cc-cards.json"
+CC_EXPECTED_RELATIVE = Path("journal") / "plan" / "cc-expected.json"
+LOGO_TOKEN_VAR = "NEXT_PUBLIC_LOGO_DEV_TOKEN"
 STATEMENTS_RELATIVE = Path("statements")
 
 
@@ -81,6 +94,25 @@ def _load_cc_cards(path: Path) -> dict:
     return doc if isinstance(doc, dict) else {}
 
 
+def _logo_token(env_file: Path | None) -> str | None:
+    """The logo service's publishable token: the environment, else the dotenv
+    file. Never printed or logged."""
+    token = os.environ.get(LOGO_TOKEN_VAR, "").strip()
+    if token:
+        return token
+    if env_file is None:
+        return None
+    try:
+        lines = env_file.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return None
+    for line in lines:
+        key, sep, value = line.strip().removeprefix("export ").partition("=")
+        if sep and key.strip() == LOGO_TOKEN_VAR:
+            return value.strip().strip("\"'") or None
+    return None
+
+
 def _load_statements(ledger_dir: Path) -> dict[str, list[billing.Statement]]:
     """Closed card statements by account; empty when there are none."""
     return billing.read_all(ledger_dir / STATEMENTS_RELATIVE)
@@ -108,6 +140,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         default=None,
         help=f"config file (default: $LEDGER_DIR/config/{CONFIG_FILENAME})",
+    )
+    parser.add_argument(
+        "--web-env",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help=f"dotenv file to read {LOGO_TOKEN_VAR} from when it is not in the "
+        "environment (merchant logo URLs)",
     )
     args = parser.parse_args(argv)
 
@@ -151,6 +191,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         cc_cards=_load_cc_cards(ledger_dir / CC_CARDS_RELATIVE),
         statements=_load_statements(ledger_dir),
         meta=meta,
+        expected=_load_cc_cards(ledger_dir / CC_EXPECTED_RELATIVE),
+        logos=load_resolver(get_config_dir() / UI_CONFIG_FILENAME),
+        logo_token=_logo_token(args.web_env),
     )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -159,12 +202,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         f.write("\n")
 
     groups = snapshot["accounts"]["groups"]
+    rows = snapshot["activity"]["transactions"]
+    with_logo = sum(1 for r in rows if r.get("logoDomain"))
     print(
         f"wrote {out_path} (as of {asof.isoformat()}): "
         f"{sum(len(g['accounts']) for g in groups)} accounts, "
         f"{len(snapshot['activity']['transactions'])} transactions, "
         f"{len(snapshot['plan']['events'])} plan events, "
-        f"{len(snapshot['goals'])} goals"
+        f"{len(snapshot['goals'])} goals, "
+        f"{with_logo} of {len(rows)} transactions with a logo domain"
+        f"{'' if snapshot['logos'] else ' (no logo token: no image URLs)'}"
     )
     return 0
 

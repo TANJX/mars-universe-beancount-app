@@ -2,8 +2,11 @@
 
 import datetime as dt
 import json
+import re
+from pathlib import Path
 
 import pytest
+import yaml
 from beancount import loader
 from beancount_tooling import billing
 from beancount_tooling.mobile import (
@@ -12,8 +15,11 @@ from beancount_tooling.mobile import (
     MobileConfigError,
     build_snapshot,
     cli,
+    equity,
     load_config,
+    logos,
     parse_config,
+    payees,
 )
 
 from . import mobile_ledger
@@ -61,6 +67,7 @@ def snap(ledger_dir, entries):
         mobile_ledger.ASOF,
         cc_cards=mobile_ledger.cc_cards(),
         statements=billing.read_all(ledger_dir / "statements"),
+        logos=logos.load_resolver(ledger_dir / "config" / "ui.yaml"),
     )
 
 
@@ -188,6 +195,39 @@ def test_spend_by_month_matches_the_summary(snap):
     )
 
 
+def test_spend_by_month_splits_fixed_from_day_to_day(snap):
+    assert snap["spend"]["dayToDayExclude"] == ["Home"]
+    months = snap["activity"]["spendByMonth"]
+    for m in months:
+        home = sum(c["value"] for c in m["categories"] if c["name"] == "Home")
+        assert m["fixed"] == pytest.approx(home, abs=0.01)
+        assert m["fixed"] + m["dayToDay"] == pytest.approx(m["total"], abs=0.01)
+        to_date = m["throughDay"]
+        assert to_date["day"] == 18
+        assert to_date["fixed"] + to_date["dayToDay"] == pytest.approx(
+            to_date["total"], abs=0.01
+        )
+        assert to_date["total"] <= m["total"] + 0.01
+    # The month in progress is its own "through today".
+    cur = months[-1]
+    assert cur["throughDay"]["total"] == cur["total"]
+    assert cur["dayToDay"] == pytest.approx(snap["spend"]["flex"]["mtd"], abs=1)
+    # A finished month: rent posts on day 1, so the fixed part is mostly in by
+    # day 18, while day-to-day spending is still short of the full month.
+    may = months[-2]
+    assert may["month"] == "2030-05"
+    assert 0 < may["throughDay"]["dayToDay"] < may["dayToDay"]
+    assert may["throughDay"]["fixed"] >= 1850
+
+
+def test_spend_split_without_excluded_categories(entries):
+    snap = build_snapshot(entries, MobileConfig(), mobile_ledger.ASOF)
+    assert snap["spend"]["dayToDayExclude"] == []
+    for m in snap["activity"]["spendByMonth"]:
+        assert m["fixed"] == 0
+        assert m["dayToDay"] == m["total"]
+
+
 def test_plan_events_run_a_cash_balance(snap):
     plan = snap["plan"]
     events = plan["events"]
@@ -205,6 +245,7 @@ def test_plan_events_run_a_cash_balance(snap):
     assert plan["nextPay"]["amount"] == 2600.0
     assert plan["nextPay"] == next(e for e in events if e["label"] == "Paycheck")
     assert plan["low"]["balance"] == min(e["balance"] for e in events)
+    assert plan["nextPay"]["paycheck"]["net"] == 2600.0
     labels = {e["label"] for e in events}
     assert {"Car loan", "Commuter benefit", "Summit Rewards", "Rent"} <= labels
     assert "Ember" not in labels  # a card in credit has nothing due
@@ -434,7 +475,8 @@ def test_statement_without_card_settings(snap):
     assert driftwood["fundedBy"] == ""
     assert driftwood["fundedByName"] is None
     event = next(e for e in snap["plan"]["events"] if e["label"] == "Driftwood")
-    assert event["note"] == "Paid from"
+    assert event["note"] == "Card payment"
+    assert event["fundedBy"] is None and event["fundedByName"] is None
 
 
 def test_card_without_statements_unchanged(snap, entries):
@@ -468,3 +510,664 @@ def test_snapshot_schema_keys_unchanged(snap, entries):
     plain_top = {c["name"]: c for c in plain["cards"]["accounts"]}
     for name in ("Summit", "Cobalt", "Ember"):
         assert set(top[name]) == set(plain_top[name])
+
+
+# ---- cash exclusion ------------------------------------------------------------
+
+
+def test_excluded_account_is_not_cash_but_still_net_worth(snap, entries, ledger_dir):
+    groups = {g["id"]: g for g in snap["accounts"]["groups"]}
+    assert "Commuter" not in {a["name"] for a in snap["cash"]["accounts"]}
+    assert all(r["account"] != "Assets:Checking:Commuter" for r in groups["cash"]["accounts"])
+    row = next(
+        r for r in groups["other"]["accounts"] if r["account"] == "Assets:Checking:Commuter"
+    )
+    assert row["cashExcluded"] is True
+    assert (row["name"], row["displayName"], row["value"]) == (
+        "Commuter",
+        "Commuter card",
+        86.0,
+    )
+    # Same ledger without the exclusion: 86.00 more cash, the same net worth.
+    doc = mobile_ledger.MOBILE_YAML.replace(
+        'cash_exclude: ["Assets:Checking:Commuter"]', "cash_exclude: []"
+    )
+    counted = build_snapshot(
+        entries,
+        parse_config(yaml.safe_load(doc)),
+        mobile_ledger.ASOF,
+        cc_cards=mobile_ledger.cc_cards(),
+        statements=billing.read_all(ledger_dir / "statements"),
+    )
+    assert counted["netWorth"]["value"] == snap["netWorth"]["value"]
+    assert counted["cash"]["total"] == pytest.approx(snap["cash"]["total"] + 86.0)
+    for key in ("afterCards", "spendable"):
+        assert counted["float"][key] == pytest.approx(snap["float"][key] + 86.0)
+    assert counted["plan"]["startCash"] == pytest.approx(snap["plan"]["startCash"] + 86.0)
+    assert counted["netWorth"]["series"][-1]["cash"] == pytest.approx(
+        snap["netWorth"]["series"][-1]["cash"] + 86, abs=1
+    )
+    assert snap["plan"]["startCash"] == snap["cash"]["total"]
+
+
+def test_deposit_into_excluded_account_moves_no_projected_cash(snap):
+    events = snap["plan"]["events"]
+    i, e = next((i, e) for i, e in enumerate(events) if e["label"] == "Commuter benefit")
+    assert (e["kind"], e["amount"], e["nonCashAmount"]) == ("info", 0.0, 120.0)
+    assert e["account"] == "Assets:Checking:Commuter"
+    assert e["note"] == "Commuter card, not counted as cash"
+    assert e["balance"] == events[i - 1]["balance"]
+    raw = next(u for u in snap["upcoming"] if u["note"] == "Commuter benefit load")
+    assert (raw["amount"], raw["nonCashAmount"], raw["kind"]) == (0.0, 120.0, "income")
+    assert all("nonCashAmount" not in u for u in snap["upcoming"] if u is not raw)
+
+
+# ---- paycheck breakdown --------------------------------------------------------
+
+
+def test_paycheck_carries_its_contributions(snap):
+    pays = [e for e in snap["plan"]["events"] if e["label"] == "Paycheck"]
+    assert [e["date"] for e in pays] == ["2030-06-28", "2030-07-13", "2030-07-28"]
+    first = pays[0]["paycheck"]
+    assert first["net"] == pays[0]["amount"] == 2600.0
+    # The 401k leg of the same entry, and the benefit deposit that lands ten
+    # days later (before the next payday) belong to this paycheck.
+    assert first["contributions"] == [
+        {
+            "name": "401k",
+            "amount": 400.0,
+            "account": "Assets:Investment:Meridian:401k",
+            "date": "2030-06-28",
+        },
+        {
+            "name": "Commuter benefit",
+            "amount": 120.0,
+            "account": "Assets:Checking:Commuter",
+            "date": "2030-07-08",
+        },
+    ]
+    assert first["contributionsTotal"] == 520.0
+    assert first["total"] == 3120.0
+    assert pays[1]["paycheck"]["contributionsTotal"] == 400.0
+    assert pays[1]["paycheck"]["total"] == 3000.0
+    assert snap["plan"]["nextPay"]["paycheck"] == first
+    assert all("paycheck" not in e for e in snap["plan"]["events"] if e not in pays)
+
+
+# ---- equity --------------------------------------------------------------------
+
+
+def _equity_cfg():
+    return load_config_text(mobile_ledger.MOBILE_YAML).equity
+
+
+def load_config_text(text):
+    return parse_config(yaml.safe_load(text))
+
+
+def test_two_half_grant_vests_like_the_real_one():
+    # Same structure as the grant this was written for: 28 monthly tranches of
+    # the first half are due, the second half is 4 months into its cliff.
+    grant_a, grant_b = _equity_cfg().grants
+    day = dt.date(2030, 8, 2)
+    assert equity.vested_shares(grant_a, day) == 5833  # 10000 x 28/48 = 5833.33
+    assert equity.vested_shares(grant_b, day) == 1145  # 5000 x 11/48 = 1145.83
+    # First-half cliff: nothing the day before, a quarter of the half on it.
+    assert equity.vested_shares(grant_a, dt.date(2029, 3, 9)) == 0
+    assert equity.vested_shares(grant_a, dt.date(2029, 3, 10)) == 2500
+    # Second-half cliff two years later, on top of the first half's 36/48.
+    assert equity.vested_shares(grant_a, dt.date(2031, 3, 9)) == 7291
+    assert equity.vested_shares(grant_a, dt.date(2031, 3, 10)) == 7500 + 2500
+    assert equity.vested_shares(grant_a, dt.date(2032, 3, 10)) == 10000 + 5000
+    assert equity.vested_shares(grant_a, dt.date(2034, 3, 10)) == 20000
+    assert equity.fully_vested(grant_a) == dt.date(2034, 3, 10)
+    assert equity.next_vest(grant_a, dt.date(2034, 3, 10)) is None
+    # No cliff: the first tranche a month after the start.
+    assert equity.vested_shares(grant_b, dt.date(2029, 9, 30)) == 0
+    assert equity.vested_shares(grant_b, dt.date(2029, 10, 1)) == 104
+
+
+def test_equity_section_values_the_grants(snap):
+    eq = snap["equity"]
+    a, b = eq["grants"]
+    assert (a["vested"], a["unvested"]) == (5625, 14375)  # 27 tranches, half one
+    assert (b["vested"], b["unvested"]) == (937, 4063)  # 9 x 104.17 = 937.5
+    assert (eq["shares"], eq["vested"], eq["unvested"]) == (25000, 6562, 18438)
+    assert eq["vestedFraction"] == 0.2625
+    assert a["exerciseCostVested"] == 1125.0 and b["exerciseCostVested"] == 468.5
+    assert eq["exerciseCostVested"] == 1593.5
+    assert eq["exerciseCost"] == 6500.0
+    # Net of strike at the common FMV: 5625 x 1.80 + 937 x 1.50.
+    assert eq["vestedValue"] == 11530.5
+    assert eq["totalValue"] == 43500.0
+    assert eq["vestedValuePreferred"] == pytest.approx(5625 * 12.3 + 937 * 12.0)
+    assert eq["totalValuePreferred"] == 306000.0
+    assert a["nextVest"] == {"date": "2030-07-10", "shares": 208}
+    assert eq["nextVest"] == {
+        "date": "2030-07-01",
+        "shares": 104,
+        "grants": [{"id": "OPT-2", "shares": 104}],
+    }
+    assert (a["fullyVested"], b["fullyVested"]) == ("2034-03-10", "2033-09-01")
+    assert eq["fullyVested"] == "2034-03-10"
+    assert (eq["fmv"], eq["fmvDate"], eq["preferredPrice"]) == (2.0, "2030-05-01", 12.5)
+
+
+def test_equity_stays_out_of_net_worth(snap, entries, ledger_dir):
+    text = mobile_ledger.MOBILE_YAML.split("equity:")[0]
+    without = build_snapshot(
+        entries,
+        load_config_text(text),
+        mobile_ledger.ASOF,
+        cc_cards=mobile_ledger.cc_cards(),
+        statements=billing.read_all(ledger_dir / "statements"),
+    )
+    assert without["equity"] is None
+    assert without["netWorth"] == snap["netWorth"]
+    assert without["accounts"] == snap["accounts"]
+
+
+def test_next_vest_is_a_computed_key_date(snap, entries, ledger_dir):
+    vest = {"date": "2030-07-01", "label": "Options vest", "note": "OPT-2, +104 shares"}
+    assert snap["equity"]["nextVest"]["shares"] == 104
+    assert vest in snap["keyDates"]
+    assert snap["keyDates"] == snap["plan"]["keyDates"]
+    dates = [k["date"] for k in snap["keyDates"]]
+    assert dates == sorted(dates)
+    # Inside the horizon it is also a plan event: information only, no money.
+    events = snap["plan"]["events"]
+    i = next(i for i, e in enumerate(events) if e["label"] == "Options vest")
+    assert events[i]["kind"] == "info" and events[i]["amount"] == 0.0
+    assert events[i]["note"] == "OPT-2, +104 shares"
+    assert events[i]["balance"] == events[i - 1]["balance"]
+
+    without = build_snapshot(
+        entries,
+        load_config_text(mobile_ledger.MOBILE_YAML.split("equity:")[0]),
+        mobile_ledger.ASOF,
+        cc_cards=mobile_ledger.cc_cards(),
+        statements=billing.read_all(ledger_dir / "statements"),
+    )
+    assert all(k["label"] != "Options vest" for k in without["keyDates"])
+    assert without["keyDates"] == [k for k in snap["keyDates"] if k != vest]
+    for key in ("netWorth", "cash", "float"):
+        assert without[key] == snap[key]
+    assert without["plan"]["low"] == snap["plan"]["low"]
+    strip = lambda rows: [(e["date"], e["label"], e["amount"], e["balance"]) for e in rows]
+    assert strip(without["plan"]["events"]) == strip(
+        [e for e in events if e["label"] != "Options vest"]
+    )
+
+
+def test_vest_key_date_names_every_grant_vesting_that_day():
+    section = {
+        "nextVest": {
+            "date": "2030-07-01",
+            "shares": 1312,
+            "grants": [{"id": "OPT-1", "shares": 1208}, {"id": "OPT-2", "shares": 104}],
+        }
+    }
+    assert equity.vest_key_date(section) == {
+        "date": "2030-07-01",
+        "label": "Options vest",
+        "note": "OPT-1 and OPT-2, +1,312 shares",
+    }
+    one = {"nextVest": {"date": "2030-07-01", "shares": 1, "grants": [{"id": "OPT-2", "shares": 1}]}}
+    assert equity.vest_key_date(one)["note"] == "OPT-2, +1 share"
+    assert equity.vest_key_date(None) is None
+    assert equity.vest_key_date({"nextVest": None}) is None
+
+
+@pytest.mark.parametrize(
+    "grant, message",
+    [
+        ({"id": "g", "shares": 100, "strike": 1}, "at least one schedule"),
+        (
+            {
+                "id": "g",
+                "shares": 100,
+                "strike": 1,
+                "vesting": [{"shares": 90, "start": "2030-01-01", "months": 48}],
+            },
+            "do not add up",
+        ),
+        (
+            {
+                "id": "g",
+                "shares": 100,
+                "strike": 1,
+                "vesting": [
+                    {
+                        "shares": 100,
+                        "start": "2030-01-01",
+                        "months": 12,
+                        "cliff_months": 13,
+                    }
+                ],
+            },
+            "longer than",
+        ),
+    ],
+)
+def test_equity_config_errors(grant, message):
+    with pytest.raises(MobileConfigError, match=message):
+        parse_config({"equity": {"grants": [grant]}})
+
+
+# ---- merchant logos ------------------------------------------------------------
+
+
+def test_rows_carry_a_logo_domain_only_when_one_resolves(snap):
+    rows = snap["activity"]["transactions"]
+
+    def one(**match):
+        return next(r for r in rows if all(r.get(k) == v for k, v in match.items()))
+
+    assert one(payee="Greenleaf Market")["logoDomain"] == "greenleaf.example"
+    # A registry merchant without a domain, and an unknown payee: no key at all.
+    assert "logoDomain" not in one(payee="Paper Lantern Books")
+    assert "logoDomain" not in one(payee="Corner Pharmacy")
+    # Income takes the income account's merchant, transfers the other side's.
+    assert one(rawPayee="Interest Payment")["logoDomain"] == "harborbank.example"
+    assert one(rawPayee="Transfer to savings")["logoDomain"] == "harborbank.example"
+    # Investment rows and pure rebates show a glyph on the web: no logo here.
+    assert all("logoDomain" not in r for r in rows if r["kind"] == "investment")
+    assert "logoDomain" not in one(narration="Statement credit")
+    recent = {r["payee"]: r for r in snap["recent"]}
+    assert recent["Blue Door Bistro"]["logoDomain"] == "bluedoor.example"
+    assert "logoDomain" not in recent["Harvest Lane Co-op"]
+
+
+def test_logo_url_template_needs_a_token(entries):
+    resolver = logos.build_resolver({})
+    bare = build_snapshot(entries, MobileConfig(), mobile_ledger.ASOF, logos=resolver)
+    assert bare["logos"] is None
+    with_token = build_snapshot(
+        entries, MobileConfig(), mobile_ledger.ASOF, logos=resolver, logo_token="pk_test"
+    )
+    assert with_token["logos"] == {
+        "provider": "logo.dev",
+        "urlTemplate": "https://img.logo.dev/{domain}?token=pk_test&size={size}&format=png&retina=true",
+    }
+
+
+def test_payee_matching_follows_the_web_rules():
+    r = logos.build_resolver(
+        {"merchants": {"Corner Cafe": {"domain": "cafe.example", "aliases": ["Cnr Cafe"]}}}
+    )
+    assert r.match("Sq *Corner Cafe 10001").domain == "cafe.example"  # rail + ZIP
+    assert r.match("CNR CAFE #1234").domain == "cafe.example"  # alias, terminal id
+    assert r.match("Tm *Some Arena Show").name == "Ticketmaster"
+    assert r.match("Public Service Des:pseg Id:123 Indn:Someone").name == "PSEG"
+    # A brand must start on a word boundary, and a short one must be a whole word.
+    assert r.match("Pineapple Express Diner") is None
+    assert r.match("Citizen Watch Repair") is None
+    # `<brand>*<detail>`: a known prefix is the brand, not a name inside the detail.
+    assert r.match("Uber.Com*microsoft Th").name == "Uber"
+    assert r.domain("Unknown", accounts=("Assets:Checking:Nowhere",)) is None
+
+
+def test_bundled_merchants_match_the_web_defaults():
+    source = (
+        Path(__file__).resolve().parents[3]
+        / "apps/web/lib/config/defaults/merchants.ts"
+    )
+    if not source.is_file():
+        pytest.skip("web app sources not present")
+    body = source.read_text(encoding="utf-8").split("MERCHANT_DEFAULTS")[-1]
+    web = []
+    for block in re.findall(r"\{(.*?)\}", body, re.S):
+        name = re.search(r'name:\s*"([^"]+)"', block)
+        if not name:
+            continue
+        domain = re.search(r'domain:\s*"([^"]+)"', block)
+        aliases = re.search(r"aliases:\s*\[(.*?)\]", block, re.S)
+        web.append(
+            (
+                name.group(1),
+                domain.group(1) if domain else None,
+                tuple(re.findall(r'"([^"]+)"', aliases.group(1))) if aliases else (),
+            )
+        )
+    assert tuple(web) == logos.DEFAULT_MERCHANTS
+
+
+def test_cli_reads_the_logo_token_without_printing_it(
+    ledger_dir, tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setenv("LEDGER_DIR", str(ledger_dir))
+    monkeypatch.delenv(cli.LOGO_TOKEN_VAR, raising=False)
+    env = tmp_path / "web.env"
+    env.write_text(f'OTHER=1\n{cli.LOGO_TOKEN_VAR}="pk_from_file"\n', encoding="utf-8")
+    out = tmp_path / "snapshot.json"
+    assert cli.main(["--asof", "2030-06-18", "--out", str(out), "--web-env", str(env)]) == 0
+    snapshot = json.loads(out.read_text(encoding="utf-8"))
+    assert "token=pk_from_file&" in snapshot["logos"]["urlTemplate"]
+    printed = capsys.readouterr()
+    assert "pk_from_file" not in printed.out + printed.err
+    # No token anywhere: domains only.
+    assert cli.main(["--asof", "2030-06-18", "--out", str(out)]) == 0
+    snapshot = json.loads(out.read_text(encoding="utf-8"))
+    assert snapshot["logos"] is None
+    assert any("logoDomain" in r for r in snapshot["activity"]["transactions"])
+
+
+# ---- card events ---------------------------------------------------------------
+
+
+def test_card_event_uses_the_open_statement(snap):
+    events = [e for e in snap["plan"]["events"] if e["kind"] == "card"]
+
+    def of(card):
+        return [e for e in events if e["account"] == f"Liabilities:Credit:{card}"]
+
+    driftwood = _cards(snap)["Driftwood"]
+    assert (driftwood["statementId"], driftwood["statementRemaining"]) == (
+        "2030-06-03",
+        88.1,
+    )
+    billed, later = of("Driftwood")
+    # The statement on its due date, then what was charged since a month on.
+    assert (billed["date"], billed["amount"], billed["basis"]) == (
+        "2030-06-28",
+        -88.1,
+        "statement",
+    )
+    assert billed["statementId"] == "2030-06-03"
+    assert (later["date"], later["basis"]) == ("2030-07-28", "unbilled")
+    assert "statementId" not in later
+    assert billed["amount"] + later["amount"] == pytest.approx(-driftwood["value"])
+    # Never more than is owed now (credits since the statement closed).
+    cobalt = _cards(snap)["Cobalt"]
+    assert cobalt["statementRemaining"] == 412.34 > cobalt["value"]
+    (only,) = of("Cobalt")
+    assert (only["amount"], only["basis"]) == (-cobalt["value"], "statement")
+    assert only["note"] == "Card payment from Harbor"
+    assert (only["fundedBy"], only["fundedByName"]) == ("Harbor", "Harbor")
+    # No statement on record: the whole balance on the next due day.
+    (summit,) = of("Summit")
+    assert (summit["basis"], summit["amount"]) == (
+        "balance",
+        -_cards(snap)["Summit"]["value"],
+    )
+    assert "statementId" not in summit
+    assert _cards(snap)["Summit"]["statementRemaining"] is None
+
+
+def test_statement_payments_since_close_reduce_what_is_due(entries):
+    # Cobalt's 05-01 statement (301.15) is open on 05-25, three days after the
+    # monthly payment landed on the card.
+    snapshot = build_snapshot(
+        entries,
+        MobileConfig(),
+        dt.date(2030, 5, 25),
+        cc_cards=mobile_ledger.cc_cards(),
+        statements={
+            "Liabilities:Credit:Cobalt": [
+                _statement("Cobalt", "2030-05-01", "301.15", "2030-05-26")
+            ]
+        },
+    )
+    cobalt = _cards(snapshot)["Cobalt"]
+    paid = sum(
+        r["amount"]
+        for r in snapshot["activity"]["transactions"]
+        if r["kind"] == "card payment"
+        and r["account"] == "Cobalt"
+        and r["date"] > "2030-05-01"
+    )
+    assert paid > 0
+    assert cobalt["statement"] == 301.15
+    assert cobalt["statementRemaining"] == pytest.approx(max(301.15 - paid, 0), abs=0.01)
+
+
+def test_expected_statement_dates_the_unbilled_charges(snap, entries, ledger_dir):
+    cobalt = _cards(snap)["Cobalt"]
+    planned = build_snapshot(
+        entries,
+        load_config(ledger_dir / "config" / "mobile.yaml"),
+        mobile_ledger.ASOF,
+        cc_cards=mobile_ledger.cc_cards(),
+        statements=billing.read_all(ledger_dir / "statements"),
+        expected={
+            "Liabilities:Credit:Cobalt": {
+                "id": "2030-07-01",
+                "dueDate": "2030-07-24",
+                "estimatedBalance": "150.00",
+            },
+            # Older than the statement on record: ignored.
+            "Liabilities:Credit:Atlas": {"id": "2030-05-01", "dueDate": "2030-07-01"},
+        },
+    )
+    events = [
+        e
+        for e in planned["plan"]["events"]
+        if e.get("account") == "Liabilities:Credit:Cobalt"
+    ]
+    assert [(e["date"], e["amount"], e["basis"]) for e in events] == [
+        ("2030-06-26", -cobalt["value"], "statement"),
+        ("2030-07-24", -150.0, "expected"),
+    ]
+    assert events[1]["statementId"] == "2030-07-01"
+    atlas = [
+        e["basis"]
+        for e in planned["plan"]["events"]
+        if e.get("account") == "Liabilities:Credit:Atlas"
+    ]
+    assert "expected" not in atlas
+
+
+# ---- payee display names ---------------------------------------------------------
+
+Ctx = payees.RowContext
+
+
+def _show(payee, narration="", **ctx):
+    d = payees.display(payee, narration, Ctx(**ctx) if ctx else None)
+    return d.payee, d.narration
+
+
+@pytest.mark.parametrize(
+    "raw, ctx, expected",
+    [
+        # NACHA: company and description; ids, Indn and Co Id dropped.
+        (
+            "C123456 Globex Corp Des:payroll Id:p0a1b2c3d4 Indn:Doe Jane Co Id:1234567890 PPD",
+            {"kind": "income"},
+            ("Globex Corp", "Payroll"),
+        ),
+        (
+            "GLOBEX CORP DES:CASHREWARD ID:X1 INDN:DOE JANE CO ID:1234567890 PPD",
+            {"kind": "income"},
+            ("Globex Corp", "Cash reward"),
+        ),
+        (
+            "Sample Pay Des:cashout Id:9876543210 Indn:Jane Doe Co Id:5555555555 Web",
+            {"kind": "transfer"},
+            ("Sample Pay", "Cash-out"),
+        ),
+        # A numeric description says nothing.
+        (
+            "Summit Card Des:4455667788 Id: Indn:Jane Doe Co Id:1111111111 PPD",
+            {"kind": "transfer", "amount": -50},
+            ("Summit Card", ""),
+        ),
+        # Zelle: the counterparty is the title, the memo fills the narration.
+        (
+            "Zelle Payment From Jordan Avery for Dinner; Conf# Q1w2e3r4t",
+            {"kind": "transfer"},
+            ("Jordan Avery", "Dinner"),
+        ),
+        (
+            "Zelle Payment to Riley Brooks Conf# Abc123xyz",
+            {"kind": "transfer"},
+            ("Riley Brooks", ""),
+        ),
+        (
+            "TD Zelle Received 123abc456def Zelle Riley Brooks",
+            {"kind": "transfer"},
+            ("Riley Brooks", ""),
+        ),
+        # Card-side payment wording: structure names it.
+        ("Payment From CHK 1234 Conf#m01234567890", {"kind": "card payment"}, ("Card payment", "")),
+        ("Autopay Payment - Thank You", {"kind": "card payment"}, ("Card payment", "Autopay")),
+        (
+            "Online/Mobile Payment Conf#m09876543210",
+            {"kind": "card payment"},
+            ("Card payment", ""),
+        ),
+        # Own-account transfer wording.
+        ("Internal Transfer to Personal Savings", {"kind": "transfer"}, ("Transfer to savings", "")),
+        ("ACH Deposit from Example Bank", {"kind": "transfer"}, ("Transfer from Example Bank", "")),
+        (
+            "ACH Online transfer to EXAMPLE BANK, N.A. ********9999",
+            {"kind": "transfer"},
+            ("Transfer to Example Bank", ""),
+        ),
+        ("ACH Withdrawal to Account", {"kind": "transfer", "amount": -5}, ("Transfer out", "")),
+        (
+            "Online Scheduled Payment to Acct# 1111 Confirmation# 2222222222",
+            {"kind": "transfer", "amount": -90, "counterpart": "Summit Rewards"},
+            ("Transfer to Summit Rewards", ""),
+        ),
+        (
+            "Contribution to Roth IRA from SAMPLE CHECKING - 1234",
+            {"kind": "investment"},
+            ("Roth IRA contribution", "From Sample Checking"),
+        ),
+        ("Summit Card Epayment Ach PMT", {"kind": "transfer"}, ("Summit Card", "Payment")),
+        # Interest wording, from the row's category.
+        ("Iod Interest Paid", {"kind": "income", "category": "Interest"}, ("Interest", "")),
+        ("Interest on cash balance", {"kind": "income", "category": "Interest"}, ("Interest", "")),
+        # ATM: the location becomes the narration.
+        (
+            "Examplebank Atm 01/02 #000001234 Withdrwl Main St and First Springfield Il",
+            {"kind": "transfer"},
+            ("ATM withdrawal", "Main St and First Springfield IL"),
+        ),
+        ("Offer:corner bakery", {"kind": "income"}, ("Corner Bakery", "Card offer")),
+        # Re-casing shouting text, short consonant-only words stay upper case.
+        ("SAKURA RAMEN HOUSE", {"kind": "expense"}, ("Sakura Ramen House", "")),
+    ],
+)
+def test_payee_display_families(raw, ctx, expected):
+    assert _show(raw, **ctx) == expected
+
+
+def test_zelle_with_stray_quotes():
+    raw = 'Zelle Payment From Jordan Avery for Pasta"; Conf# Wq12er34t"'
+    assert _show(raw, kind="transfer") == ("Jordan Avery", "Pasta")
+    # The row's own narration beats the bank memo.
+    assert _show(raw, "Pasta night, my share", kind="transfer") == (
+        "Jordan Avery",
+        "Pasta night, my share",
+    )
+
+
+@pytest.mark.parametrize(
+    "payee, narration, ctx",
+    [
+        ("Blue Door Bistro", "Team dinner", {"kind": "expense"}),
+        ("Joe's Pizza", "", {"kind": "expense"}),
+        ("IKEA", "", {"kind": "expense"}),
+        # Merchant names that look like bank wording stay put on expense rows.
+        ("Harbor Light Payment", "", {"kind": "expense"}),
+        ("Transfer Station Cafe", "", {"kind": "expense"}),
+        ("Greenleaf Market", "", {}),
+        ("Dividend from Total Market ETF", "", {"kind": "income", "category": "Dividend"}),
+        ("", "", {"kind": "transfer"}),
+        ("", "Opening balances", {"kind": "transfer"}),
+    ],
+)
+def test_clean_and_empty_payees_pass_through(payee, narration, ctx):
+    d = payees.display(payee, narration, Ctx(**ctx) if ctx else None)
+    assert (d.payee, d.narration, d.changed) == (payee, narration, False)
+
+
+def test_personal_labels_win_and_only_fill_an_empty_narration():
+    labels = (
+        payees.PayeeLabel(re.compile(r"^C\d+ Globex\b", re.I), "Globex", "Payroll"),
+        payees.PayeeLabel(re.compile(r"^Zelle Payment From J Avery\b", re.I), "Jordan"),
+    )
+    raw = "C123456 GLOBEX PAYROLL"
+    assert payees.display(raw, "", Ctx(kind="income"), labels).payee == "Globex"
+    assert payees.display(raw, "", Ctx(kind="income"), labels).narration == "Payroll"
+    assert payees.display(raw, "June bonus", None, labels).narration == "June bonus"
+    # A label without a narration keeps the generic memo.
+    d = payees.display("Zelle Payment From J Avery for Lunch; Conf# X1", "", None, labels)
+    assert (d.payee, d.narration) == ("Jordan", "Lunch")
+    assert d.raw == "Zelle Payment From J Avery for Lunch; Conf# X1"
+
+
+def test_title_and_narration_do_not_repeat():
+    labels = (payees.PayeeLabel(re.compile("^Summit CCB"), "Summit Card", "Card payment"),)
+    d = payees.display("Summit CCB Payment", "Summit Card payment", None, labels)
+    assert (d.payee, d.narration) == ("Summit Card", "Payment")
+    d = payees.display("Summit CCB Payment", "summit card", None, labels)
+    assert (d.payee, d.narration) == ("Summit Card", "")
+    d = payees.display("Summit CCB Payment", "Summit Card \u2014 June", None, labels)
+    assert d.narration == "June"
+
+
+def test_payee_labels_config():
+    cfg = load_config_text(
+        'payees:\n  - { match: "^Acme\\\\b", title: "Acme", narration: "Payroll" }\n'
+    )
+    assert cfg.payees[0].title == "Acme" and cfg.payees[0].pattern.search("ACME PAYROLL")
+    with pytest.raises(MobileConfigError, match="not a valid pattern"):
+        parse_config({"payees": [{"match": "([", "title": "x"}]})
+    with pytest.raises(MobileConfigError, match="missing 'title'"):
+        parse_config({"payees": [{"match": "x"}]})
+    with pytest.raises(MobileConfigError, match="unknown key"):
+        parse_config({"payees": [{"match": "x", "title": "y", "kind": "z"}]})
+
+
+def test_sample_snapshot_shows_display_names(snap):
+    rows = snap["activity"]["transactions"]
+    by_raw = {r["rawPayee"]: r for r in rows if "rawPayee" in r}
+    zelle = next(r for k, r in by_raw.items() if k.startswith("Zelle Payment From Jordan"))
+    assert (zelle["payee"], zelle["narration"]) == ("Jordan Avery", "Dinner")
+    acme = next(r for k, r in by_raw.items() if k.startswith("Acme Corp Des:expense"))
+    assert (acme["payee"], acme["narration"]) == ("Acme Corp", "Expense reimbursement")
+    reward = next(r for k, r in by_raw.items() if k.startswith("HARBOR BANK DES:"))
+    assert (reward["payee"], reward["narration"]) == ("Harbor Bank", "Cash reward")
+    assert any(r["payee"] == "Card payment" for r in rows if r["kind"] == "card payment")
+    assert any(r["payee"] == "ATM withdrawal" for r in rows)
+    # Rows the layer leaves alone carry no rawPayee.
+    assert all("rawPayee" not in r for r in rows if r["payee"] == "Greenleaf Market")
+
+
+def test_payee_cleanup_changes_only_display_text(ledger_dir, entries, snap):
+    cfg = load_config(ledger_dir / "config" / "mobile.yaml")
+    raw = build_snapshot(
+        entries,
+        cfg,
+        mobile_ledger.ASOF,
+        cc_cards=mobile_ledger.cc_cards(),
+        statements=billing.read_all(ledger_dir / "statements"),
+        logos=logos.load_resolver(ledger_dir / "config" / "ui.yaml"),
+        clean_payees=False,
+    )
+    on, off = snap["activity"]["transactions"], raw["activity"]["transactions"]
+    assert any("rawPayee" in r for r in on)
+    assert all("rawPayee" not in r for r in off)
+    keys = ("id", "date", "kind", "category", "subcategory", "amount", "account", "accountPath")
+    for a, b in zip(on, off, strict=True):
+        assert [a.get(k) for k in keys] == [b.get(k) for k in keys]
+        assert a.get("logoDomain") == b.get("logoDomain")
+        assert a.get("rawPayee", a["payee"]) == b["payee"]
+
+    def strip(s):
+        s = json.loads(json.dumps(s))
+        for r in s["activity"]["transactions"]:
+            for k in ("payee", "narration", "rawPayee"):
+                r.pop(k, None)
+        for r in s["recent"]:
+            for k in ("payee", "note", "rawPayee"):
+                r.pop(k, None)
+        for r in s["upcoming"]:
+            for k in ("label", "note", "rawLabel"):
+                r.pop(k, None)
+        return s
+
+    assert strip(snap) == strip(raw)

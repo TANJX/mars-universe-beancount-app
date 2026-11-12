@@ -1,8 +1,9 @@
 """Load and validate ``$LEDGER_DIR/config/mobile.yaml``.
 
 Everything personal about a snapshot lives in that file: goals, the emergency
-fund, loans, key dates, display names and the rules that label upcoming cash
-events. The generator itself only knows the shape of a beancount ledger.
+fund, loans, key dates, display names, the rules that label upcoming cash
+events and the labels that name raw payees. The generator itself only knows
+the shape of a beancount ledger.
 
 A missing file is a valid, empty config: the snapshot then has balances,
 spending and activity but no goals, key dates or labelled events.
@@ -11,11 +12,14 @@ spending and activity but no goals, key dates or labelled events.
 from __future__ import annotations
 
 import datetime as dt
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from beancount_tooling.mobile.payees import PayeeLabel
 
 CONFIG_FILENAME = "mobile.yaml"
 
@@ -47,10 +51,21 @@ class Accounts:
     clearing: tuple[str, ...] = ("Assets:Pending-Transfer",)
     # Other accounts that can pay for an expense (after cards and checking).
     paying: tuple[str, ...] = ("Assets:Transit", "Assets:Gift-Card")
+    # Checking or savings accounts that are not spendable money (a benefit
+    # card's balance). They leave the cash group, cash totals and projected
+    # cash, and are listed under "other". Net worth still counts them.
+    cash_exclude: tuple[str, ...] = ()
 
     @property
     def cash(self) -> tuple[str, ...]:
         return self.checking + self.savings
+
+    def is_cash(self, account: str) -> bool:
+        """Checking or savings, and not excluded from cash."""
+        return account.startswith(self.cash) and not self.cash_excluded(account)
+
+    def cash_excluded(self, account: str) -> bool:
+        return bool(self.cash_exclude) and account.startswith(self.cash_exclude)
 
 
 @dataclass(frozen=True)
@@ -132,6 +147,48 @@ class EventRule:
 
 
 @dataclass(frozen=True)
+class VestingSchedule:
+    """One vesting schedule: ``shares`` vest in ``months`` equal monthly
+    tranches counted from ``start``; nothing vests before ``cliff_months``
+    have passed, and then every tranche up to that month vests at once."""
+
+    shares: float
+    start: dt.date
+    months: int
+    cliff_months: int = 0
+
+
+@dataclass(frozen=True)
+class EquityGrant:
+    """An option grant. A grant with an unusual structure (two halves on
+    different clocks) lists one schedule per part."""
+
+    id: str
+    shares: float
+    strike: float
+    vesting: tuple[VestingSchedule, ...]
+    name: str | None = None
+    type: str | None = None
+    grant_date: dt.date | None = None
+    expiration: dt.date | None = None
+    exercised: float = 0.0
+
+
+@dataclass(frozen=True)
+class Equity:
+    """Option grants in a private company: paper value, never in net worth."""
+
+    grants: tuple[EquityGrant, ...]
+    company: str | None = None
+    # Fair market value of one common share (a 409A valuation).
+    fmv: float | None = None
+    fmv_date: dt.date | None = None
+    # Price per share of the last preferred round.
+    preferred_price: float | None = None
+    note: str | None = None
+
+
+@dataclass(frozen=True)
 class MobileConfig:
     accounts: Accounts = field(default_factory=Accounts)
     horizon_until: dt.date | None = None
@@ -145,6 +202,8 @@ class MobileConfig:
     investments: tuple[InvestmentGroup, ...] = ()
     event_rules: tuple[EventRule, ...] = ()
     display_names: dict[str, str] = field(default_factory=dict)
+    equity: Equity | None = None
+    payees: tuple[PayeeLabel, ...] = ()
     path: Path | None = None
 
     def horizon(self, asof: dt.date) -> dt.date:
@@ -318,6 +377,123 @@ def _parse_investment(raw: Any, i: int) -> InvestmentGroup:
     )
 
 
+def _int(m: dict, key: str, where: str, default: int | None = None) -> int:
+    v = m.get(key, default)
+    if v is None:
+        raise MobileConfigError(f"{where}: missing '{key}'")
+    if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+        raise MobileConfigError(f"{where}: '{key}' must be a whole number, 0 or more")
+    return v
+
+
+def _parse_grant(raw: Any, i: int) -> EquityGrant:
+    where = f"equity.grants[{i}]"
+    m = _mapping(raw, where)
+    _known(
+        m,
+        {
+            "id",
+            "name",
+            "type",
+            "grant_date",
+            "shares",
+            "strike",
+            "expiration",
+            "exercised",
+            "vesting",
+        },
+        where,
+    )
+    shares = _num(m, "shares", where)
+    schedules = []
+    for j, raw_s in enumerate(_list(m.get("vesting"), f"{where}.vesting")):
+        sw = f"{where}.vesting[{j}]"
+        sm = _mapping(raw_s, sw)
+        _known(sm, {"shares", "start", "months", "cliff_months"}, sw)
+        months = _int(sm, "months", sw)
+        cliff = _int(sm, "cliff_months", sw, 0)
+        if months < 1:
+            raise MobileConfigError(f"{sw}: 'months' must be at least 1")
+        if cliff > months:
+            raise MobileConfigError(f"{sw}: 'cliff_months' is longer than 'months'")
+        schedules.append(
+            VestingSchedule(
+                shares=_num(sm, "shares", sw),
+                start=_date(sm, "start", sw),
+                months=months,
+                cliff_months=cliff,
+            )
+        )
+    if not schedules:
+        raise MobileConfigError(f"{where}: 'vesting' needs at least one schedule")
+    if abs(sum(s.shares for s in schedules) - shares) > 1e-6:
+        raise MobileConfigError(
+            f"{where}: the vesting schedules do not add up to 'shares'"
+        )
+    exercised = _num(m, "exercised", where, required=False) or 0.0
+    if not 0 <= exercised <= shares:
+        raise MobileConfigError(f"{where}: 'exercised' must be between 0 and 'shares'")
+    return EquityGrant(
+        id=_str(m, "id", where),
+        name=_str(m, "name", where, required=False),
+        type=_str(m, "type", where, required=False),
+        grant_date=_date(m, "grant_date", where, required=False),
+        shares=shares,
+        strike=_num(m, "strike", where),
+        expiration=_date(m, "expiration", where, required=False),
+        exercised=exercised,
+        vesting=tuple(schedules),
+    )
+
+
+def _parse_equity(raw: Any) -> Equity | None:
+    if raw is None:
+        return None
+    m = _mapping(raw, "equity")
+    _known(
+        m,
+        {"company", "fmv", "fmv_date", "preferred_price", "note", "grants"},
+        "equity",
+    )
+    grants = tuple(
+        _parse_grant(g, i)
+        for i, g in enumerate(_list(m.get("grants"), "equity.grants"))
+    )
+    if not grants:
+        raise MobileConfigError("equity: 'grants' needs at least one grant")
+    ids = [g.id for g in grants]
+    dupes = sorted({i for i in ids if ids.count(i) > 1})
+    if dupes:
+        raise MobileConfigError(f"equity.grants: duplicate id(s) {', '.join(dupes)}")
+    return Equity(
+        grants=grants,
+        company=_str(m, "company", "equity", required=False),
+        fmv=_num(m, "fmv", "equity", required=False),
+        fmv_date=_date(m, "fmv_date", "equity", required=False),
+        preferred_price=_num(m, "preferred_price", "equity", required=False),
+        note=_str(m, "note", "equity", required=False),
+    )
+
+
+def _parse_payee(raw: Any, i: int) -> PayeeLabel:
+    where = f"payees[{i}]"
+    m = _mapping(raw, where)
+    _known(m, {"match", "title", "narration"}, where)
+    pattern = _str(m, "match", where)
+    try:
+        compiled = re.compile(pattern, re.IGNORECASE)
+    except re.error as e:
+        raise MobileConfigError(f"{where}: 'match' is not a valid pattern: {e}") from e
+    title = _str(m, "title", where)
+    if not title.strip():
+        raise MobileConfigError(f"{where}: 'title' is empty")
+    return PayeeLabel(
+        pattern=compiled,
+        title=title,
+        narration=_str(m, "narration", where, required=False),
+    )
+
+
 def parse_config(raw: Any, path: Path | None = None) -> MobileConfig:
     """Validate a parsed mobile.yaml document."""
     doc = _mapping(raw, "mobile.yaml")
@@ -334,6 +510,8 @@ def parse_config(raw: Any, path: Path | None = None) -> MobileConfig:
             "key_dates",
             "investments",
             "display_names",
+            "equity",
+            "payees",
         },
         "mobile.yaml",
     )
@@ -435,6 +613,10 @@ def parse_config(raw: Any, path: Path | None = None) -> MobileConfig:
             for i, r in enumerate(_list(plan.get("events"), "plan.events"))
         ),
         display_names={str(k): str(v) for k, v in names.items()},
+        equity=_parse_equity(doc.get("equity")),
+        payees=tuple(
+            _parse_payee(p, i) for i, p in enumerate(_list(doc.get("payees"), "payees"))
+        ),
         path=path,
     )
 

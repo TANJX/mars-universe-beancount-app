@@ -1,7 +1,8 @@
 """A small, fully synthetic ledger for the mobile snapshot tests.
 
 ``write_ledger(root)`` lays out a ledger directory the way ``$LEDGER_DIR`` looks
-(journal, config/mobile.yaml, journal/plan/cc-cards.json, statements/billing).
+(journal, config/mobile.yaml, config/ui.yaml, journal/plan/cc-cards.json,
+statements/billing).
 Every name and number is invented and the output is deterministic. Run as a script to write one:
 
     uv run python tests/mobile_ledger.py <dir>
@@ -31,6 +32,8 @@ CARDS = [
 ]
 
 MOBILE_YAML = """\
+accounts:
+  cash_exclude: ["Assets:Checking:Commuter"]
 plan:
   horizon: { until: 2030-07-31, days: 45 }
   events:
@@ -94,6 +97,50 @@ display_names:
   "Assets:Receivable:Acme:Expenses": "Acme expenses"
   "Assets:Gift-Card:*": "{name} gift card"
   "Assets:Transit:Suica": "Suica"
+  "Assets:Checking:Commuter": "Commuter card"
+payees:
+  - { match: "^Acme Corp Des:expense\\\\b", title: "Acme Corp", narration: "Expense reimbursement" }
+equity:
+  company: "Acme Corp"
+  fmv: 2.00
+  fmv_date: 2030-05-01
+  preferred_price: 12.50
+  grants:
+    - id: "OPT-1"
+      type: "ISO"
+      grant_date: 2028-04-02
+      shares: 20000
+      strike: 0.20
+      expiration: 2038-03-10
+      # Two halves, each a 1-year cliff then monthly; the second clock starts 2 years in.
+      vesting:
+        - { shares: 10000, start: 2028-03-10, months: 48, cliff_months: 12 }
+        - { shares: 10000, start: 2030-03-10, months: 48, cliff_months: 12 }
+    - id: "OPT-2"
+      type: "ISO"
+      grant_date: 2029-09-15
+      shares: 5000
+      strike: 0.50
+      expiration: 2039-09-15
+      vesting:
+        - { shares: 5000, start: 2029-09-01, months: 48 }
+"""
+
+# Merchant logos, the way the web viewer's config/ui.yaml declares them.
+UI_YAML = """\
+merchants:
+  Greenleaf Market: { domain: greenleaf.example }
+  Blue Door Bistro: { domain: bluedoor.example, aliases: ["Blue Door"] }
+  Skyline Air: { domain: skylineair.example }
+  Pixel Stream: { domain: pixelstream.example }
+  Harbor Bank: { domain: harborbank.example }
+  Acme Corp: { domain: acme.example }
+  Paper Lantern Books: {}
+accounts:
+  logos:
+    "Income:Salary:Acme": "Acme Corp"
+    "Assets:Checking:Harbor": "Harbor Bank"
+    "Assets:Saving:Harbor": "Harbor Bank"
 """
 
 MERCHANTS = [
@@ -152,6 +199,7 @@ def journal_text(asof: dt.date = ASOF) -> str:
     opens = [
         "Assets:Checking:Harbor",
         "Assets:Checking:Tidewater",
+        "Assets:Checking:Commuter",
         "Assets:Saving:Harbor",
         "Assets:Cash",
         "Assets:Gift-Card:Coffee",
@@ -218,6 +266,7 @@ def journal_text(asof: dt.date = ASOF) -> str:
         [
             "Assets:Checking:Harbor 5200.00 USD",
             "Assets:Checking:Tidewater 900.00 USD",
+            "Assets:Checking:Commuter 86.00 USD",
             "Assets:Saving:Harbor 8000.00 USD",
             "Assets:Gift-Card:Coffee 50.00 USD",
             "Assets:Transit:Suica 5000 JPY",
@@ -467,6 +516,28 @@ def journal_text(asof: dt.date = ASOF) -> str:
         "Team dinner, reimbursed by Acme",
         ["Assets:Receivable:Acme:Expenses 212.40 USD", "Liabilities:Credit:Summit"],
     )
+    # Raw bank text the snapshot shows by a display name (mobile/payees.py).
+    tx(
+        asof - dt.timedelta(days=5),
+        "*",
+        'Zelle Payment From Jordan Avery for Dinner\\"; Conf# Q7x2k9m4p\\"',
+        "",
+        ["Assets:Checking:Harbor 40.00 USD", "Assets:Receivable:Roommate"],
+    )
+    tx(
+        asof - dt.timedelta(days=5),
+        "*",
+        "Acme Corp Des:expense Id:XR52Q7 Indn:Doe Jordan Co Id:9900000001 PPD",
+        "",
+        ["Assets:Checking:Harbor 212.40 USD", "Assets:Receivable:Acme:Expenses"],
+    )
+    tx(
+        asof - dt.timedelta(days=5),
+        "*",
+        "HARBOR BANK DES:CASHREWARD ID:X1 INDN:DOE JORDAN CO ID:1234500000 PPD",
+        "",
+        ["Assets:Checking:Harbor 12.00 USD", "Income:Rebate:Cards"],
+    )
     tx(
         asof - dt.timedelta(days=4),
         "*",
@@ -522,7 +593,11 @@ def journal_text(asof: dt.date = ASOF) -> str:
             "!",
             "Acme Corp Payroll",
             "",
-            ["Assets:Checking:Harbor 2450.00 USD", "Income:Salary:Acme"],
+            [
+                "Assets:Checking:Harbor 2450.00 USD",
+                "Assets:Investment:Meridian:401k:USD 400.00 USD",
+                "Income:Salary:Acme",
+            ],
             'tid: "salary-harbor"',
         )
         tx(
@@ -556,7 +631,7 @@ def journal_text(asof: dt.date = ASOF) -> str:
         "!",
         "Benefit Card",
         "Commuter benefit load",
-        ["Assets:Checking:Tidewater 120.00 USD", "Income:Salary:Acme"],
+        ["Assets:Checking:Commuter 120.00 USD", "Income:Salary:Acme"],
     )
     return "\n".join(out) + "\n"
 
@@ -631,6 +706,7 @@ def write_ledger(root: Path) -> Path:
         json.dumps(cc_cards(), indent=2), encoding="utf-8"
     )
     (root / "config" / "mobile.yaml").write_text(MOBILE_YAML, encoding="utf-8")
+    (root / "config" / "ui.yaml").write_text(UI_YAML, encoding="utf-8")
     billing = root / "statements" / "billing" / "credit"
     billing.mkdir(parents=True, exist_ok=True)
     for card, lines in statements().items():
