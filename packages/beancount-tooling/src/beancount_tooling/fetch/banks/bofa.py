@@ -69,7 +69,12 @@ LOGGED_IN_MARKER = re.compile(r"^(Log Out|Sign Out)$", re.IGNORECASE)
 # aria-modal, so while it is open every other control, the logged-in marker
 # included, is hidden from role queries and login() would poll until timeout.
 WELCOME_DIALOG = re.compile(r"^Welcome to Online Banking", re.IGNORECASE)
-WELCOME_DISMISS = re.compile(r"^Continue$", re.IGNORECASE)
+# The modal's content varies: the 2026-10-07 version had a "Continue" button,
+# the 2026-11-12 "Pay & Transfer" version only a top-right X (left the fetcher
+# stuck until closed by hand). Match either; Escape is the fallback.
+WELCOME_DISMISS = re.compile(
+    r"^(Continue|Got it|Done|No thanks|Dismiss)$|close", re.IGNORECASE
+)
 
 # MFA challenge (SMS code or push approval), matched against visible text.
 MFA_TEXT = re.compile(  # UNVERIFIED
@@ -420,10 +425,18 @@ def _text_visible(page: Page, pattern: re.Pattern[str]) -> bool:
 def _dismiss_welcome(page: Page) -> None:
     """Close the redesign's welcome modal if it is showing (non-waiting)."""
     dialog = page.get_by_role("dialog", name=WELCOME_DIALOG).filter(visible=True)
-    if dialog.count():
-        dialog.first.get_by_role("button", name=WELCOME_DISMISS).click(
-            timeout=STEP_TIMEOUT_MS
-        )
+    if not dialog.count():
+        return
+    button = dialog.first.get_by_role("button", name=WELCOME_DISMISS).filter(
+        visible=True
+    )
+    if button.count():
+        try:
+            button.first.click(timeout=STEP_TIMEOUT_MS)
+            return
+        except Exception:  # noqa: BLE001, S110 (fall through to Escape)
+            pass
+    page.keyboard.press("Escape")
 
 
 def _options(select: Locator) -> list[str]:
