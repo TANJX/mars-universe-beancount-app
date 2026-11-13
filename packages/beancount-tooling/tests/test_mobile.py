@@ -16,6 +16,7 @@ from beancount_tooling.mobile import (
     build_snapshot,
     cli,
     equity,
+    leave,
     load_config,
     logos,
     parse_config,
@@ -68,6 +69,7 @@ def snap(ledger_dir, entries):
         cc_cards=mobile_ledger.cc_cards(),
         statements=billing.read_all(ledger_dir / "statements"),
         logos=logos.load_resolver(ledger_dir / "config" / "ui.yaml"),
+        leave=leave.read_leave(ledger_dir),
     )
 
 
@@ -503,7 +505,7 @@ def test_snapshot_schema_keys_unchanged(snap, entries):
     plain = build_snapshot(
         entries, MobileConfig(), mobile_ledger.ASOF, cc_cards=mobile_ledger.cc_cards()
     )
-    assert set(snap) == set(plain)
+    assert set(snap) - {"leave"} == set(plain)
     for name, row in _cards(snap).items():
         assert set(row) == set(_cards(plain)[name])
     top = {c["name"]: c for c in snap["cards"]["accounts"]}
@@ -1147,6 +1149,7 @@ def test_payee_cleanup_changes_only_display_text(ledger_dir, entries, snap):
         statements=billing.read_all(ledger_dir / "statements"),
         logos=logos.load_resolver(ledger_dir / "config" / "ui.yaml"),
         clean_payees=False,
+        leave=leave.read_leave(ledger_dir),
     )
     on, off = snap["activity"]["transactions"], raw["activity"]["transactions"]
     assert any("rawPayee" in r for r in on)
@@ -1171,3 +1174,254 @@ def test_payee_cleanup_changes_only_display_text(ledger_dir, entries, snap):
         return s
 
     assert strip(snap) == strip(raw)
+
+
+# ---- leave ---------------------------------------------------------------------
+
+
+def test_leave_section_reads_the_newest_stub(snap):
+    lv = snap["leave"]
+    assert lv["unit"] == "days"
+    # The corrected line for the 06-14 stub wins; the 06-28 stub is after as-of.
+    assert lv["lastStub"] == {"date": "2030-06-14", "periodEnd": "2030-06-15"}
+    assert lv["asOf"] == "2030-06-15"
+    assert lv["pto"]["balance"] == 0.48
+    assert lv["sick"]["balance"] == 0  # zero is a balance, not a missing one
+    # Calendar 2030 through as-of, half days included; the 07-01 booking is not taken.
+    assert lv["pto"]["usedThisYear"] == 11
+    assert lv["sick"]["usedThisYear"] == 2
+    assert lv["pto"]["accrualPerMonth"] == pytest.approx(0.0383 * 261 / 12, abs=1e-4)
+    assert lv["pto"]["balanceCap"] == 10
+
+
+def test_leave_history_converts_hours_and_skips_blank_cells(snap):
+    hist = snap["leave"]["history"]
+    dates = [h["date"] for h in hist]
+    assert dates == sorted(dates) and len(dates) == len(set(dates))
+    assert hist[0] == {"date": "2028-04-14", "pto": 0.383, "sick": 0.19}  # from hours
+    assert "2028-09-15" not in dates  # PTO cell left blank on that stub
+    assert dates[-1] == "2030-06-14" and hist[-1]["pto"] == 0.48
+    assert "2030-06-28" not in dates
+
+
+def test_leave_projection_runs_through_next_year(snap):
+    lv = snap["leave"]
+    proj = lv["projection"]
+    assert proj[0]["date"] == "2030-06-30" and proj[-1]["date"] == "2031-12-31"
+    assert len(proj) == 19  # every month end
+    assert all(p["pto"] <= 10 for p in proj)
+    # The tenure step: 13 a year from the 3-year anniversary.
+    assert lv["pto"]["rateChange"] == {"date": "2031-04-03", "accrualPerYear": 13}
+    assert lv["pto"]["capDate"] == "2031-05-16"
+    by = {p["date"]: p for p in proj}
+    assert by["2031-05-31"]["pto"] == 10
+    # Sick lapses on Dec 31 (no carryover), resets to 5 and, frontloaded, stays.
+    assert lv["sick"]["resetsOn"] == "2031-01-01" and lv["sick"]["resetTo"] == 5
+    assert lv["sick"]["lapsesOnReset"] == by["2030-12-31"]["sick"]
+    assert 0 < lv["sick"]["lapsesOnReset"] < 5
+    assert {p["sick"] for p in proj if p["date"] >= "2031"} == {5}
+
+
+def test_leave_is_left_out_without_config_or_files(entries, ledger_dir, tmp_path):
+    files = leave.read_leave(ledger_dir)
+    assert "leave" not in build_snapshot(entries, MobileConfig(), mobile_ledger.ASOF, leave=files)
+    cfg = load_config(ledger_dir / "config" / "mobile.yaml")
+    assert "leave" not in build_snapshot(entries, cfg, mobile_ledger.ASOF)
+    assert leave.read_leave(tmp_path) is None
+    # Every stub is after the as-of date: nothing to show yet.
+    assert leave.build_leave(cfg.leave, files, dt.date(2028, 4, 10)) is None
+
+
+def test_cli_writes_the_leave_section(ledger_dir, tmp_path, monkeypatch):
+    monkeypatch.setenv("LEDGER_DIR", str(ledger_dir))
+    out = tmp_path / "snapshot.json"
+    assert cli.main(["--asof", "2030-06-18", "--out", str(out)]) == 0
+    assert json.loads(out.read_text(encoding="utf-8"))["leave"]["pto"]["balance"] == 0.48
+
+
+def _stub(pay, pto, sick, *, end=None, unit="days", sick_accrued=0.0):
+    return {
+        "id": pay,
+        "payDate": pay,
+        "periodEnd": end or pay,
+        "unit": unit,
+        "policies": {
+            "pto": {"balance": pto, "accrued": 0.0},
+            "sick": {"balance": sick, "accrued": sick_accrued},
+        },
+    }
+
+
+def _policies(pto=None, sick=None, hire="2020-03-02"):
+    return {"hireDate": hire, "policies": {"pto": pto or {}, "sick": sick or {}}}
+
+
+RATES = parse_config({"leave": {"accrual_per_weekday": {"pto": 0.05, "sick": 0.02}}}).leave
+
+
+def _by_date(section):
+    return {p["date"]: p for p in section["projection"]}
+
+
+def test_leave_at_the_cap_pauses_accrual():
+    files = leave.LeaveFiles(
+        stubs=[_stub("2030-03-15", 10.0, 1.0)],
+        policies=_policies(pto={"accrualPerYear": 12, "balanceCap": 10}),
+    )
+    lv = leave.build_leave(RATES, files, dt.date(2030, 3, 20))
+    assert lv["pto"]["capDate"] == "2030-03-15"  # already there
+    assert {p["pto"] for p in lv["projection"]} == {10}
+
+
+def test_leave_cap_reached_later_and_no_cap_at_all():
+    files = leave.LeaveFiles(
+        stubs=[_stub("2030-03-15", 9.0, 0.0)],
+        policies=_policies(pto={"accrualPerYear": 12, "balanceCap": 10}),
+    )
+    lv = leave.build_leave(RATES, files, dt.date(2030, 3, 20))
+    # 20 weekdays at 0.05 after Fri 03-15: Mon 03-18 to Fri 04-12.
+    assert lv["pto"]["capDate"] == "2030-04-12"
+    uncapped = leave.LeaveFiles(stubs=[_stub("2030-03-15", 9.0, 0.0)])
+    lv = leave.build_leave(RATES, uncapped, dt.date(2030, 3, 20))
+    assert lv["pto"]["balanceCap"] is None and lv["pto"]["capDate"] is None
+    assert lv["pto"]["rateChange"] is None
+    assert lv["sick"]["resetsOn"] is None and lv["sick"]["lapsesOnReset"] is None
+    # Mon 03-18 to Fri 03-29: 10 weekdays.
+    assert _by_date(lv)["2030-03-31"]["pto"] == pytest.approx(9.0 + 0.05 * 10)
+
+
+def test_leave_cap_beyond_the_projection_is_still_dated():
+    files = leave.LeaveFiles(
+        stubs=[_stub("2030-03-15", 0.0, 0.0)],
+        policies=_policies(pto={"accrualPerYear": 12, "balanceCap": 40}),
+    )
+    lv = leave.build_leave(RATES, files, dt.date(2030, 3, 20))
+    assert lv["projection"][-1]["date"] == "2031-12-31"
+    assert lv["projection"][-1]["pto"] < 40
+    assert lv["pto"]["capDate"] > "2031-12-31"
+
+
+def test_leave_rate_steps_up_at_the_tenure_anniversary():
+    files = leave.LeaveFiles(
+        stubs=[_stub("2030-12-31", 1.0, 0.0)],
+        policies=_policies(
+            pto={
+                "accrualPerYear": 12,
+                "accrualPerYearFrom": [{"tenureYears": 5, "days": 15}],
+                "balanceCap": 99,
+            }
+        ),
+    )
+    lv = leave.build_leave(RATES, files, dt.date(2031, 1, 2))
+    # Hired 2020-03-02: the 5-year step is in the past, so 15 a year is today's
+    # rate and there is no step ahead.
+    assert lv["pto"]["rateChange"] is None
+    files = leave.LeaveFiles(
+        stubs=[_stub("2030-12-31", 1.0, 0.0)],
+        policies=_policies(
+            pto={
+                "accrualPerYear": 12,
+                "accrualPerYearFrom": [{"tenureYears": 3, "days": 15}],
+            },
+            hire="2028-03-01",
+        ),
+    )
+    lv = leave.build_leave(RATES, files, dt.date(2031, 1, 2))
+    assert lv["pto"]["rateChange"] == {"date": "2031-03-01", "accrualPerYear": 15}
+    by = _by_date(lv)
+    feb = by["2031-02-28"]["pto"] - by["2031-01-31"]["pto"]  # 20 weekdays
+    apr = by["2031-04-30"]["pto"] - by["2031-03-31"]["pto"]  # 22 weekdays
+    assert feb == pytest.approx(20 * 0.05)
+    assert apr == pytest.approx(22 * 0.05 * 15 / 12)
+
+
+def test_leave_sick_resets_across_new_year():
+    sick = {
+        "cycle": "calendar",
+        "resetTo": 5,
+        "carryoverCap": 1,
+        "annualAccrualCap": 5,
+        "balanceCap": 8,
+    }
+    files = leave.LeaveFiles(
+        stubs=[_stub("2030-12-15", 0.0, 3.0, sick_accrued=4.9)],
+        policies=_policies(sick=sick),
+    )
+    lv = leave.build_leave(RATES, files, dt.date(2030, 12, 20))
+    by = _by_date(lv)
+    # Only 0.1 of the year's 5 days was left to accrue.
+    assert by["2030-12-31"]["sick"] == pytest.approx(3.1)
+    assert lv["sick"]["resetsOn"] == "2031-01-01"
+    assert lv["sick"]["lapsesOnReset"] == pytest.approx(2.1)  # 1 carries over
+    # 1 kept + 5, then accrual starts again, up to the balance cap of 8.
+    assert by["2031-01-31"]["sick"] == pytest.approx(6 + 23 * 0.02)
+    assert max(p["sick"] for p in lv["projection"]) == 8
+    # Frontloaded from the new year: the reset is the grant, nothing accrues.
+    files = leave.LeaveFiles(
+        stubs=[_stub("2030-12-15", 0.0, 3.0, sick_accrued=4.9)],
+        policies=_policies(sick={**sick, "carryoverCap": 0, "frontloadedFrom": "2031-01-01"}),
+    )
+    lv = leave.build_leave(RATES, files, dt.date(2030, 12, 20))
+    assert {p["sick"] for p in lv["projection"] if p["date"] >= "2031"} == {5}
+    assert lv["sick"]["lapsesOnReset"] == pytest.approx(3.1)
+
+
+def test_leave_breakdown_beats_stub_accruals_for_the_year():
+    sick = {
+        "cycle": "calendar",
+        "resetTo": 5,
+        "annualAccrualCap": 5,
+        "breakdownAsOf": {"date": "2030-12-10", "accrued": 5.0},
+    }
+    files = leave.LeaveFiles(
+        stubs=[_stub("2030-12-15", 0.0, 2.0, sick_accrued=0.2)],
+        policies=_policies(sick=sick),
+    )
+    lv = leave.build_leave(RATES, files, dt.date(2030, 12, 20))
+    assert _by_date(lv)["2030-12-31"]["sick"] == 2  # the year is used up
+    # A breakdown from another year is ignored.
+    sick["breakdownAsOf"]["date"] = "2029-12-10"
+    lv = leave.build_leave(RATES, files, dt.date(2030, 12, 20))
+    # 12 weekdays left in December, 0.2 of the 5 accrued so far by the stubs.
+    assert _by_date(lv)["2030-12-31"]["sick"] == pytest.approx(2 + 12 * 0.02)
+
+
+def test_leave_half_days_and_hours():
+    files = leave.LeaveFiles(
+        stubs=[
+            _stub("2030-03-15", 22.5, 4.0, unit="hours"),
+            _stub("2030-03-29", 2.5, 0.5, end="2030-03-31"),
+        ],
+        taken=[
+            {"date": "2030-03-04", "type": "pto", "days": 0.5},
+            {"date": "2030-03-05", "type": "pto", "days": 1},
+            {"date": "2030-03-06", "type": "sick", "days": 0.5},
+            {"date": "2029-12-31", "type": "pto", "days": 1},
+            {"date": "2030-04-30", "type": "pto", "days": 1},
+        ],
+    )
+    cfg = parse_config(
+        {"leave": {"accrual_per_weekday": {"pto": 0.05}, "hours_per_day": 7.5}}
+    ).leave
+    lv = leave.build_leave(cfg, files, dt.date(2030, 4, 2))
+    assert lv["history"][0] == {"date": "2030-03-15", "pto": 3, "sick": 0.5333}
+    assert lv["pto"]["balance"] == 2.5 and lv["sick"]["balance"] == 0.5
+    assert lv["asOf"] == "2030-03-31"
+    assert lv["pto"]["usedThisYear"] == 1.5 and lv["sick"]["usedThisYear"] == 0.5
+    # No sick accrual configured: the balance holds.
+    assert {p["sick"] for p in lv["projection"]} == {0.5}
+
+
+@pytest.mark.parametrize(
+    "doc, message",
+    [
+        ({"leave": {}}, "missing 'pto'"),
+        ({"leave": {"accrual_per_weekday": {"pto": 2}}}, "0 to 1"),
+        ({"leave": {"accrual_per_weekday": {"pto": 0.04, "vacation": 1}}}, "unknown key"),
+        ({"leave": {"accrual_per_weekday": {"pto": 0.04}, "hours_per_day": 0}}, "more than 0"),
+        ({"leave": {"rate": 1}}, "unknown key"),
+    ],
+)
+def test_leave_config_errors(doc, message):
+    with pytest.raises(MobileConfigError, match=message):
+        parse_config(doc)

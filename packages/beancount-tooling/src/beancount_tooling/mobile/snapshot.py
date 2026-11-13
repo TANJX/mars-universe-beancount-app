@@ -42,6 +42,7 @@ from beancount_tooling.mobile.config import (
     Goal,
 )
 from beancount_tooling.mobile.equity import build_equity, vest_key_date
+from beancount_tooling.mobile.leave import LeaveFiles, build_leave
 from beancount_tooling.mobile.logos import LogoResolver, url_template
 from beancount_tooling.mobile.payees import PayeeLabel, RowContext
 from beancount_tooling.mobile.payees import display as payee_display
@@ -1298,6 +1299,7 @@ def build_snapshot(
     logos: LogoResolver | None = None,
     logo_token: str | None = None,
     clean_payees: bool = True,
+    leave: LeaveFiles | None = None,
 ) -> dict:
     """Build the snapshot dict.
 
@@ -1316,6 +1318,9 @@ def build_snapshot(
     publishable token: with it the snapshot's ``logos.urlTemplate`` is set.
     ``clean_payees`` shows raw bank payees by their display names (see
     ``payees.py``); off, every row shows the ledger's text unchanged.
+    ``leave`` is the ledger's leave files (``leave.read_leave``): with them and
+    a ``leave`` section in the config the snapshot gets a ``leave`` object,
+    otherwise the key is left out.
     """
     led = _Ledger(entries, asof)
     names = _Names(cfg)
@@ -1415,7 +1420,7 @@ def build_snapshot(
     net_now = led.total(asof)
     invest_now = led.total(asof, a.investments)
     d30 = asof - dt.timedelta(days=30)
-    return {
+    out = {
         "meta": {
             "schemaVersion": SCHEMA_VERSION,
             "asOf": asof.isoformat(),
@@ -1486,3 +1491,7 @@ def build_snapshot(
             else None
         ),
     }
+    leave_section = build_leave(cfg.leave, leave, asof)
+    if leave_section is not None:
+        out["leave"] = leave_section
+    return out

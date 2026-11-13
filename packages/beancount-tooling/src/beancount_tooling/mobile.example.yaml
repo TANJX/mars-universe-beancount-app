@@ -165,6 +165,24 @@ equity:
       vesting:
         - { shares: 5000, start: 2029-09-01, months: 48 }   # monthly, no cliff
 
+# PTO and sick time: the snapshot's `leave` section (balances in days, and where they go
+# if no more leave is taken). Most of it comes from files in the ledger, not from here:
+#   statements/leave/<Provider>.jsonl   one line per paystub: id, payDate, periodEnd,
+#                                       unit ("days" or "hours"), policies.pto and
+#                                       policies.sick with balance and accrued
+#   statements/leave/policies.json      optional policy limits: hireDate, the PTO cap and
+#                                       tenure steps (accrualPerYear, accrualPerYearFrom),
+#                                       the sick reset (cycle "calendar", resetTo,
+#                                       carryoverCap, annualAccrualCap, frontloadedFrom)
+#   journal/leave/taken.jsonl           one line per day off: date, type (pto|sick), days
+# This section adds what those files do not say: how much one weekday earns, in days, at
+# today's rate (a stub's accrued divided by the weekdays in its pay period). A tenure step
+# scales the PTO rate by new days per year over current days per year. Without this
+# section, or without any stub, the snapshot has no `leave` key.
+leave:
+  accrual_per_weekday: { pto: 0.0383, sick: 0.019 }   # 10 and 5 days a year
+  hours_per_day: 8   # for stub files kept in hours (default 8)
+
 # Merchant logos need no section here. Rows get a `logoDomain` from the web viewer's
 # config (<LEDGER_DIR>/config/ui.yaml: `merchants:` and `accounts.logos`) plus the
 # bundled universal brands. The image URL template (`logos.urlTemplate`) is written only

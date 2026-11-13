@@ -189,6 +189,18 @@ class Equity:
 
 
 @dataclass(frozen=True)
+class Leave:
+    """What the snapshot's ``leave`` section needs beyond the ledger's leave
+    files: how much PTO and sick time one weekday earns, in days, at the
+    current rate (read off a paystub: accrued / weekdays in the period), and
+    how long a day is for stub files kept in hours."""
+
+    pto_per_weekday: float
+    sick_per_weekday: float = 0.0
+    hours_per_day: float = 8.0
+
+
+@dataclass(frozen=True)
 class MobileConfig:
     accounts: Accounts = field(default_factory=Accounts)
     horizon_until: dt.date | None = None
@@ -204,6 +216,7 @@ class MobileConfig:
     display_names: dict[str, str] = field(default_factory=dict)
     equity: Equity | None = None
     payees: tuple[PayeeLabel, ...] = ()
+    leave: Leave | None = None
     path: Path | None = None
 
     def horizon(self, asof: dt.date) -> dt.date:
@@ -475,6 +488,30 @@ def _parse_equity(raw: Any) -> Equity | None:
     )
 
 
+def _parse_leave(raw: Any) -> Leave | None:
+    if raw is None:
+        return None
+    m = _mapping(raw, "leave")
+    _known(m, {"accrual_per_weekday", "hours_per_day"}, "leave")
+    rates = _mapping(m.get("accrual_per_weekday"), "leave.accrual_per_weekday")
+    _known(rates, {"pto", "sick"}, "leave.accrual_per_weekday")
+    pto = _num(rates, "pto", "leave.accrual_per_weekday")
+    sick = _num(rates, "sick", "leave.accrual_per_weekday", required=False) or 0.0
+    for name, v in (("pto", pto), ("sick", sick)):
+        if not 0 <= v < 1:
+            raise MobileConfigError(
+                f"leave.accrual_per_weekday: '{name}' must be days per weekday, 0 to 1"
+            )
+    hours = _num(m, "hours_per_day", "leave", required=False)
+    if hours is not None and hours <= 0:
+        raise MobileConfigError("leave: 'hours_per_day' must be more than 0")
+    return Leave(
+        pto_per_weekday=pto,
+        sick_per_weekday=sick,
+        hours_per_day=hours if hours is not None else 8.0,
+    )
+
+
 def _parse_payee(raw: Any, i: int) -> PayeeLabel:
     where = f"payees[{i}]"
     m = _mapping(raw, where)
@@ -512,6 +549,7 @@ def parse_config(raw: Any, path: Path | None = None) -> MobileConfig:
             "display_names",
             "equity",
             "payees",
+            "leave",
         },
         "mobile.yaml",
     )
@@ -617,6 +655,7 @@ def parse_config(raw: Any, path: Path | None = None) -> MobileConfig:
         payees=tuple(
             _parse_payee(p, i) for i, p in enumerate(_list(doc.get("payees"), "payees"))
         ),
+        leave=_parse_leave(doc.get("leave")),
         path=path,
     )
 

@@ -2,7 +2,7 @@
 
 ``write_ledger(root)`` lays out a ledger directory the way ``$LEDGER_DIR`` looks
 (journal, config/mobile.yaml, config/ui.yaml, journal/plan/cc-cards.json,
-statements/billing).
+statements/billing, statements/leave, journal/leave).
 Every name and number is invented and the output is deterministic. Run as a script to write one:
 
     uv run python tests/mobile_ledger.py <dir>
@@ -124,6 +124,9 @@ equity:
       expiration: 2039-09-15
       vesting:
         - { shares: 5000, start: 2029-09-01, months: 48 }
+leave:
+  accrual_per_weekday: { pto: 0.0383, sick: 0.019 }
+  hours_per_day: 8
 """
 
 # Merchant logos, the way the web viewer's config/ui.yaml declares them.
@@ -695,6 +698,171 @@ def statements() -> dict[str, list[dict]]:
     }
 
 
+# ---- leave -----------------------------------------------------------------------
+
+LEAVE_HIRE = dt.date(2028, 4, 3)
+LEAVE_PTO_RATE = 0.0383  # days per weekday (10 a year)
+LEAVE_SICK_RATE = 0.019
+# The older payroll kept hours (8 a day) until this date, the newer one days.
+LEAVE_HOURS_UNTIL = dt.date(2029, 4, 1)
+
+LEAVE_POLICIES = {
+    "provider": "Payroll",
+    "capturedAt": "2030-06-15",
+    "hireDate": LEAVE_HIRE.isoformat(),
+    "policies": {
+        "pto": {
+            "name": "Paid time off",
+            "cycle": "anniversary",
+            "accrualPerYear": 10,
+            "accrualPerYearFrom": [{"tenureYears": 3, "days": 13}],
+            "balanceCap": 10,
+            "carryoverCap": 10,
+        },
+        "sick": {
+            "name": "Sick leave",
+            "cycle": "calendar",
+            "accrualPerYear": 5,
+            "annualAccrualCap": 5,
+            "balanceCap": 5,
+            "carryoverCap": 0,
+            "resetTo": 5,
+            "frontloadedFrom": "2031-01-01",
+        },
+    },
+}
+
+# Days off. Half days, a day either side of a weekend, and one booked after the
+# as-of date (not counted as taken).
+LEAVE_TAKEN = [
+    ("2028-12-22", "pto", 1),
+    ("2029-03-08", "sick", 1),
+    ("2029-08-13", "pto", 1),
+    ("2029-08-14", "pto", 1),
+    ("2029-08-15", "pto", 1),
+    ("2029-08-16", "pto", 1),
+    ("2029-08-17", "pto", 1),
+    ("2029-11-23", "sick", 1),
+    ("2029-12-24", "pto", 1),
+    ("2029-12-26", "pto", 0.5),
+    ("2030-01-02", "pto", 1),
+    ("2030-01-03", "pto", 1),
+    ("2030-03-04", "sick", 0.5),
+    ("2030-03-08", "pto", 1),
+    ("2030-03-11", "pto", 1),
+    ("2030-03-13", "pto", 0.5),
+    ("2030-04-15", "pto", 1),
+    ("2030-04-16", "pto", 1),
+    ("2030-04-17", "pto", 1),
+    ("2030-04-18", "pto", 1),
+    ("2030-04-19", "pto", 0.5),
+    ("2030-05-06", "sick", 1),
+    ("2030-05-20", "pto", 1),
+    ("2030-05-21", "pto", 1),
+    ("2030-06-10", "sick", 0.5),
+    ("2030-07-01", "pto", 1),
+]
+
+
+def _weekdays(first: dt.date, last: dt.date) -> int:
+    return sum(
+        1
+        for i in range((last - first).days + 1)
+        if (first + dt.timedelta(days=i)).weekday() < 5
+    )
+
+
+def leave_stubs() -> dict[str, list[dict]]:
+    """Semi-monthly paystub leave tables, per payroll file. Balances follow
+    the accrual rates, the PTO cap and the days off above; sick time accrues
+    up to 5 days a calendar year and none carries over. The newest stub before
+    the as-of date has a correcting line (the last line wins) that leaves a
+    half-day-ish PTO balance and no sick time. One stub is after the as-of
+    date, and one has a blank PTO cell."""
+    old, new = [], []
+    pto = sick = year_sick = 0.0
+    month = dt.date(2028, 4, 1)
+    while month <= dt.date(2030, 6, 1):
+        nxt = dt.date(month.year + (month.month == 12), month.month % 12 + 1, 1)
+        for first, last in (
+            (month, month.replace(day=15)),
+            (month.replace(day=16), nxt - dt.timedelta(days=1)),
+        ):
+            if first.month == 1 and first.day == 1:
+                sick = year_sick = 0.0
+            wd = _weekdays(max(first, LEAVE_HIRE), last)
+            used = {"pto": 0.0, "sick": 0.0}
+            for day, kind, n in LEAVE_TAKEN:
+                if first.isoformat() <= day <= last.isoformat():
+                    used[kind] += n
+            pto_acc = min(LEAVE_PTO_RATE * wd, max(0.0, 10 - pto))
+            sick_acc = min(LEAVE_SICK_RATE * wd, 5 - year_sick)
+            year_sick += sick_acc
+            pto += pto_acc - used["pto"]
+            sick += sick_acc - used["sick"]
+            pay = last
+            while pay.weekday() >= 5:
+                pay -= dt.timedelta(days=1)
+            hours = last < LEAVE_HOURS_UNTIL
+            k = 8 if hours else 1
+            rec = {
+                "provider": "Oldpay" if hours else "Payroll",
+                "id": pay.isoformat(),
+                "payDate": pay.isoformat(),
+                "periodStart": first.isoformat(),
+                "periodEnd": last.isoformat(),
+                "unit": "hours" if hours else "days",
+                "policies": {
+                    "pto": {
+                        "used": used["pto"] * k,
+                        "accrued": round(pto_acc * k, 4),
+                        "balance": round(pto * k, 4),
+                    },
+                    "sick": {
+                        "used": used["sick"] * k,
+                        "accrued": round(sick_acc * k, 4),
+                        "balance": round(sick * k, 4),
+                    },
+                },
+            }
+            if pay.isoformat() == "2028-09-15":
+                rec["policies"]["pto"]["balance"] = None
+            (old if hours else new).append(rec)
+            if pay.isoformat() == "2030-06-14":
+                fixed = json.loads(json.dumps(rec))
+                fixed["policies"]["pto"]["balance"] = 0.48
+                fixed["policies"]["sick"]["balance"] = 0.0
+                fixed["note"] = "Corrected from the stub."
+                new.append(fixed)
+                pto, sick = 0.48, 0.0
+        month = nxt
+    return {"Oldpay": old, "Payroll": new}
+
+
+def write_leave(root: Path) -> None:
+    folder = root / "statements" / "leave"
+    folder.mkdir(parents=True, exist_ok=True)
+    for name, lines in leave_stubs().items():
+        (folder / f"{name}.jsonl").write_text(
+            "".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8"
+        )
+    (folder / "policies.json").write_text(
+        json.dumps(LEAVE_POLICIES, indent=2), encoding="utf-8"
+    )
+    taken = root / "journal" / "leave"
+    taken.mkdir(parents=True, exist_ok=True)
+    (taken / "taken.jsonl").write_text(
+        "".join(
+            json.dumps(
+                {"date": d, "type": t, "days": n, "note": None, "source": "manual"}
+            )
+            + "\n"
+            for d, t, n in LEAVE_TAKEN
+        ),
+        encoding="utf-8",
+    )
+
+
 def write_ledger(root: Path) -> Path:
     """Write the synthetic ledger under ``root`` and return ``root``."""
     (root / "journal" / "plan").mkdir(parents=True, exist_ok=True)
@@ -713,6 +881,7 @@ def write_ledger(root: Path) -> Path:
         (billing / f"{card}.jsonl").write_text(
             "".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8"
         )
+    write_leave(root)
     return root
 
 

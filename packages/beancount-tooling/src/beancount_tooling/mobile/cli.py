@@ -7,7 +7,9 @@ Usage (from the app repo, ``LEDGER_DIR`` set)::
 Reads ``journal/journal.beancount``, ``config/mobile.yaml`` (personal inputs,
 optional), ``journal/plan/cc-cards.json`` (card due days, optional),
 ``journal/plan/cc-expected.json`` (statements that have not closed, optional),
-``statements/billing/`` (closed card statements, optional) and
+``statements/billing/`` (closed card statements, optional),
+``statements/leave/`` and ``journal/leave/taken.jsonl`` (PTO and sick
+balances, optional, used only with a ``leave`` section in the config) and
 ``config/ui.yaml`` (merchant logos, optional), and writes
 ``mobile/snapshot.json`` inside the ledger directory. ``--asof`` builds the
 snapshot as of another day; the default is today.
@@ -41,6 +43,7 @@ from beancount_tooling.mobile.config import (
     MobileConfigError,
     load_config,
 )
+from beancount_tooling.mobile.leave import read_leave
 from beancount_tooling.mobile.logos import UI_CONFIG_FILENAME, load_resolver
 from beancount_tooling.mobile.snapshot import build_snapshot
 from beancount_tooling.paths import get_config_dir, get_journal_file, get_ledger_dir
@@ -194,6 +197,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         expected=_load_cc_cards(ledger_dir / CC_EXPECTED_RELATIVE),
         logos=load_resolver(get_config_dir() / UI_CONFIG_FILENAME),
         logo_token=_logo_token(args.web_env),
+        leave=read_leave(ledger_dir),
     )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -210,7 +214,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"{len(snapshot['activity']['transactions'])} transactions, "
         f"{len(snapshot['plan']['events'])} plan events, "
         f"{len(snapshot['goals'])} goals, "
-        f"{with_logo} of {len(rows)} transactions with a logo domain"
+        f"{with_logo} of {len(rows)} transactions with a logo domain, "
+        f"{'leave as of ' + snapshot['leave']['asOf'] if 'leave' in snapshot else 'no leave'}"
         f"{'' if snapshot['logos'] else ' (no logo token: no image URLs)'}"
     )
     return 0
