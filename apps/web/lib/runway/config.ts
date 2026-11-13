@@ -288,6 +288,9 @@ function parseContribution(
     tax,
     channel,
     ytd: numRecord(o.ytd),
+    ...(typeof o.ytdFrom === "string" && o.ytdFrom
+      ? { ytdFrom: o.ytdFrom, ytdLedger: numRecord(o.ytdLedger) }
+      : {}),
     schedule: byFrom(schedule),
   }
 }

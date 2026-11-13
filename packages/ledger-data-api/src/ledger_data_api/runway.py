@@ -15,6 +15,9 @@ resolves its inputs into one JSON payload:
             patches over the person's own plan (runway_patch.py).
   ledger    `starting.source: ledger` fills starting balances from the ledger
             at `asof`, mapping each account to a sleeve by ordered regex rules.
+            A contribution stream's `ytd_from: <account regex>` fills that
+            stream's `ytd` for the `asof` year from the ledger's deposits
+            (`ledger_contributions`), so a hand-typed total can't drift.
 
 The output is camelCase (see `build_runway_data`). Errors drop a person;
 warnings keep it. Balances are never logged.
@@ -32,9 +35,11 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from beancount.core import data
 
 from . import store
 from .fire import _query, _usd
+from .portfolio import FUNDING_ROOTS, _explicit_amount, _tax_year
 from .runway_patch import apply_patch
 
 log = logging.getLogger(__name__)
@@ -313,6 +318,76 @@ def ledger_positions(ledger, entries, asof: datetime.date) -> list[tuple[str, st
         if abs(usd) >= 0.005:
             out.append((str(account), str(currency), usd))
     return sorted(out)
+
+
+def ledger_contributions(entries, pattern: str, asof: datetime.date) -> dict[str, float]:
+    """Contributions into accounts matching `pattern`, by tax year, up to `asof`.
+
+    A transaction counts when it moves USD into a matching account: its largest
+    inbound USD leg there is the deposit. The amount is the transaction's (or
+    that posting's) `contribution:` metadata, which leaves a broker match out;
+    without it, the USD that left asset or liability accounts outside the
+    pattern. The tax year is `tax-year:` metadata, else the deposit's year, so a
+    January deposit for last year counts toward last year.
+    """
+    rx = re.compile(pattern)
+    by_year: dict[str, float] = {}
+    for entry in entries:
+        if not isinstance(entry, data.Transaction) or entry.date > asof:
+            continue
+        deposit = None
+        for posting in entry.postings:
+            units = posting.units
+            if units is None or units.currency != "USD" or not rx.search(posting.account):
+                continue
+            if units.number > 0 and (deposit is None or units.number > deposit.units.number):
+                deposit = posting
+        if deposit is None:
+            continue
+        amount = _explicit_amount(entry, deposit)
+        if amount is None:
+            amount = sum(
+                (
+                    -p.units.number
+                    for p in entry.postings
+                    if p.units is not None
+                    and p.units.currency == "USD"
+                    and p.units.number < 0
+                    and p.account.startswith(FUNDING_ROOTS)
+                    and not rx.search(p.account)
+                ),
+                start=0,
+            )
+        if amount <= 0:
+            continue
+        year = str(_tax_year(entry, deposit, entry.date.year))
+        by_year[year] = round(by_year.get(year, 0.0) + float(amount), 2)
+    return by_year
+
+
+def fill_ledger_ytd(ctx: _Ctx, contributions: list[dict], asof: datetime.date, contributions_fn) -> None:
+    """Set `ytd[asof year]` from the ledger on every stream with `ytdFrom`.
+
+    The filled years are listed in `ytdLedger` so a save writes `ytd_from`
+    back instead of the number. A hand-written `ytd` for the same year loses,
+    with a warning when it disagrees.
+    """
+    year = str(asof.year)
+    for i, c in enumerate(contributions):
+        pattern = c.get("ytdFrom")
+        if not pattern:
+            continue
+        if contributions_fn is None:
+            continue
+        amount = contributions_fn(pattern).get(year, 0.0)
+        hand = c["ytd"].get(year)
+        if hand is not None and abs(hand - amount) >= 0.005:
+            ctx.warn(
+                f"contributions[{i}].ytd.{year}",
+                f"ytd {year} is {hand:,.2f} here but {amount:,.2f} in the ledger (ytd_from); using the ledger",
+            )
+        c["ytd"] = {**c["ytd"], year: amount}
+        c["ytdLedger"] = {year: amount}
 
 
 def map_sleeves(
@@ -726,6 +801,15 @@ def _norm_contributions(ctx: _Ctx, raw: Any, path: str) -> list[dict]:
             str(y): _num(ctx, v, f"{p}.ytd.{y}", 0.0, 0)
             for y, v in _dict(ctx, c.get("ytd"), f"{p}.ytd").items()
         }
+        ytd_from = c.get("ytd_from")
+        if ytd_from is not None:
+            try:
+                if not isinstance(ytd_from, str) or not ytd_from:
+                    raise re.error("not a string")
+                re.compile(ytd_from)
+            except re.error:
+                ctx.err(f"{p}.ytd_from", f"ytd_from must be an account regex, got {ytd_from!r}")
+                ytd_from = None
         schedule = []
         starts: set[str] = set()
         for j, e in enumerate(_list(ctx, c.get("schedule"), f"{p}.schedule")):
@@ -744,6 +828,7 @@ def _norm_contributions(ctx: _Ctx, raw: Any, path: str) -> list[dict]:
                 "tax": tax,
                 "channel": channel,
                 "ytd": ytd,
+                **({"ytdFrom": ytd_from} if ytd_from else {}),
                 "schedule": sorted(schedule, key=lambda e: e["from"]),
             }
         )
@@ -1062,6 +1147,7 @@ def resolve_person(
     defaults: dict,
     horizon: dict,
     positions_fn,
+    contributions_fn=None,
 ) -> tuple[dict | None, list[dict], list[dict]]:
     """Normalize one merged person mapping (include already applied).
 
@@ -1083,6 +1169,7 @@ def resolve_person(
     asof = datetime.date.fromisoformat(horizon["asof"])
     merged = _deep_merge(defaults, {k: v for k, v in raw.items() if k != "scenarios"})
     body = _resolve_body(ctx, merged, horizon)
+    fill_ledger_ytd(ctx, body["contributions"], asof, contributions_fn)
     starting = _norm_starting(ctx, merged.get("starting"), "starting", asof, positions_fn)
     if ctx.errors or starting is None:
         return None, ctx.errors, ctx.warnings
@@ -1098,6 +1185,7 @@ def resolve_person(
     for i, sid, label, patch in _scenario_list(ctx, raw.get("scenarios")):
         sctx = _Ctx(pid, f"{ctx.base}.scenarios[{i}].patch")
         sbody = _resolve_body(sctx, apply_patch(plan_body, patch), horizon)
+        fill_ledger_ytd(sctx, sbody["contributions"], asof, contributions_fn)
         errors += sctx.errors
         # Skip warnings the base already reported for the same field.
         base_known = {(w["path"], w["message"]) for w in ctx.warnings}
@@ -1238,6 +1326,15 @@ def build_runway_data(
             )
         return positions_cache[0]
 
+    contributions_cache: dict[str, dict[str, float]] = {}
+
+    def contributions_fn(pattern: str) -> dict[str, float]:
+        if pattern not in contributions_cache:
+            contributions_cache[pattern] = ledger_contributions(
+                entries, pattern, datetime.date.fromisoformat(horizon["asof"])
+            )
+        return contributions_cache[pattern]
+
     people: list[dict] = []
     roster: list[dict] = []
     errors = list(top.errors)
@@ -1287,6 +1384,7 @@ def build_runway_data(
             defaults=person_defaults,
             horizon=horizon,
             positions_fn=positions_fn,
+            contributions_fn=contributions_fn,
         )
         errors.extend(p_errors)
         warnings.extend(p_warnings)

@@ -104,6 +104,10 @@ export interface Contribution {
   channel: Channel
   /** Already contributed this year before `asof`, by year. */
   ytd: Record<string, number>
+  /** Account regex (`ytd_from`) the server totals the ledger's deposits for. */
+  ytdFrom?: string
+  /** The `ytd` years the server filled from the ledger; not hand values. */
+  ytdLedger?: Record<string, number>
   schedule: Phase[]
 }
 

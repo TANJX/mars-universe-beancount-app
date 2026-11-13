@@ -518,3 +518,102 @@ def test_example_config_resolves_cleanly(tmp_path):
     assert person["starting"]["sleeves"]["reserve"] == 30000.0
     assert person["spreadThrough"] == "year_end"
     assert person["playCap"] == 0.10
+
+
+# ---------- ytd_from: contributions so far, from the ledger ----------
+
+IRA_LEDGER = """
+2020-01-01 open Assets:Checking:Acme USD
+2020-01-01 open Assets:Investment:Broker:Roth-IRA:USD USD
+2020-01-01 open Assets:Investment:Broker:Roth-IRA:VTI VTI
+2020-01-01 open Assets:Investment:Broker:Trad-IRA:USD USD
+2020-01-01 open Income:Match USD
+2020-01-01 open Income:Dividends USD
+2020-01-01 open Equity:Opening
+
+2026-01-05 * "Deposit for last year, with a 3% match"
+  contribution: 290.00 USD
+  tax-year: 2025
+  Assets:Investment:Broker:Roth-IRA:USD  298.70 USD
+  Assets:Checking:Acme                  -290.00 USD
+  Income:Match                            -8.70 USD
+
+2026-03-02 * "Deposit with a 3% match"
+  contribution: 100.00 USD
+  Assets:Investment:Broker:Roth-IRA:USD  103.00 USD
+  Assets:Checking:Acme                  -100.00 USD
+  Income:Match                            -3.00 USD
+
+2026-04-01 * "Deposit without metadata: the funding leg counts"
+  Assets:Investment:Broker:Roth-IRA:USD   50.00 USD
+  Assets:Checking:Acme                   -50.00 USD
+
+2026-04-02 * "Buy inside the IRA: not a contribution"
+  Assets:Investment:Broker:Roth-IRA:VTI  1 VTI {100 USD}
+  Assets:Investment:Broker:Roth-IRA:USD  -100.00 USD
+
+2026-04-03 * "Dividend: not a contribution"
+  Assets:Investment:Broker:Roth-IRA:USD    2.00 USD
+  Income:Dividends                        -2.00 USD
+
+2026-05-01 * "Traditional IRA deposit: other pattern"
+  contribution: 40.00 USD
+  Assets:Investment:Broker:Trad-IRA:USD   40.00 USD
+  Assets:Checking:Acme                   -40.00 USD
+
+2026-12-01 * "After asof"
+  contribution: 500.00 USD
+  Assets:Investment:Broker:Roth-IRA:USD  500.00 USD
+  Assets:Checking:Acme                  -500.00 USD
+"""
+
+
+@pytest.fixture
+def ira_ledger():
+    entries, errors, options = loader.load_string(IRA_LEDGER)
+    assert not errors
+    return SimpleNamespace(options=options), entries
+
+
+def test_ledger_contributions_by_tax_year(ira_ledger):
+    _led, entries = ira_ledger
+    got = runway.ledger_contributions(entries, "^Assets:Investment:Broker:Roth-IRA:", TODAY)
+    # 2025: the January deposit tagged tax-year 2025. 2026: 100 (metadata, match
+    # excluded) + 50 (funding leg); the buy, the dividend and December are out.
+    assert got == {"2025": 290.0, "2026": 150.0}
+
+
+def test_ytd_from_fills_ytd_and_warns_on_a_stale_hand_value(tmp_path, ira_ledger):
+    root = make_root(tmp_path)
+    _write(
+        root,
+        "asof: 2026-11-08\npeople:"
+        + BASE_PERSON
+        + "    contributions:\n"
+        + "      - id: ira-roth\n        account: ira\n        tax: roth\n"
+        + '        ytd_from: "^Assets:Investment:Broker:Roth-IRA:"\n'
+        + "        ytd: { 2026: 440, 2025: 7000 }\n"
+        + "        schedule: [ { from: 2026-11, pace: even } ]\n",
+    )
+    data = build(root, ira_ledger)
+    assert data["errors"] == []
+    (c,) = data["people"][0]["contributions"]
+    assert c["ytd"] == {"2026": 150.0, "2025": 7000.0}  # only the asof year comes from the ledger
+    assert c["ytdFrom"] == "^Assets:Investment:Broker:Roth-IRA:"
+    assert c["ytdLedger"] == {"2026": 150.0}
+    assert any(
+        w["path"].endswith("contributions[0].ytd.2026") and "using the ledger" in w["message"]
+        for w in data["warnings"]
+    )
+
+
+def test_ytd_from_rejects_a_bad_regex(tmp_path, ira_ledger):
+    root = make_root(tmp_path)
+    _write(
+        root,
+        "asof: 2026-11-08\npeople:"
+        + BASE_PERSON
+        + '    contributions:\n      - { id: ira-roth, account: ira, tax: roth, ytd_from: "(" }\n',
+    )
+    data = build(root, ira_ledger)
+    assert any(e["path"].endswith("contributions[0].ytd_from") for e in data["errors"])

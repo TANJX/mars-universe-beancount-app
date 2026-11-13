@@ -214,3 +214,30 @@ def test_locked_person_cannot_be_saved(root, ledger):
     data = load(root, ledger)
     with pytest.raises(runway_write.SaveError):
         save(root, ledger, {"version": data["version"], "person": {"id": "sam", "plan": {}, "scenarios": []}})
+
+
+def test_ytd_from_survives_a_save_and_is_not_written_as_a_number(root, ledger):
+    path = root / "config" / "runway.yaml"
+    text = path.read_text()
+    old = "      - id: ira-roth\n        account: ira\n        tax: roth\n"
+    assert old in text
+    path.write_text(text.replace(old, old + '        ytd_from: "^Assets:Investment:Broker:Roth-IRA:"\n'))
+    data = load(root, ledger)
+    assert data["errors"] == []
+    alex = data["people"][0]
+    ira = next(c for c in alex["contributions"] if c["id"] == "ira-roth")
+    assert ira["ytdLedger"] == {"2026": 0.0}
+
+    before = path.read_text()
+    out = save(root, ledger, {"version": data["version"], "person": person_req(alex), "shared": data["shared"]})
+    assert out == {"status": "ok", "written": []}
+    assert path.read_text() == before
+
+    edited = copy.deepcopy(alex)
+    edited["spendingMonthly"] = 3100
+    out = save(root, ledger, {"version": data["version"], "person": person_req(edited), "shared": data["shared"]})
+    assert out["written"] == ["config/runway.yaml"]
+    after = path.read_text()
+    assert 'ytd_from: "^Assets:Investment:Broker:Roth-IRA:"' in after
+    ira_block = after[after.index("- id: ira-roth") : after.index("returns:", after.index("- id: ira-roth"))]
+    assert "ytd:" not in ira_block

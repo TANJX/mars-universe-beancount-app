@@ -182,7 +182,9 @@ def _contribution(c: dict) -> dict:
             "account": account,
             "tax": c.get("tax") if account != "hsa" else None,
             "channel": channel if account == "hsa" and channel != "payroll" else None,
-            "ytd": {str(k): v for k, v in (c.get("ytd") or {}).items()},
+            # Years filled from the ledger (`ytd_from`) are not hand values.
+            "ytd": {str(k): v for k, v in (c.get("ytd") or {}).items() if str(k) not in (c.get("ytdLedger") or {})},
+            "ytd_from": c.get("ytdFrom"),
             "schedule": [_phase(p, channel) for p in c.get("schedule") or []],
         }
     )
