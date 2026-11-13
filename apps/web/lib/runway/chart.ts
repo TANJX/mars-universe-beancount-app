@@ -329,7 +329,11 @@ export function chartEvents(
 ): ChartEvent[] {
   const out: ChartEvent[] = []
   rows.forEach((row, i) => {
-    const typed = row.events.map((e) => ({ e, type: glyphFor(e, row) }))
+    let typed = row.events.map((e) => ({ e, type: glyphFor(e, row) }))
+    // Forecast deposits come from the month's amounts below, so payroll
+    // money (which the engine does not announce) is marked like cash-paid.
+    if (!row.actual)
+      typed = typed.filter((t) => t.type !== "ira" && t.type !== "hsa")
     const bills = typed.filter((t) => t.type === "bill").length
     for (const { e, type } of typed)
       out.push({
@@ -339,7 +343,39 @@ export function chartEvents(
         label: e,
         detail: detailFor(type, e, row, result, bills),
       })
+    if (!row.actual)
+      for (const d of forecastDeposits(row))
+        out.push({ i, month: row.month, ...d })
   })
+  return out
+}
+
+/** Money into the IRA, 401k and HSA in a forecast month, from the run's
+ * amounts: paid from pay (payroll), paid from cash (direct), and the match. */
+export function forecastDeposits(
+  row: MonthRow
+): { type: GlyphType; label: string; detail: string }[] {
+  const out: { type: GlyphType; label: string; detail: string }[] = []
+  if (row.iraOut >= 0.5)
+    out.push({
+      type: "ira",
+      label: "IRA deposit",
+      detail: `${money(row.iraOut)} paid from cash`,
+    })
+  if (row.k401In + row.match >= 0.5) {
+    const parts: string[] = []
+    if (row.k401In >= 0.5) parts.push(`${money(row.k401In)} from pay`)
+    if (row.match >= 0.5) parts.push(`${money(row.match)} match`)
+    out.push({ type: "k401", label: "401k deposit", detail: parts.join(" + ") })
+  }
+  // hsaIn counts payroll, direct and employer money; hsaOut is the direct part.
+  const fromPay = row.hsaIn - row.hsaOut
+  if (row.hsaIn >= 0.5) {
+    const parts: string[] = []
+    if (fromPay >= 0.5) parts.push(`${money(fromPay)} from pay`)
+    if (row.hsaOut >= 0.5) parts.push(`${money(row.hsaOut)} paid from cash`)
+    out.push({ type: "hsa", label: "HSA deposit", detail: parts.join(" + ") })
+  }
   return out
 }
 

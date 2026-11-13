@@ -174,6 +174,24 @@ test("chartEvents adds detail copy where the row knows the amount", () => {
   )
 })
 
+test("forecast months mark payroll deposits too, from the month's amounts", () => {
+  const rows = [
+    // HSA from the paycheck only: the engine announces nothing.
+    row("2027-02", { hsaIn: 367, k401In: 7600, match: 0 }),
+    // A direct HSA deposit the engine did announce, plus payroll money.
+    row("2027-03", { events: ["HSA deposit"], hsaIn: 1367, hsaOut: 1000 }),
+  ]
+  const ev = chartEvents(rows)
+  assert.deepEqual(
+    ev.map((e) => [e.i, e.type, e.detail]),
+    [
+      [0, "k401", "$7,600 from pay"],
+      [0, "hsa", "$367 from pay"],
+      [1, "hsa", "$367 from pay + $1,000 paid from cash"],
+    ]
+  )
+})
+
 test("chartWarnings pins each warning to its month", () => {
   const rows = monthSpan("2026-11", 6).map((m) => row(m))
   const ws = chartWarnings(
