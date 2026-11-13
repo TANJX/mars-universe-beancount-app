@@ -281,19 +281,19 @@ const STATE_OPTIONS: { value: StateCode; label: string }[] = [
 ]
 
 function dayText(d: number): string {
-  if (d === -1) return "last"
+  if (d === -1) return "last weekday"
   const tens = d % 100
   const suffix =
     tens >= 11 && tens <= 13 ? "th" : (["th", "st", "nd", "rd"][d % 10] ?? "th")
   return `${d}${suffix}`
 }
 
-/** "semimonthly 15th and last", "biweekly from 2026-11-07". */
+/** "semimonthly, 15th and last weekday", "biweekly from 2026-11-07". */
 export function scheduleText(s: PaySchedule | null): string {
   if (!s) return "no schedule"
   if (s.frequency === "biweekly")
     return s.anchor ? `biweekly from ${s.anchor}` : "biweekly"
-  return `semimonthly ${s.days.map(dayText).join(" and ")}`
+  return `semimonthly, ${s.days.map(dayText).join(" and ")}`
 }
 
 export function deductionsText(d: Deduction[]): string {

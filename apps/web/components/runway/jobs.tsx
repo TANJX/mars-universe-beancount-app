@@ -1,11 +1,12 @@
 "use client"
 
-// "Jobs and pay": who pays the person and when. A timeline of the job
-// windows over the horizon, one card per job (dates, salary steps, 401k
-// match, pay overrides) and the person's pay defaults at the bottom.
+// "Jobs and pay": who pays the person and when. One lane per job over the
+// horizon (salary steps as shade steps, gaps as stripes), one card per job
+// (dates, salary steps, 401k match, pay overrides) and the pay defaults at
+// the bottom.
 //
 // Windows and hints come from lib/runway/jobs.ts, the same resolver the
-// engine uses, so the timeline always matches the paychecks.
+// engine uses, so the lanes always match the paychecks.
 //
 // Every edit goes through `update`, which applies a function to the latest
 // body (not the one this render closed over). A blur can commit a number
@@ -14,9 +15,20 @@
 import { AlertTriangle, ChevronRight, X } from "lucide-react"
 import * as React from "react"
 
-import { NumberField, Segmented, usdShort } from "@/components/fire/controls"
+import {
+  NumberField,
+  Segmented,
+  usd,
+  usdShort,
+} from "@/components/fire/controls"
 import { Button } from "@/components/ui/button"
-import { grossAt, type JobWindow, jobEnd, jobWindows } from "@/lib/runway/jobs"
+import {
+  activeJobAt,
+  grossAt,
+  type JobWindow,
+  jobEnd,
+  jobWindows,
+} from "@/lib/runway/jobs"
 import { deepEqual } from "@/lib/runway/patch"
 import { addMonths } from "@/lib/runway/schedule"
 import type {
@@ -34,6 +46,7 @@ import { cn } from "@/lib/utils"
 import { matchText } from "./contributions"
 import {
   EditedDot,
+  FallbackReset,
   FIELD,
   Field,
   InputsSection,
@@ -80,6 +93,17 @@ const JOB_FIELDS = [
   "hsaEmployer",
 ]
 
+/** Job colors and the gap stripe. Job 1 is the primary; dark mode lifts it,
+ * because the dark primary is too dim for marks. Job 2 is a neutral slate. */
+const LANE_TOKENS =
+  "[--job1:var(--primary)] [--job2:oklch(0.46_0.03_255)] [--stripe:oklch(0.147_0.004_49.3/0.09)] dark:[--job1:oklch(0.66_0.17_14)] dark:[--job2:oklch(0.78_0.02_255)] dark:[--stripe:oklch(1_0_0/0.07)]"
+
+const STRIPES =
+  "repeating-linear-gradient(135deg, transparent 0 4px, var(--stripe) 4px 7px)"
+
+const WARN = "text-amber-700 dark:text-amber-400"
+const ERROR = "text-rose-600 dark:text-rose-400"
+
 function thisMonth(): string {
   return new Date().toISOString().slice(0, 7)
 }
@@ -91,11 +115,47 @@ function reducedMotion(): boolean {
   )
 }
 
+/** "Jan ’28". */
+function monApos(m: string): string {
+  return `${monName(m)} ’${m.slice(2, 4)}`
+}
+
+/** "+10%", "−4.5%". */
+function pctDelta(x: number): string {
+  const v = Math.abs(x).toFixed(1).replace(/\.0$/, "")
+  return `${x >= 0 ? "+" : "−"}${v}%`
+}
+
+/** 0.04 -> "4%", 0.035 -> "3.5%". */
+function pctPlain(v: number): string {
+  return `${Number((v * 100).toFixed(2))}%`
+}
+
+function capitalize(s: string): string {
+  return s ? `${s[0].toUpperCase()}${s.slice(1)}` : s
+}
+
+function cmpStart(a: Job, b: Job): number {
+  const x = a.start ?? ""
+  const y = b.start ?? ""
+  return x < y ? -1 : x > y ? 1 : 0
+}
+
 /** Enabled steps in month order. */
 function enabledSteps(job: Job): SalaryStep[] {
   return job.salary
     .filter((s) => s.enabled)
     .sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0))
+}
+
+/** Index into `job.salary` of the step paying in `m`: the same pick as
+ * grossAt (the last enabled step on or before `m`, in list order). */
+function stepIndexAt(job: Job, m: string): number {
+  let at = -1
+  job.salary.forEach((s, i) => {
+    if (s.enabled && s.from <= m) at = i
+  })
+  return at
 }
 
 /** "$165k → $180k +1": a job's salary list in a few characters. */
@@ -110,49 +170,71 @@ function salaryText(steps: SalaryStep[]): string {
   return t
 }
 
-/** The first month of the job inside the horizon (or its start). */
-function firstPaidMonth(job: Job, months: string[]): string {
-  const first = months[0] ?? thisMonth()
-  return job.start && job.start > first ? job.start : first
-}
-
-/** One clause of the collapsed summary. */
-function jobClause(
+/** First and last month the job pays inside the horizon. */
+function paidRange(
   job: Job,
-  windows: JobWindow[],
-  months: string[],
-  isFirst: boolean
-): string {
-  const eff = firstPaidMonth(job, months)
-  const end =
-    windows.filter((w) => w.jobId === job.id).at(-1)?.to ?? months.at(-1) ?? eff
-  const later = enabledSteps(job).filter((s) => s.from > eff && s.from <= end)
-  let t = `${job.employer || "Unnamed job"} ${usdShort(grossAt(job, eff))}`
-  if (later[0]) t += ` → ${usdShort(later[0].gross)} ${monName(later[0].from)}`
-  if (later.length > 1)
-    t += ` +${later.length - 1} step${later.length > 2 ? "s" : ""}`
-  if (!isFirst && job.start) t += ` from ${monLong(job.start)}`
-  return t
+  windows: JobWindow[]
+): { from: string; to: string } | null {
+  const mine = windows.filter((w) => w.jobId === job.id)
+  if (!mine.length) return null
+  return { from: mine[0].from, to: mine[mine.length - 1].to }
 }
 
+/** "$150k → $175k": gross in the first and last paid month. */
+function payText(job: Job, windows: JobWindow[], months: string[]): string {
+  const r = paidRange(job, windows)
+  const first = months[0] ?? thisMonth()
+  const m0 = r ? r.from : job.start && job.start > first ? job.start : first
+  const a = grossAt(job, m0)
+  const b = r ? grossAt(job, r.to) : a
+  return a === b ? usdShort(a) : `${usdShort(a)} → ${usdShort(b)}`
+}
+
+/** The gap window right after the job's last paid window, if any. */
+function gapAfter(job: Job, windows: JobWindow[]): JobWindow | null {
+  let i = -1
+  windows.forEach((w, k) => {
+    if (w.jobId === job.id) i = k
+  })
+  const next = i >= 0 ? windows[i + 1] : undefined
+  return next && next.jobId == null ? next : null
+}
+
+/** Collapsed summary: "Northwind $150k → $175k by Jan ’28 · Contoso $180k
+ * from Jul 2028 · no pay Apr ’28 to Jun ’28". */
 function sectionSummary(
   jobs: Job[],
   windows: JobWindow[],
   months: string[]
 ): string {
-  const paying = new Set(windows.map((w) => w.jobId).filter(Boolean))
-  const on = jobs
-    .filter((j) => j.enabled && paying.has(j.id))
-    .sort((a, b) => ((a.start ?? "") < (b.start ?? "") ? -1 : 1))
-  if (!on.length) return "No pay"
-  const clauses = on.map((j, i) => jobClause(j, windows, months, i === 0))
+  const first = months[0] ?? thisMonth()
+  const parts: string[] = []
+  for (const j of jobs.filter((x) => x.enabled).sort(cmpStart)) {
+    const r = paidRange(j, windows)
+    if (!r) continue
+    const a = grossAt(j, r.from)
+    const b = grossAt(j, r.to)
+    const raises = enabledSteps(j).filter(
+      (s) => s.from > r.from && s.from <= r.to
+    )
+    let t = `${j.employer || "Unnamed job"} ${usdShort(a)}`
+    const lastRaise = raises.at(-1)
+    if (b !== a && lastRaise)
+      t += ` → ${usdShort(b)} by ${monApos(lastRaise.from)}`
+    if (parts.length > 0 || (j.start != null && j.start > first))
+      t += ` from ${monLong(r.from)}`
+    parts.push(t)
+  }
+  if (!parts.length) return "No pay"
   for (const w of windows) {
-    if (w.jobId != null) continue
-    clauses.push(
-      `No pay ${monLong(w.from)}${w.to !== w.from ? ` to ${monLong(w.to)}` : ""}`
+    if (w.jobId != null || w.from === first) continue
+    parts.push(
+      w.from === w.to
+        ? `no pay ${monApos(w.from)}`
+        : `no pay ${monApos(w.from)} to ${monApos(w.to)}`
     )
   }
-  return clauses.join(" · ")
+  return parts.join(" · ")
 }
 
 function newJobId(taken: Set<string>): string {
@@ -160,6 +242,25 @@ function newJobId(taken: Set<string>): string {
     const id = `job-${Math.random().toString(36).slice(2, 8)}`
     if (!taken.has(id)) return id
   }
+}
+
+/** A step that the scenario changed: the plan's job has no enabled step in
+ * the same month with the same gross. */
+function stepChanged(step: SalaryStep, baseJob: Job | null): boolean {
+  if (!baseJob) return false
+  return !baseJob.salary.some(
+    (b) => b.enabled && b.from === step.from && b.gross === step.gross
+  )
+}
+
+/** "Added in scenario" is tinted; the other tags are plain. */
+function ScenarioTag({ children }: { children: string }) {
+  if (!children.startsWith("Added")) return <RowTag>{children}</RowTag>
+  return (
+    <span className="inline-flex h-4 shrink-0 items-center whitespace-nowrap rounded-full border border-primary/20 bg-primary/5 px-1.5 text-[11px] text-foreground dark:border-primary/40 dark:bg-primary/15">
+      {children}
+    </span>
+  )
 }
 
 // ------------------------------------------------------------------ section
@@ -289,6 +390,16 @@ export function JobsSection({
       rows.filter((r) => r.kind === "removed").length +
       (deepEqual(body.pay, base.pay) ? 0 : 1)
     : 0
+  const unsaved =
+    saved != null &&
+    (!deepEqual(jobs, saved.jobs) || !deepEqual(body.pay, saved.pay))
+
+  // Lane colors alternate by start order, so a job keeps its color in the
+  // lanes, the card swatch and the scenario.
+  const colorOf = new Map<string, string>()
+  ;[...jobs].sort(cmpStart).forEach((j, i) => {
+    colorOf.set(j.id, i % 2 ? "var(--job2)" : "var(--job1)")
+  })
 
   const addJob = () => {
     const b = bodyRef.current
@@ -333,6 +444,8 @@ export function JobsSection({
     if (baseById.has(id)) focusRef.current = { kind: "restore", id }
     else if (cur[i + 1])
       focusRef.current = { kind: "header", id: cur[i + 1].id }
+    else if (cur[i - 1])
+      focusRef.current = { kind: "header", id: cur[i - 1].id }
     else focusRef.current = { kind: "add" }
     update((b) => ({ ...b, jobs: b.jobs.filter((j) => j.id !== id) }))
   }
@@ -358,19 +471,37 @@ export function JobsSection({
     })
   }
 
-  const jumpTo = (id: string) => {
+  // A lane segment opens its job's card and focuses that step's gross.
+  const jumpTo = (id: string, step: number) => {
     setCardOpen(id, true)
     requestAnimationFrame(() => {
-      const card = rootRef.current?.querySelector<HTMLElement>(
+      const root = rootRef.current
+      const card = root?.querySelector<HTMLElement>(
         `[data-job-card="${CSS.escape(id)}"]`
       )
-      card?.scrollIntoView({
+      if (!card) return
+      const input =
+        step >= 0
+          ? card.querySelector<HTMLInputElement>(
+              `[data-step-index="${step}"] [data-step-gross] input`
+            )
+          : null
+      const target =
+        input ?? card.querySelector<HTMLElement>(`[data-job-header]`)
+      if (input && !finePointer()) {
+        // No keyboard pop on touch: bring the row into view instead.
+        input.scrollIntoView({
+          block: "nearest",
+          behavior: reducedMotion() ? "auto" : "smooth",
+        })
+        return
+      }
+      card.scrollIntoView({
         block: "nearest",
         behavior: reducedMotion() ? "auto" : "smooth",
       })
-      rootRef.current
-        ?.querySelector<HTMLElement>(`[data-job-header="${CSS.escape(id)}"]`)
-        ?.focus({ preventScroll: true })
+      target?.focus({ preventScroll: true })
+      if (input) input.select()
     })
   }
 
@@ -379,35 +510,55 @@ export function JobsSection({
     .filter((k) => k === "jobs" || k === "pay")
     .map((k) => errors[k])
 
+  const badge =
+    fromPlan > 0 || unsaved ? (
+      <span className="inline-flex items-center gap-1.5">
+        {fromPlan > 0 ? <RowTag>{fromPlan} from Plan</RowTag> : null}
+        {unsaved ? (
+          <RowTag>
+            <span
+              aria-hidden="true"
+              className="mr-1 size-1.5 rounded-full bg-primary"
+            />
+            Unsaved
+          </RowTag>
+        ) : null}
+      </span>
+    ) : undefined
+
   return (
     <InputsSection
       title="Jobs and pay"
       hint="Who pays you and when. A job ends when you leave or when the next job starts."
       summary={sectionSummary(jobs, windows, months)}
-      badge={fromPlan > 0 ? <RowTag>{fromPlan} from Plan</RowTag> : undefined}
+      badge={badge}
       forceOpen={hasErrors}
     >
-      <div ref={rootRef} className="flex min-w-0 flex-col gap-3 @md:col-span-2">
+      <div
+        ref={rootRef}
+        className={cn(
+          "flex min-w-0 flex-col gap-3 @md:col-span-2",
+          LANE_TOKENS
+        )}
+      >
         {looseErrors.map((msg) => (
-          <span
-            key={msg}
-            className="text-rose-600 text-xs dark:text-rose-400"
-            data-field-error=""
-          >
+          <span key={msg} className={cn("text-xs", ERROR)} data-field-error="">
             {msg}
           </span>
         ))}
-        {months.length ? (
-          <JobTimeline
+        {months.length && jobs.length ? (
+          <JobLanes
             jobs={jobs}
             windows={windows}
             months={months}
+            baseById={base ? baseById : null}
+            colorOf={colorOf}
             onJump={jumpTo}
           />
         ) : null}
 
         {jobs.length === 0 && !rows.length ? (
-          <div className="flex flex-col items-start gap-2 rounded-lg border border-dashed p-3 text-muted-foreground text-xs">
+          <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed p-4 text-center text-muted-foreground text-xs">
             No jobs. Without a job this plan has no paychecks.
             {readOnly ? null : (
               <Button
@@ -422,35 +573,39 @@ export function JobsSection({
           </div>
         ) : null}
 
-        {rows.map((r) =>
-          r.kind === "removed" ? (
-            <RemovedJobRow
-              key={r.job.id}
-              job={r.job}
-              readOnly={readOnly}
-              onRestore={() => restoreJob(r.job.id)}
-            />
-          ) : (
-            <JobCard
-              key={r.job.id}
-              job={r.job}
-              index={r.index}
-              jobs={jobs}
-              windows={windows}
-              months={months}
-              pay={body.pay}
-              savedJob={saved ? (savedById.get(r.job.id) ?? null) : null}
-              baseJob={baseById.get(r.job.id) ?? null}
-              tag={tagOf(r.job)}
-              open={open.has(r.job.id)}
-              onOpenChange={(v) => setCardOpen(r.job.id, v)}
-              readOnly={readOnly}
-              errors={errors}
-              setJob={(fn) => setJob(r.job.id, fn)}
-              onRemove={() => removeJob(r.job.id)}
-            />
-          )
-        )}
+        {rows.length ? (
+          <div className="flex flex-col gap-2">
+            {rows.map((r) =>
+              r.kind === "removed" ? (
+                <RemovedJobRow
+                  key={r.job.id}
+                  job={r.job}
+                  readOnly={readOnly}
+                  onRestore={() => restoreJob(r.job.id)}
+                />
+              ) : (
+                <JobCard
+                  key={r.job.id}
+                  job={r.job}
+                  index={r.index}
+                  jobs={jobs}
+                  windows={windows}
+                  months={months}
+                  pay={body.pay}
+                  savedJob={saved ? (savedById.get(r.job.id) ?? null) : null}
+                  baseJob={baseById.get(r.job.id) ?? null}
+                  tag={tagOf(r.job)}
+                  open={open.has(r.job.id)}
+                  onOpenChange={(v) => setCardOpen(r.job.id, v)}
+                  readOnly={readOnly}
+                  errors={errors}
+                  setJob={(fn) => setJob(r.job.id, fn)}
+                  onRemove={() => removeJob(r.job.id)}
+                />
+              )
+            )}
+          </div>
+        ) : null}
 
         {jobs.length > 0 && !readOnly ? (
           <AddButton data-add-job="" onClick={addJob}>
@@ -471,161 +626,318 @@ export function JobsSection({
   )
 }
 
-// ----------------------------------------------------------------- timeline
+// -------------------------------------------------------------------- lanes
 
-function JobTimeline({
+/** One cell per calendar year: "’26" when a year has under 3 months. */
+function yearBands(months: string[]) {
+  const out: { year: string; from: number; n: number }[] = []
+  months.forEach((m, i) => {
+    const year = m.slice(0, 4)
+    const last = out.at(-1)
+    if (last && last.year === year) last.n += 1
+    else out.push({ year, from: i, n: 1 })
+  })
+  return out
+}
+
+/** Width a mono 11px label needs, padding included. */
+function labelWidth(text: string): number {
+  return text.length * 6.7 + 12
+}
+
+function JobLanes({
   jobs,
   windows,
   months,
+  baseById,
+  colorOf,
   onJump,
 }: {
   jobs: Job[]
   windows: JobWindow[]
   months: string[]
-  onJump: (id: string) => void
+  baseById: Map<string, Job> | null
+  colorOf: Map<string, string>
+  onJump: (id: string, step: number) => void
 }) {
   const n = months.length
   const idx = new Map(months.map((m, i) => [m, i]))
-  const byId = new Map(jobs.map((j) => [j.id, j]))
-  // Alternate shades by job, in order of first appearance.
-  const shade = new Map<string, number>()
-  for (const w of windows)
-    if (w.jobId && !shade.has(w.jobId)) shade.set(w.jobId, shade.size)
+  const ref = React.useRef<HTMLDivElement>(null)
+  // Label fitting needs the track width; measured before paint so labels
+  // never pop in after the first frame.
+  const [width, setWidth] = React.useState(0)
+  React.useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    setWidth(el.getBoundingClientRect().width)
+    const ro = new ResizeObserver(([e]) => setWidth(e.contentRect.width))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const pxm = width / n
 
-  // Ticks: each job window's opening gross, then each step inside it.
-  const ticks: { at: number; label: string }[] = []
-  for (const w of windows) {
-    const job = w.jobId ? byId.get(w.jobId) : null
-    if (!job) continue
-    const start = idx.get(w.from) ?? 0
-    ticks.push({ at: start, label: usdShort(grossAt(job, w.from)).slice(1) })
-    for (const s of enabledSteps(job)) {
-      if (s.from > w.from && s.from <= w.to)
-        ticks.push({
-          at: idx.get(s.from) ?? start,
-          label: usdShort(s.gross).slice(1),
-        })
-    }
+  const cols = { gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }
+  const span = (from: number, count: number) => ({
+    gridColumn: `${from + 1} / span ${count}`,
+  })
+  const range = (a: string, b: string) =>
+    a === b ? monLong(a) : `${monLong(a)} to ${monLong(b)}`
+  const janLines = months.flatMap((m, i) =>
+    i > 0 && m.endsWith("-01")
+      ? [
+          <span
+            key={m}
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-y-0 w-px bg-foreground/15"
+            style={{ left: `${(i / n) * 100}%` }}
+          />,
+        ]
+      : []
+  )
+
+  const lanes = [...jobs].sort(cmpStart)
+
+  // Caption: gross over the plan, raises, job changes.
+  let total = 0
+  let raises = 0
+  let changes = 0
+  let prevJob: Job | null = null
+  let prevGross = 0
+  let lastPaying: Job | null = null
+  for (const m of months) {
+    const j = activeJobAt(jobs, m)
+    const g = j ? grossAt(j, m) : 0
+    total += g / 12
+    if (j && prevJob === j && g > prevGross) raises += 1
+    if (j && lastPaying && lastPaying !== j) changes += 1
+    if (j) lastPaying = j
+    prevJob = j
+    prevGross = g
   }
-  ticks.sort((a, b) => a.at - b.at)
-  // Labels closer than three months apart would overlap; keep the first.
-  let lastLabel = -99
-  const shownTicks = ticks.map((t) => {
-    const show = t.at - lastLabel >= 3
-    if (show) lastLabel = t.at
-    return { ...t, show }
-  })
-
-  const axis: { at: number; label: string }[] = [
-    { at: 0, label: shortMonth(months[0]) },
-  ]
-  months.forEach((m, i) => {
-    if (m.endsWith("-01") && i >= 3 && i <= n - 4)
-      axis.push({ at: i, label: m.slice(0, 4) })
-  })
-  if (n > 1) axis.push({ at: n - 1, label: shortMonth(months[n - 1]) })
-
-  const left = (at: number) => `${(at / n) * 100}%`
-  const edge = (at: number) =>
-    at > n - 4 ? "-translate-x-full text-right" : ""
 
   return (
-    <div className="flex flex-col gap-1">
-      <div className="relative h-4 text-[11px] text-muted-foreground">
-        {axis.map((a) => (
+    <div
+      role="group"
+      aria-label="Who pays you, by month. Each bar is a job; each shade step is a salary change."
+      className="flex min-w-0 flex-col gap-1"
+    >
+      <div ref={ref} className="grid" style={cols} aria-hidden="true">
+        {yearBands(months).map((b, i) => (
           <span
-            key={`${a.at}-${a.label}`}
+            key={b.year}
+            style={span(b.from, b.n)}
             className={cn(
-              "absolute top-0 whitespace-nowrap font-mono tabular-nums",
-              a.at === n - 1 && "right-0",
-              a.at !== n - 1 && edge(a.at)
+              "relative overflow-hidden whitespace-nowrap font-mono text-[11px] text-muted-foreground tabular-nums",
+              i > 0 &&
+                "pl-1.5 before:absolute before:top-0.5 before:bottom-px before:left-0 before:w-px before:bg-foreground/15"
             )}
-            style={a.at === n - 1 ? undefined : { left: left(a.at) }}
           >
-            {a.label}
+            {b.n >= 3 ? b.year : `’${b.year.slice(2)}`}
           </span>
         ))}
       </div>
-      <div
-        role="group"
-        aria-label="Who pays you, by month"
-        className="grid h-6 gap-px"
-        style={{ gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }}
-      >
-        {windows.map((w) => {
-          const from = idx.get(w.from) ?? 0
-          const span = (idx.get(w.to) ?? from) - from + 1
-          const style = { gridColumn: `${from + 1} / span ${span}` }
-          const range =
-            w.from === w.to
-              ? monLong(w.from)
-              : `${monLong(w.from)} to ${monLong(w.to)}`
-          const job = w.jobId ? byId.get(w.jobId) : null
-          if (!job) {
-            return (
-              <div
-                key={`gap-${w.from}`}
-                style={{
-                  ...style,
-                  backgroundImage:
-                    "repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in oklab, currentColor 14%, transparent) 4px 6px)",
-                }}
-                className="flex min-w-0 items-center justify-center overflow-hidden bg-muted text-[11px] text-muted-foreground first:rounded-l-md last:rounded-r-md"
-              >
-                <span className="sr-only">No pay, {range}</span>
-                {span >= 2 ? (
-                  <span aria-hidden="true" className="truncate px-1">
-                    No pay
-                  </span>
-                ) : null}
-              </div>
-            )
-          }
-          return (
-            <button
-              key={`${job.id}-${w.from}`}
-              type="button"
-              style={style}
-              aria-label={`${job.employer || "Unnamed job"}, ${range}`}
-              onClick={() => onJump(job.id)}
-              className={cn(
-                "relative flex min-w-0 items-center overflow-visible px-1.5 text-left text-[11px] text-foreground outline-none before:absolute before:inset-x-0 before:-inset-y-1 first:rounded-l-md last:rounded-r-md hover:bg-primary/40 focus-visible:ring-3 focus-visible:ring-ring/50 pointer-coarse:before:-inset-y-2.5",
-                (shade.get(job.id) ?? 0) % 2 ? "bg-primary/30" : "bg-primary/15"
-              )}
-            >
-              <span className="min-w-0 truncate">{job.employer}</span>
-            </button>
-          )
-        })}
+      <div className="hidden @xl:grid" style={cols} aria-hidden="true">
+        {months.map((m) => (
+          <span
+            key={m}
+            className="text-center font-mono text-[10px] text-muted-foreground/75"
+          >
+            {monName(m).slice(0, 1)}
+          </span>
+        ))}
       </div>
-      {shownTicks.length ? (
-        <div
-          className="relative h-4 text-[11px] text-muted-foreground"
-          aria-hidden="true"
-        >
-          {shownTicks.map((t) => (
-            <span
-              key={`${t.at}-${t.label}`}
-              className={cn(
-                "absolute top-0 flex items-center gap-0.5 whitespace-nowrap font-mono tabular-nums",
-                edge(t.at)
-              )}
-              style={{ left: left(t.at) }}
+
+      {lanes.map((job) => {
+        const color = colorOf.get(job.id) ?? "var(--job1)"
+        const name = job.employer || "Unnamed job"
+        const baseJob = baseById?.get(job.id) ?? null
+        const added = baseById != null && baseJob == null
+        const mine = job.enabled
+          ? windows.filter((w) => w.jobId === job.id)
+          : []
+        const gap = job.enabled ? gapAfter(job, windows) : null
+        const end = job.enabled ? jobEnd(jobs, job, months) : null
+
+        let cells: React.ReactNode
+        if (!job.enabled || !mine.length) {
+          cells = (
+            <div
+              className="flex h-full items-center rounded-md border border-foreground/15 border-dashed px-2 text-[11px] text-muted-foreground"
+              style={{ gridColumn: "1 / -1" }}
             >
-              <span className="h-2 w-px bg-muted-foreground/60" />
-              {t.show ? t.label : null}
+              {job.enabled
+                ? "Pays nothing inside the plan"
+                : "Off: not in this plan"}
+            </div>
+          )
+        } else {
+          cells = (
+            <>
+              {mine.map((w) => {
+                const a = idx.get(w.from) ?? 0
+                const b = idx.get(w.to) ?? a
+                // Runs of the same salary step inside the window.
+                const runs: { step: number; from: number; n: number }[] = []
+                for (let i = a; i <= b; i++) {
+                  const step = stepIndexAt(job, months[i])
+                  const last = runs.at(-1)
+                  if (last && last.step === step) last.n += 1
+                  else runs.push({ step, from: i, n: 1 })
+                }
+                let prev = 0
+                return (
+                  <div
+                    key={w.from}
+                    className="flex h-full min-w-0 gap-0.5"
+                    style={span(a, b - a + 1)}
+                  >
+                    {runs.map((r, ri) => {
+                      const s = job.salary[r.step]
+                      const g = s?.gross ?? 0
+                      const up = prev ? ((g - prev) / prev) * 100 : null
+                      prev = g
+                      const label = usdShort(g)
+                      const upText = up ? pctDelta(up) : ""
+                      const w = r.n * pxm - 2
+                      const need = labelWidth(label)
+                      const needUp = need + upText.length * 6.2 + 5
+                      const changed =
+                        s != null && baseJob != null && stepChanged(s, baseJob)
+                      const mix = Math.min(18 + ri * 14, 60)
+                      const when = range(
+                        months[r.from],
+                        months[r.from + r.n - 1]
+                      )
+                      return (
+                        <button
+                          key={months[r.from]}
+                          type="button"
+                          onClick={() => onJump(job.id, r.step)}
+                          aria-label={`${name}, ${usd(g)} a year, ${when}${changed ? ", changed in scenario" : ""}. Edit`}
+                          title={`${name} · ${usd(g)}/yr · ${when}`}
+                          style={{
+                            flexGrow: r.n,
+                            background: `color-mix(in oklab, ${color} ${mix}%, var(--card))`,
+                          }}
+                          className={cn(
+                            "relative flex h-full min-w-0 shrink basis-0 touch-manipulation items-center gap-1 overflow-hidden whitespace-nowrap px-1.5 font-mono text-[11px] text-foreground tabular-nums transition-[filter] duration-150 ease-out first:rounded-l-md last:rounded-r-md hover:brightness-[1.08] focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.985] motion-reduce:transition-none",
+                            changed
+                              ? "outline-1 outline-foreground outline-dashed -outline-offset-3"
+                              : "outline-none"
+                          )}
+                        >
+                          {w >= need ? label : null}
+                          {w >= needUp && upText ? (
+                            <span className="text-muted-foreground">
+                              {upText}
+                            </span>
+                          ) : null}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )
+              })}
+              {gap ? (
+                <div
+                  className="flex h-full items-center justify-center overflow-hidden whitespace-nowrap rounded-md text-[11px] text-muted-foreground"
+                  style={{
+                    ...span(
+                      idx.get(gap.from) ?? 0,
+                      (idx.get(gap.to) ?? 0) - (idx.get(gap.from) ?? 0) + 1
+                    ),
+                    backgroundImage: STRIPES,
+                  }}
+                  title={`No pay, ${range(gap.from, gap.to)}`}
+                >
+                  <span className="sr-only">
+                    No pay, {range(gap.from, gap.to)}
+                  </span>
+                  {((idx.get(gap.to) ?? 0) - (idx.get(gap.from) ?? 0) + 1) *
+                    pxm >
+                  labelWidth("No pay") ? (
+                    <span aria-hidden="true">No pay</span>
+                  ) : null}
+                </div>
+              ) : null}
+            </>
+          )
+        }
+
+        // The end-of-job line: why the bar stops where it does.
+        let endLine: React.ReactNode = null
+        if (end && gap) {
+          const count = (idx.get(gap.to) ?? 0) - (idx.get(gap.from) ?? 0) + 1
+          endLine = (
+            <span className={cn("inline-flex items-start gap-1", WARN)}>
+              <AlertTriangle
+                size={11}
+                aria-hidden="true"
+                className="mt-0.5 shrink-0"
+              />
+              {`No pay for ${count} month${count === 1 ? "" : "s"}, ${
+                gap.from === gap.to
+                  ? monApos(gap.from)
+                  : `${monApos(gap.from)} to ${monApos(gap.to)}`
+              }${end.next ? `, until ${end.next.employer} starts` : ""}`}
             </span>
-          ))}
-        </div>
-      ) : null}
+          )
+        } else if (end?.next) {
+          endLine =
+            job.leave === end.last
+              ? `Ends ${monLong(end.last)} (you leave)`
+              : `Ends ${monLong(end.last)}, when ${end.next.employer} starts`
+        }
+
+        return (
+          <div key={job.id} className="flex min-w-0 flex-col gap-1 pt-1.5">
+            <div className="flex min-w-0 items-center gap-1.5 text-xs">
+              <span
+                aria-hidden="true"
+                className="size-2 shrink-0 rounded-[2px]"
+                style={{ background: job.enabled ? color : "transparent" }}
+              />
+              <span
+                className={cn(
+                  "min-w-0 truncate font-medium",
+                  !job.enabled && "text-muted-foreground"
+                )}
+              >
+                {name}
+              </span>
+              {added ? <ScenarioTag>Added</ScenarioTag> : null}
+              <span className="ml-auto shrink-0 whitespace-nowrap font-mono text-muted-foreground tabular-nums">
+                {job.enabled ? payText(job, windows, months) : "off"}
+              </span>
+            </div>
+            <div className="relative h-[26px] rounded-md bg-muted">
+              {janLines}
+              <div className="absolute inset-0 grid" style={cols}>
+                {cells}
+              </div>
+            </div>
+            {endLine ? (
+              <span className="text-[11px] text-muted-foreground">
+                {endLine}
+              </span>
+            ) : null}
+          </div>
+        )
+      })}
+
+      <div className="flex flex-wrap gap-x-3 gap-y-0.5 pt-1 text-[11px] text-muted-foreground">
+        <span>
+          Gross over the plan{" "}
+          <span className="font-mono font-medium text-foreground tabular-nums">
+            {usd(total)}
+          </span>{" "}
+          · {raises} raise{raises === 1 ? "" : "s"} · {changes} job change
+          {changes === 1 ? "" : "s"}
+        </span>
+        <span>Tap a step to edit it.</span>
+      </div>
     </div>
   )
-}
-
-/** "Nov '26". */
-function shortMonth(m: string | undefined): string {
-  if (!m) return ""
-  return `${monName(m)} ’${m.slice(2, 4)}`
 }
 
 // ----------------------------------------------------------------- job card
@@ -641,7 +953,7 @@ function RemovedJobRow({
 }) {
   return (
     <div className="flex min-h-11 items-center gap-2 rounded-lg px-3 py-2 text-xs ring-1 ring-foreground/10 md:min-h-9">
-      <span className="min-w-0 truncate text-muted-foreground line-through opacity-55">
+      <span className="min-w-0 truncate text-muted-foreground line-through opacity-70">
         {job.employer}
       </span>
       <RowTag>Removed in scenario</RowTag>
@@ -650,13 +962,61 @@ function RemovedJobRow({
           type="button"
           data-job-restore={job.id}
           onClick={onRestore}
-          className="relative ml-auto text-muted-foreground text-xs outline-none before:absolute before:-inset-2 hover:text-foreground focus-visible:underline pointer-coarse:before:-inset-3"
+          className="relative ml-auto min-h-7 touch-manipulation font-medium text-foreground text-xs outline-none before:absolute before:-inset-x-1.5 before:-inset-y-1 focus-visible:underline active:scale-[0.97] pointer-coarse:before:-inset-y-2"
         >
           Restore
         </button>
       )}
     </div>
   )
+}
+
+/** The card's second line: dates with the reason, and any hint. */
+function jobLine(
+  job: Job,
+  jobs: Job[],
+  windows: JobWindow[],
+  months: string[]
+): { dates: string; hint?: string; gap?: string } {
+  const first = months[0] ?? thisMonth()
+  const before = job.start == null || job.start < first
+  const s = before ? "Before plan" : monLong(job.start)
+  if (!job.enabled)
+    return {
+      dates: job.leave
+        ? `${s} to ${monLong(job.leave)}`
+        : before
+          ? "Whole plan"
+          : `From ${monLong(job.start)}`,
+      hint: "Off: not in this plan",
+    }
+  if (!paidRange(job, windows))
+    return {
+      dates: s,
+      hint: "Pays nothing inside the plan: a later job covers it.",
+    }
+  const end = jobEnd(jobs, job, months)
+  if (!end)
+    return {
+      dates: before
+        ? job.leave
+          ? `${s} to ${monLong(job.leave)}`
+          : "Whole plan"
+        : `From ${monLong(job.start)}`,
+    }
+  const dates = `${s} to ${monLong(end.last)}`
+  if (end.gap) {
+    const from = addMonths(end.last, 1)
+    return {
+      dates,
+      gap: end.next?.start
+        ? `No pay from ${monLong(from)} until ${end.next.employer} starts in ${monLong(end.next.start)}.`
+        : `No pay after ${monLong(end.last)}.`,
+    }
+  }
+  if (end.next && job.leave !== end.last)
+    return { dates: `${dates}, when ${end.next.employer} starts` }
+  return { dates }
 }
 
 function JobCard({
@@ -701,17 +1061,12 @@ function JobCard({
   const first = months[0] ?? thisMonth()
   const last = months.at(-1) ?? first
   const end = job.enabled ? jobEnd(jobs, job, months) : null
-  const pays = job.enabled && windows.some((w) => w.jobId === job.id)
-  const before = job.start == null || job.start < first
-  const endM = job.enabled ? (end?.last ?? null) : job.leave
-  const dates = before
-    ? endM
-      ? `before plan to ${monLong(endM)}`
-      : "whole plan"
-    : endM
-      ? `${monLong(job.start)} to ${monLong(endM)}`
-      : `from ${monLong(job.start)}`
-  const gross = grossAt(job, firstPaidMonth(job, months))
+  const line = jobLine(job, jobs, windows, months)
+  const range = paidRange(job, windows)
+  const grossNow = grossAt(
+    job,
+    range?.from ?? (job.start && job.start > first ? job.start : first)
+  )
 
   // The next enabled job by start, for the leave helper.
   const laterJob =
@@ -725,27 +1080,7 @@ function JobCard({
               j.start != null &&
               j.start > (job.start ?? "")
           )
-          .sort((a, b) => ((a.start ?? "") < (b.start ?? "") ? -1 : 1))[0] ??
-        null)
-
-  let hint: React.ReactNode = null
-  if (!job.enabled) hint = "Off: not in this plan"
-  else if (!pays) hint = "Pays nothing inside the plan: a later job covers it."
-  else if (end && !end.gap && end.next && job.leave !== end.last)
-    hint = `Ends ${monLong(end.last)} when ${end.next.employer} starts`
-  else if (end?.gap)
-    hint = (
-      <span className="inline-flex items-start gap-1 text-amber-700 dark:text-amber-400">
-        <AlertTriangle
-          size={12}
-          aria-hidden="true"
-          className="mt-px shrink-0"
-        />
-        {end.next?.start
-          ? `Leaves ${monLong(end.last)}. No pay until ${end.next.employer} starts in ${monLong(end.next.start)}.`
-          : `Leaves ${monLong(end.last)}. No pay after that.`}
-      </span>
-    )
+          .sort(cmpStart)[0] ?? null)
 
   const m = <K extends keyof Job>(k: K, fmt: (v: Job[K]) => string) =>
     marks(
@@ -775,25 +1110,29 @@ function JobCard({
   })
 
   const bodyId = fid("body")
+  const dim = !job.enabled && "opacity-55"
   return (
     <div
       data-job-card={job.id}
-      className="@container flex scroll-mt-14 flex-col rounded-lg ring-1 ring-foreground/10"
+      className={cn(
+        "@container flex scroll-mt-14 flex-col rounded-lg ring-1",
+        open ? "ring-foreground/15" : "ring-foreground/10"
+      )}
     >
-      <div className="flex flex-col gap-0.5 px-3 py-2">
-        <div className="flex min-h-9 items-center gap-2 text-xs md:min-h-7">
-          <HitToggle
-            checked={job.enabled}
-            onChange={(v) => setJob((j) => ({ ...j, enabled: v }))}
-            label={`Include ${name}`}
-          />
+      <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 px-3 py-2 text-xs">
+        <HitToggle
+          checked={job.enabled}
+          onChange={(v) => setJob((j) => ({ ...j, enabled: v }))}
+          label={`Include ${name}`}
+        />
+        <div className="flex min-w-0 items-center gap-1.5">
           <button
             type="button"
             data-job-header={job.id}
             aria-expanded={open}
             aria-controls={bodyId}
             onClick={() => onOpenChange(!open)}
-            className="flex min-w-0 items-center gap-1 rounded-sm font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="flex min-h-9 min-w-0 touch-manipulation items-center gap-1 rounded-sm text-left font-medium outline-none hover:underline hover:decoration-foreground/20 hover:underline-offset-[3px] focus-visible:ring-3 focus-visible:ring-ring/50 md:min-h-7"
           >
             <ChevronRight
               size={12}
@@ -803,145 +1142,158 @@ function JobCard({
                 open && "rotate-90"
               )}
             />
-            <span className={cn("truncate", !job.enabled && "opacity-55")}>
+            <span className={cn("truncate", dim)}>
               {job.employer || "Unnamed job"}
             </span>
           </button>
           {jobEdited ? (
             <EditedDot
+              label={`Unsaved changes to ${name}. Reset this job.`}
               onReset={() =>
                 savedJob && setJob(() => structuredClone(savedJob))
               }
             />
           ) : null}
-          {tag ? <RowTag>{tag}</RowTag> : null}
-          <span className="ml-auto hidden shrink-0 whitespace-nowrap text-muted-foreground @md:inline">
-            {dates}
-          </span>
-          <span
-            className={cn(
-              "ml-auto shrink-0 font-mono tabular-nums @md:ml-0",
-              !job.enabled && "opacity-55"
-            )}
-          >
-            {usdShort(gross)}
-          </span>
-          {readOnly ? null : (
-            <IconButton label={`Remove ${name}`} onClick={onRemove}>
-              <X size={12} aria-hidden="true" />
-            </IconButton>
-          )}
         </div>
-        <span className="pl-9 text-muted-foreground text-xs @md:hidden">
-          {dates}
+        <span
+          className={cn(
+            "shrink-0 whitespace-nowrap text-right font-mono tabular-nums",
+            dim
+          )}
+        >
+          {payText(job, windows, months)}
         </span>
-        {hint ? (
-          <span className="pl-9 text-muted-foreground text-xs">{hint}</span>
-        ) : null}
+        <div className="col-start-2 col-end-[-1] -mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground">
+          {tag ? <ScenarioTag>{tag}</ScenarioTag> : null}
+          <span>{line.dates}</span>
+          {line.hint ? <span>{line.hint}</span> : null}
+          {line.gap ? (
+            <span
+              className={cn("inline-flex basis-full items-start gap-1", WARN)}
+            >
+              <AlertTriangle
+                size={12}
+                aria-hidden="true"
+                className="mt-px shrink-0"
+              />
+              {line.gap}
+            </span>
+          ) : null}
+        </div>
       </div>
 
       {open ? (
         <div
           id={bodyId}
-          className={cn(
-            "grid gap-x-4 gap-y-3 border-t px-3 pt-3 pb-3 @md:grid-cols-2",
-            !job.enabled && "opacity-55"
-          )}
+          className="flex flex-col gap-4 border-t px-3 pt-3.5 pb-3"
         >
-          <Field
-            id={fid("employer")}
-            label="Employer"
-            className="@md:col-span-2"
-            {...m("employer", (v) => v || "unnamed")}
-            error={employerError}
-          >
-            <input
+          <div className={cn("grid gap-x-4 gap-y-3 @md:grid-cols-2", dim)}>
+            <Field
               id={fid("employer")}
-              data-job-employer={job.id}
-              value={job.employer}
-              disabled={readOnly}
-              required
-              autoComplete="off"
-              spellCheck={false}
-              data-1p-ignore
-              aria-invalid={employerError ? true : undefined}
-              onChange={(e) =>
-                setJob((j) => ({ ...j, employer: e.target.value }))
-              }
-              onBlur={() => setTouched(true)}
-              className={TEXT_INPUT}
-            />
-          </Field>
-
-          <Field
-            id={fid("start")}
-            label="Start"
-            {...m("start", (v) => (v ? monLong(v) : "before plan"))}
-            error={errors[`${path}.start`]}
-          >
-            <Lock disabled={readOnly || job.start == null}>
-              <MonthField
-                id={fid("start")}
-                ariaLabel={`${name} start month`}
-                value={job.start ?? ""}
-                max={last}
-                onChange={(start) => setJob((j) => ({ ...j, start }))}
+              label="Employer"
+              className="@md:col-span-2"
+              {...m("employer", (v) => v || "unnamed")}
+              error={employerError}
+            >
+              <input
+                id={fid("employer")}
+                data-job-employer={job.id}
+                value={job.employer}
+                disabled={readOnly}
+                required
+                autoComplete="off"
+                spellCheck={false}
+                data-1p-ignore
+                aria-invalid={employerError ? true : undefined}
+                onChange={(e) =>
+                  setJob((j) => ({ ...j, employer: e.target.value }))
+                }
+                onBlur={() => setTouched(true)}
+                className={TEXT_INPUT}
               />
-            </Lock>
-            {index === 0 || job.start == null ? (
-              <Lock disabled={readOnly}>
-                <CheckRow
-                  checked={job.start == null}
-                  onChange={(v) =>
-                    setJob((j) => ({ ...j, start: v ? null : first }))
-                  }
-                >
-                  Already working here
-                </CheckRow>
+            </Field>
+
+            <Field
+              id={fid("start")}
+              label="Start"
+              {...m("start", (v) => (v ? monLong(v) : "before plan"))}
+              error={errors[`${path}.start`]}
+            >
+              <Lock disabled={readOnly || job.start == null}>
+                {job.start == null ? (
+                  <input
+                    id={fid("start")}
+                    value="Before the plan"
+                    disabled
+                    className={cn(TEXT_INPUT, "text-muted-foreground")}
+                  />
+                ) : (
+                  <MonthField
+                    id={fid("start")}
+                    ariaLabel={`${name} start month`}
+                    value={job.start}
+                    max={last}
+                    onChange={(start) => setJob((j) => ({ ...j, start }))}
+                  />
+                )}
               </Lock>
-            ) : null}
-          </Field>
-
-          <Field
-            id={fid("leave")}
-            label="Leave (optional)"
-            {...m("leave", (v) => (v ? monLong(v) : "open"))}
-            error={leaveError}
-          >
-            <Lock disabled={readOnly} className="flex items-center gap-1">
-              <MonthField
-                id={fid("leave")}
-                ariaLabel={`${name} leave month`}
-                value={job.leave ?? ""}
-                min={job.start ?? undefined}
-                onChange={(leave) => setJob((j) => ({ ...j, leave }))}
-              />
-              {job.leave && !readOnly ? (
-                <IconButton
-                  label="Clear leave month"
-                  className="ml-1"
-                  onClick={() => setJob((j) => ({ ...j, leave: null }))}
-                >
-                  <X size={12} aria-hidden="true" />
-                </IconButton>
+              {index === 0 || job.start == null ? (
+                <Lock disabled={readOnly}>
+                  <CheckRow
+                    checked={job.start == null}
+                    onChange={(v) =>
+                      setJob((j) => ({ ...j, start: v ? null : first }))
+                    }
+                  >
+                    Already working here
+                  </CheckRow>
+                </Lock>
               ) : null}
-            </Lock>
-            {!job.leave && !leaveError ? (
-              <span className="text-muted-foreground text-xs">
-                {laterJob?.start
-                  ? `Ends when ${laterJob.employer} starts (${monLong(laterJob.start)})`
-                  : "Open: runs to the end of the plan"}
-              </span>
-            ) : null}
-          </Field>
+            </Field>
 
-          <div className="flex min-w-0 flex-col gap-1.5 @md:col-span-2">
+            <Field
+              id={fid("leave")}
+              label="Leave (optional)"
+              {...m("leave", (v) => (v ? monLong(v) : "open"))}
+              error={leaveError}
+            >
+              <Lock disabled={readOnly} className="flex items-center gap-1">
+                <MonthField
+                  id={fid("leave")}
+                  ariaLabel={`${name} leave month`}
+                  value={job.leave ?? ""}
+                  min={job.start ?? undefined}
+                  onChange={(leave) => setJob((j) => ({ ...j, leave }))}
+                />
+                {job.leave && !readOnly ? (
+                  <IconButton
+                    label="Clear leave month"
+                    className="ml-1"
+                    onClick={() => setJob((j) => ({ ...j, leave: null }))}
+                  >
+                    <X size={12} aria-hidden="true" />
+                  </IconButton>
+                ) : null}
+              </Lock>
+              {!job.leave && !leaveError ? (
+                <span className="text-muted-foreground text-xs">
+                  {laterJob?.start
+                    ? `Ends when ${laterJob.employer} starts (${monLong(laterJob.start)})`
+                    : "Open: runs to the end of the plan"}
+                </span>
+              ) : null}
+            </Field>
+          </div>
+
+          <div className={cn("flex min-w-0 flex-col gap-1.5", dim)}>
             <div className="flex items-center gap-1.5 text-xs">
-              <span>Salary (gross)</span>
+              <span className="font-medium">Salary</span>
+              <span className="text-muted-foreground">annual gross</span>
               <Markers {...m("salary", salaryText)} />
             </div>
             <SalarySteps
               steps={job.salary}
+              baseJob={baseJob}
               jobStart={job.start}
               months={months}
               who={name}
@@ -952,43 +1304,54 @@ function JobCard({
             />
           </div>
 
-          <div className="flex min-w-0 flex-col gap-1.5 @md:col-span-2">
+          <div className={cn("flex min-w-0 flex-col gap-1.5", dim)}>
             <div className="flex items-center gap-1.5 text-xs">
-              <span>401k match</span>
+              <span className="font-medium">401k match</span>
               <Markers {...m("match", matchText)} />
             </div>
             <MatchEditor
               value={job.match}
+              grossNow={grossNow}
               readOnly={readOnly}
               onChange={(match) => setJob((j) => ({ ...j, match }))}
             />
             {errUnder(errors, `${path}.match`) ? (
-              <span className="text-rose-600 text-xs dark:text-rose-400">
+              <span className={cn("text-xs", ERROR)}>
                 {errUnder(errors, `${path}.match`)}
               </span>
             ) : null}
           </div>
 
-          <JobPayOverrides
-            job={job}
-            pay={pay}
-            savedJob={savedJob}
-            baseJob={baseJob}
-            readOnly={readOnly}
-            errors={errors}
-            path={path}
-            setJob={setJob}
-          />
+          <div className={cn("min-w-0", dim)}>
+            <JobPayOverrides
+              job={job}
+              pay={pay}
+              savedJob={savedJob}
+              baseJob={baseJob}
+              readOnly={readOnly}
+              errors={errors}
+              path={path}
+              setJob={setJob}
+            />
+          </div>
 
           {otherErrors.map(([k, msg]) => (
-            <span
-              key={k}
-              className="text-rose-600 text-xs @md:col-span-2 dark:text-rose-400"
-              data-field-error=""
-            >
+            <span key={k} className={cn("text-xs", ERROR)} data-field-error="">
               {msg}
             </span>
           ))}
+
+          {readOnly ? null : (
+            <div className="-mt-1 flex justify-end border-t pt-2">
+              <button
+                type="button"
+                onClick={onRemove}
+                className="relative inline-flex min-h-9 touch-manipulation items-center text-rose-600 text-xs underline-offset-2 outline-none before:absolute before:-inset-x-1.5 before:-inset-y-1 hover:underline focus-visible:underline active:scale-[0.97] md:min-h-7 dark:text-rose-400"
+              >
+                Remove {job.employer || "this job"}
+              </button>
+            </div>
+          )}
         </div>
       ) : null}
     </div>
@@ -999,6 +1362,7 @@ function JobCard({
 
 function SalarySteps({
   steps,
+  baseJob,
   jobStart,
   months,
   who,
@@ -1008,6 +1372,7 @@ function SalarySteps({
   onChange,
 }: {
   steps: SalaryStep[]
+  baseJob: Job | null
   jobStart: string | null
   months: string[]
   who: string
@@ -1097,6 +1462,19 @@ function SalarySteps({
     if (seen.has(s.from)) dupAt.add(i)
     else seen.set(s.from, i)
   })
+  // Change from the previous enabled step, in month order.
+  const delta = new Map<number, number>()
+  {
+    const order = steps
+      .map((s, i) => ({ s, i }))
+      .filter((x) => x.s.enabled)
+      .sort((a, b) => (a.s.from < b.s.from ? -1 : a.s.from > b.s.from ? 1 : 0))
+    order.forEach((x, k) => {
+      const p = order[k - 1]
+      if (p && p.s.gross > 0)
+        delta.set(x.i, ((x.s.gross - p.s.gross) / p.s.gross) * 100)
+    })
+  }
   const firstOn = enabledSteps({ salary: steps } as Job)[0]
   const effStart =
     jobStart == null || (months[0] && jobStart < months[0])
@@ -1116,8 +1494,26 @@ function SalarySteps({
         })()
       : null
 
+  // Narrow: [check] [month] [change] [x], then gross, then note.
+  // From 30rem: one row, with column headers.
+  const grid =
+    "grid grid-cols-[20px_minmax(0,1fr)_3.4rem_24px] items-center gap-x-2 gap-y-1.5 @[30rem]:grid-cols-[20px_9.25rem_minmax(6.5rem,1fr)_3.4rem_minmax(0,1fr)_24px]"
+
   return (
-    <div ref={rootRef} className="flex flex-col gap-2">
+    <div ref={rootRef} className="flex flex-col gap-1.5">
+      <div
+        aria-hidden="true"
+        className={cn(
+          grid,
+          "hidden text-[11px] text-muted-foreground @[30rem]:grid"
+        )}
+      >
+        <span />
+        <span>From</span>
+        <span className="text-right">Annual gross</span>
+        <span className="text-right">Change</span>
+        <span>Note</span>
+      </div>
       {steps.map((s, i) => {
         const k = lk.keys[i]
         const when = monLong(s.from)
@@ -1125,27 +1521,47 @@ function SalarySteps({
           errUnder(errors, `${path}[${i}]`) ??
           (dupAt.has(i) ? `Two steps start in ${when}.` : undefined)
         const only = steps.length <= 1
+        const d = delta.get(i)
+        const before = months[0] != null && s.from < months[0]
+        // In a scenario: the plan's gross for the same month, when it differs.
+        const planStep =
+          baseJob?.salary.find((b) => b.from === s.from && b.enabled) ?? null
+        const planGross =
+          planStep && planStep.gross !== s.gross ? planStep.gross : null
+        const off = !s.enabled && "opacity-50"
         return (
           <div
             key={k}
             data-step={k}
+            data-step-index={i}
             onBlur={(e) => {
               if (!e.currentTarget.contains(e.relatedTarget as Node | null))
                 sortSteps()
             }}
-            className="flex flex-col gap-1"
+            className={cn(
+              grid,
+              i > 0 && "border-t pt-2 @[30rem]:border-t-0 @[30rem]:pt-0"
+            )}
           >
+            <label
+              title="Include this step"
+              className="relative col-start-1 row-start-1 grid h-9 w-5 cursor-pointer place-items-center before:absolute before:inset-y-0 before:-inset-x-1 md:h-7"
+            >
+              <input
+                type="checkbox"
+                checked={s.enabled}
+                disabled={readOnly}
+                aria-label={`Include ${when} step`}
+                onChange={(e) => set(i, { enabled: e.target.checked })}
+                className="relative size-4 cursor-pointer accent-primary md:size-3.5"
+              />
+            </label>
             <div
               className={cn(
-                "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 @md:grid-cols-[auto_8.5rem_minmax(0,1fr)_minmax(0,1fr)_auto]",
-                !s.enabled && "text-muted-foreground"
+                "col-start-2 row-start-1 flex min-w-0 flex-col gap-0.5",
+                off
               )}
             >
-              <HitToggle
-                checked={s.enabled}
-                onChange={(v) => set(i, { enabled: v })}
-                label={`Include ${when} step`}
-              />
               <Lock disabled={readOnly}>
                 <MonthField
                   ariaLabel={`${who} salary step month`}
@@ -1153,62 +1569,105 @@ function SalarySteps({
                   onChange={(from) => set(i, { from })}
                 />
               </Lock>
-              <Lock
-                disabled={readOnly}
-                className="order-last col-span-3 grid grid-cols-2 gap-2 @md:contents"
-              >
-                <span data-step-gross="" className="contents">
-                  <NumberField
-                    ariaLabel={`Gross from ${when}`}
-                    prefix="$"
-                    suffix="/yr"
-                    className={cn(FIELD, !s.enabled && "opacity-70")}
-                    value={s.gross}
-                    onChange={(v) => set(i, { gross: Math.max(0, v) })}
-                  />
+              {before ? (
+                <span className="text-[11px] text-muted-foreground">
+                  before plan
                 </span>
-                <input
-                  aria-label={`Note for ${when} step`}
-                  placeholder="Note"
-                  value={s.note ?? ""}
-                  autoComplete="off"
-                  data-1p-ignore
-                  onChange={(e) => set(i, { note: e.target.value || null })}
-                  className={TEXT_INPUT}
-                />
-              </Lock>
-              {readOnly ? (
-                <span />
-              ) : (
-                <IconButton
-                  data-step-remove=""
-                  label={
-                    only
-                      ? `Remove ${when} step (a job needs at least one salary)`
-                      : `Remove ${when} step`
-                  }
-                  title={only ? "A job needs at least one salary" : undefined}
-                  disabled={only}
-                  className="ml-1 @md:order-last"
-                  onClick={() => remove(i)}
-                >
-                  <X size={12} aria-hidden="true" />
-                </IconButton>
-              )}
+              ) : null}
             </div>
-            {err ? (
-              <span
-                className="text-rose-600 text-xs dark:text-rose-400"
-                data-field-error=""
-              >
-                {err}
+            <Lock
+              disabled={readOnly}
+              className={cn(
+                "col-start-2 col-end-[-1] row-start-2 @[30rem]:col-start-3 @[30rem]:col-end-auto @[30rem]:row-start-1 @[30rem]:self-start",
+                off
+              )}
+            >
+              <span data-step-gross="" className="contents">
+                <NumberField
+                  ariaLabel={`Annual gross from ${when}`}
+                  prefix="$"
+                  suffix="/yr"
+                  className={FIELD}
+                  value={s.gross}
+                  onChange={(v) => set(i, { gross: Math.max(0, v) })}
+                />
               </span>
+            </Lock>
+            <span
+              className={cn(
+                "col-start-3 row-start-1 text-right font-mono text-[11px] tabular-nums @[30rem]:col-start-4",
+                d != null && d > 0
+                  ? "text-foreground"
+                  : "text-muted-foreground",
+                off
+              )}
+            >
+              <span aria-hidden="true">
+                {d != null ? pctDelta(d) : s.enabled ? "start" : "off"}
+              </span>
+              {d != null ? (
+                <span className="sr-only">
+                  {pctDelta(d)} from the step before
+                </span>
+              ) : null}
+            </span>
+            <Lock
+              disabled={readOnly}
+              className={cn(
+                "col-start-2 col-end-[-1] row-start-3 @[30rem]:col-start-5 @[30rem]:col-end-auto @[30rem]:row-start-1 @[30rem]:self-start",
+                off
+              )}
+            >
+              <input
+                aria-label={`Note for ${when} step`}
+                placeholder="Note"
+                value={s.note ?? ""}
+                autoComplete="off"
+                spellCheck={false}
+                data-1p-ignore
+                onChange={(e) => set(i, { note: e.target.value || null })}
+                className={cn(TEXT_INPUT, "w-full")}
+              />
+            </Lock>
+            {readOnly ? (
+              <span className="col-start-4 row-start-1 @[30rem]:col-start-6" />
+            ) : (
+              <IconButton
+                data-step-remove=""
+                label={
+                  only
+                    ? `Remove ${when} step (a job needs at least one salary)`
+                    : `Remove ${when} step`
+                }
+                title={only ? "A job needs at least one salary" : undefined}
+                disabled={only}
+                className="col-start-4 row-start-1 @[30rem]:col-start-6"
+                onClick={() => remove(i)}
+              >
+                <X size={12} aria-hidden="true" />
+              </IconButton>
+            )}
+            {planGross != null || err ? (
+              <div className="col-start-2 col-end-[-1] flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs">
+                {planGross != null ? (
+                  <FallbackReset
+                    source="Plan"
+                    text={usd(planGross)}
+                    onReset={() => set(i, { gross: planGross })}
+                  />
+                ) : null}
+                {err ? (
+                  <span className={ERROR} data-field-error="">
+                    {err}
+                  </span>
+                ) : null}
+              </div>
             ) : null}
           </div>
         )
       })}
       {gapWarning ? (
-        <span className="inline-flex items-start gap-1 text-amber-700 text-xs dark:text-amber-400">
+        <span className={cn("inline-flex items-start gap-1 text-xs", WARN)}>
           <AlertTriangle
             size={12}
             aria-hidden="true"
@@ -1241,12 +1700,49 @@ const MATCH_DEFAULTS: Record<Match["type"], Match> = {
   },
 }
 
+/** The match in one sentence, plus the most it can add (share of pay). */
+function matchSentence(m: Match): { text: string; max: number } {
+  switch (m.type) {
+    case "none":
+      return { text: "No employer match.", max: 0 }
+    case "flat":
+      return {
+        text: `Employer adds ${pctPlain(m.pct)} of pay, whatever you put in.`,
+        max: m.pct,
+      }
+    case "threshold":
+      return {
+        text: `Employer adds ${pctPlain(m.pct)} of pay once you put in at least ${pctPlain(m.minPct)}.`,
+        max: m.pct,
+      }
+    case "tiered": {
+      let prev = 0
+      let max = 0
+      const bits = m.tiers.map((t, i) => {
+        const w = Math.max(0, t.upToPct - prev)
+        max += t.rate * w
+        prev = Math.max(prev, t.upToPct)
+        return i === 0
+          ? `${pctPlain(t.rate)} of the first ${pctPlain(w)}`
+          : `${pctPlain(t.rate)} of the next ${pctPlain(w)}`
+      })
+      return {
+        text: `Employer matches ${bits.join(", then ")} you put in.`,
+        max,
+      }
+    }
+  }
+}
+
 function MatchEditor({
   value,
+  grossNow,
   readOnly,
   onChange,
 }: {
   value: Match
+  /** Annual gross the dollar estimate uses: the first paid month's. */
+  grossNow: number
   readOnly: boolean
   onChange: (m: Match) => void
 }) {
@@ -1256,6 +1752,7 @@ function MatchEditor({
   stash.current[value.type] = value
   const tierCount = value.type === "tiered" ? value.tiers.length : 0
   const lk = useLocalKeys(tierCount)
+  const info = matchSentence(value)
 
   return (
     <Lock disabled={readOnly} className="flex flex-col gap-2">
@@ -1331,26 +1828,28 @@ function MatchEditor({
             return (
               <div
                 key={lk.keys[i]}
-                className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
+                className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_24px] items-center gap-2 text-xs"
               >
                 <NumberField
                   ariaLabel={`Tier ${i + 1} match rate`}
                   suffix="%"
-                  className={cn(FIELD, "w-20 md:w-20")}
+                  className={FIELD}
                   value={pctIn(t.rate)}
                   onChange={(v) => setTier({ rate: Math.max(0, v) / 100 })}
                 />
-                <span className="text-muted-foreground">
+                <span className="whitespace-nowrap text-muted-foreground">
                   match on pay up to
                 </span>
                 <NumberField
                   ariaLabel={`Tier ${i + 1} applies up to, percent of pay`}
                   suffix="%"
-                  className={cn(FIELD, "w-20 md:w-20")}
+                  className={FIELD}
                   value={pctIn(t.upToPct)}
                   onChange={(v) => setTier({ upToPct: Math.max(0, v) / 100 })}
                 />
-                {readOnly ? null : (
+                {readOnly ? (
+                  <span />
+                ) : (
                   <IconButton
                     label={`Remove tier ${i + 1}`}
                     disabled={value.tiers.length <= 1}
@@ -1359,7 +1858,6 @@ function MatchEditor({
                         ? "A tiered match needs at least one tier"
                         : undefined
                     }
-                    className="ml-1"
                     onClick={() => {
                       lk.remove(i)
                       onChange({
@@ -1398,54 +1896,79 @@ function MatchEditor({
           )}
         </div>
       ) : null}
-      <span className="text-muted-foreground text-xs">
-        {value.type === "none" ? "No employer match." : matchText(value)}
-      </span>
+      <p className="m-0 text-pretty text-muted-foreground text-xs">
+        {info.text}
+        {info.max > 0 && grossNow > 0 ? (
+          <>
+            {" "}
+            Up to{" "}
+            <span className="font-mono text-foreground tabular-nums">
+              {pctPlain(info.max)}
+            </span>{" "}
+            of pay, about{" "}
+            <span className="font-mono text-foreground tabular-nums">
+              {usd(grossNow * info.max)}
+            </span>{" "}
+            a year at {usdShort(grossNow)}.
+          </>
+        ) : null}
+      </p>
     </Lock>
   )
 }
 
 // ------------------------------------------------------------ pay overrides
 
-function DetailsRow({
+/** A disclosure row: chevron, title, a one-line summary; body below. */
+function Disclosure({
   title,
   summary,
   open,
   onOpenChange,
-  className,
   children,
 }: {
   title: string
   summary: string
   open: boolean
   onOpenChange: (v: boolean) => void
-  className?: string
   children: React.ReactNode
 }) {
+  const id = React.useId()
   return (
-    <details
-      open={open}
-      onToggle={(e) =>
-        onOpenChange((e.currentTarget as HTMLDetailsElement).open)
-      }
-      className={cn("group min-w-0", className)}
-    >
-      <summary className="flex min-h-9 cursor-pointer list-none items-baseline gap-2 rounded-sm text-xs outline-none focus-visible:ring-3 focus-visible:ring-ring/50 md:min-h-7 [&::-webkit-details-marker]:hidden">
+    <div className="min-w-0 border-t pt-1">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={() => onOpenChange(!open)}
+        className="group grid min-h-9 w-full touch-manipulation grid-cols-[12px_auto_minmax(0,1fr)] items-baseline gap-x-1.5 rounded-sm py-1.5 text-left text-xs outline-none focus-visible:ring-3 focus-visible:ring-ring/50 md:min-h-8"
+      >
         <ChevronRight
           size={12}
           aria-hidden="true"
-          className="shrink-0 translate-y-0.5 text-muted-foreground transition-transform duration-150 ease-out group-open:rotate-90 motion-reduce:transition-none"
+          className={cn(
+            "translate-y-0.5 text-muted-foreground transition-transform duration-150 ease-out motion-reduce:transition-none",
+            open && "rotate-90"
+          )}
         />
-        <span className="shrink-0">{title}</span>
-        <span className="min-w-0 text-muted-foreground">{summary}</span>
-      </summary>
-      <div className="mt-2 flex flex-col gap-4 border-l pl-3">{children}</div>
-    </details>
+        <span className="whitespace-nowrap font-medium group-hover:underline group-hover:decoration-foreground/20 group-hover:underline-offset-[3px]">
+          {title}
+        </span>
+        <span className="min-w-0 truncate text-muted-foreground">
+          {summary}
+        </span>
+      </button>
+      {open ? (
+        <div id={id} className="flex flex-col gap-3.5 pt-1.5 pb-1 pl-[18px]">
+          {children}
+        </div>
+      ) : null}
+    </div>
   )
 }
 
-/** One override item: the person default with [Override], or the editor
- * with "Use person default". */
+/** One override item: "Default: ..." with [Override], or the editor with
+ * "Use pay default". */
 function OverrideItem({
   label,
   overridden,
@@ -1455,7 +1978,7 @@ function OverrideItem({
   onOverride,
   onUseDefault,
   overrideLabel = "Override",
-  defaultLabel = "Use person default",
+  defaultLabel = "Use pay default",
   children,
 }: {
   label: string
@@ -1469,8 +1992,6 @@ function OverrideItem({
   defaultLabel?: string
   children: React.ReactNode
 }) {
-  const textBtn =
-    "relative shrink-0 text-muted-foreground text-xs underline-offset-2 outline-none before:absolute before:-inset-2 hover:text-foreground focus-visible:underline pointer-coarse:before:-inset-3"
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
@@ -1482,7 +2003,7 @@ function OverrideItem({
         {readOnly ? null : overridden ? (
           <button
             type="button"
-            className={cn(textBtn, "ml-auto")}
+            className="relative ml-auto inline-flex min-h-9 shrink-0 touch-manipulation items-center text-muted-foreground text-xs underline-offset-2 outline-none before:absolute before:-inset-x-1.5 before:-inset-y-1 hover:text-foreground focus-visible:underline active:scale-[0.97] md:min-h-7"
             onClick={onUseDefault}
           >
             {defaultLabel}
@@ -1491,14 +2012,18 @@ function OverrideItem({
           <Button
             variant="outline"
             size="xs"
-            className="ml-auto h-8 md:h-6"
+            className="ml-auto h-9 md:h-7"
             onClick={onOverride}
           >
             {overrideLabel}
           </Button>
         )}
       </div>
-      {overridden ? children : null}
+      {overridden ? (
+        <div className="flex flex-col gap-2.5 border-l-2 pl-2.5">
+          {children}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -1534,14 +2059,12 @@ function JobPayOverrides({
   }, [errorInside])
 
   const overrides = [
-    job.schedule ? "schedule" : null,
+    job.schedule ? "pay schedule" : null,
     job.deductions ? "deductions" : null,
     job.withholding ? "withholding" : null,
   ].filter(Boolean)
   const summary = [
-    overrides.length
-      ? `Overrides: ${overrides.join(", ")}`
-      : "Uses person defaults",
+    overrides.length ? `Own ${overrides.join(", ")}` : "Uses your pay defaults",
     job.hsaEmployer ? "HSA employer money" : null,
   ]
     .filter(Boolean)
@@ -1562,19 +2085,18 @@ function JobPayOverrides({
     )
 
   return (
-    <DetailsRow
+    <Disclosure
       title="Pay overrides"
       summary={summary}
       open={open}
       onOpenChange={setOpen}
-      className="@md:col-span-2"
     >
       <OverrideItem
         label="Pay schedule"
         overridden={job.schedule != null}
-        defaultText={`person default (${scheduleText(pay.schedule)})`}
+        defaultText={`Default: ${capitalize(scheduleText(pay.schedule))}`}
         markers={m("schedule", (v: PaySchedule | null) =>
-          v ? scheduleText(v) : "person default"
+          v ? scheduleText(v) : "pay default"
         )}
         readOnly={readOnly}
         onOverride={() =>
@@ -1599,9 +2121,9 @@ function JobPayOverrides({
       <OverrideItem
         label="Deductions"
         overridden={job.deductions != null}
-        defaultText={`person default (${deductionsText(pay.deductions)})`}
+        defaultText={`Default: ${capitalize(deductionsText(pay.deductions))}`}
         markers={m("deductions", (v: Deduction[] | null) =>
-          v ? deductionsText(v) : "person default"
+          v ? deductionsText(v) : "pay default"
         )}
         readOnly={readOnly}
         onOverride={() =>
@@ -1625,9 +2147,9 @@ function JobPayOverrides({
       <OverrideItem
         label="Withholding"
         overridden={job.withholding != null}
-        defaultText={`person default (${withholdingText(pay.withholding)})`}
+        defaultText={`Default: ${capitalize(withholdingText(pay.withholding))}`}
         markers={m("withholding", (v: Withholding | null) =>
-          v ? withholdingText(v) : "person default"
+          v ? withholdingText(v) : "pay default"
         )}
         readOnly={readOnly}
         onOverride={() =>
@@ -1659,7 +2181,7 @@ function JobPayOverrides({
       <OverrideItem
         label="HSA employer money"
         overridden={job.hsaEmployer != null}
-        defaultText="none"
+        defaultText="None"
         overrideLabel="Add"
         defaultLabel="Remove"
         markers={m("hsaEmployer", (v) =>
@@ -1683,7 +2205,7 @@ function JobPayOverrides({
           />
         ) : null}
       </OverrideItem>
-    </DetailsRow>
+    </Disclosure>
   )
 }
 
@@ -1710,8 +2232,7 @@ function PayDefaults({
     if (errorInside) setOpen(true)
   }, [errorInside])
 
-  const sched = scheduleText(pay.schedule)
-  const summary = `${sched[0].toUpperCase()}${sched.slice(1)} · ${deductionsText(
+  const summary = `${capitalize(scheduleText(pay.schedule))} · ${deductionsText(
     pay.deductions
   )} · ${withholdingText(pay.withholding)}`
 
@@ -1731,12 +2252,15 @@ function PayDefaults({
   )
 
   return (
-    <DetailsRow
+    <Disclosure
       title="Pay defaults"
       summary={summary}
       open={open}
       onOpenChange={setOpen}
     >
+      <p className="m-0 text-muted-foreground text-xs">
+        Every job uses these unless it overrides them.
+      </p>
       <div className="flex min-w-0 flex-col gap-2">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className={label}>Pay schedule</span>
@@ -1757,7 +2281,7 @@ function PayDefaults({
               <Button
                 variant="outline"
                 size="xs"
-                className="h-8 md:h-6"
+                className="h-9 md:h-7"
                 onClick={() =>
                   setPay((p) => ({
                     ...p,
@@ -1769,9 +2293,7 @@ function PayDefaults({
               </Button>
             )}
             {errors["pay.schedule"] ? (
-              <span className="text-rose-600 dark:text-rose-400">
-                {errors["pay.schedule"]}
-              </span>
+              <span className={ERROR}>{errors["pay.schedule"]}</span>
             ) : null}
           </div>
         )}
@@ -1809,14 +2331,10 @@ function PayDefaults({
       </div>
 
       {otherErrors.map(([k, msg]) => (
-        <span
-          key={k}
-          className="text-rose-600 text-xs dark:text-rose-400"
-          data-field-error=""
-        >
+        <span key={k} className={cn("text-xs", ERROR)} data-field-error="">
           {msg}
         </span>
       ))}
-    </DetailsRow>
+    </Disclosure>
   )
 }
