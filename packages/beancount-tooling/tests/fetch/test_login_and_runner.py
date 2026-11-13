@@ -244,7 +244,15 @@ def test_failure_screenshot_masks_every_text_field(tmp_path):
 
 
 def test_registry_resolves_fetchers():
-    assert set(REGISTRY) == {"bofa", "amex", "td", "robinhood", "chase", "capitalone"}
+    assert set(REGISTRY) == {
+        "bofa",
+        "amex",
+        "td",
+        "robinhood",
+        "chase",
+        "capitalone",
+        "xmoney",
+    }
     for key in REGISTRY:
         cls = get_fetcher(key)
         assert issubclass(cls, Fetcher) and cls.key == key and cls.domain

@@ -31,6 +31,7 @@ REGISTRY: dict[str, str] = {
     "robinhood": "beancount_tooling.fetch.banks.robinhood",
     "chase": "beancount_tooling.fetch.banks.chase",
     "capitalone": "beancount_tooling.fetch.banks.capitalone",
+    "xmoney": "beancount_tooling.fetch.banks.xmoney",
 }
 
 

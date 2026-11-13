@@ -47,6 +47,7 @@ REF_KEY_COLUMNS = {
     "AmexImporter": "Reference",
     "BofAImporter": "Reference Number",
     "RobinhoodInvestmentImporter": "Id",
+    "XMoneyImporter": "Id",
 }
 AMOUNT_COLUMN = "Amount"
 

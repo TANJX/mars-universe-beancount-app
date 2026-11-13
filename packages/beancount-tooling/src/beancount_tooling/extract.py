@@ -33,6 +33,7 @@ from beancount_tooling.importer.wells_fargo_checking import WellsFargoCheckingIm
 from beancount_tooling.importer.td_checking import TDCheckingImporter
 from beancount_tooling.importer.robinhood import RobinhoodImporter
 from beancount_tooling.importer.robinhood_investment import RobinhoodInvestmentImporter
+from beancount_tooling.importer.x_money import XMoneyImporter
 from beancount_tooling import billing
 from beancount_tooling import pending
 from beancount_tooling import merchants
@@ -160,6 +161,7 @@ def build_importer(
         "TDCheckingImporter": TDCheckingImporter,
         "RobinhoodImporter": RobinhoodImporter,
         "RobinhoodInvestmentImporter": RobinhoodInvestmentImporter,
+        "XMoneyImporter": XMoneyImporter,
     }
 
     importer_cls = importer_classes[importer_class]
