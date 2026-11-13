@@ -556,6 +556,10 @@ IRA_LEDGER = """
   Assets:Investment:Broker:Roth-IRA:USD    2.00 USD
   Income:Dividends                        -2.00 USD
 
+2026-04-10 * "Roth conversion from the traditional IRA: not a contribution"
+  Assets:Investment:Broker:Roth-IRA:USD  784.04 USD
+  Assets:Investment:Broker:Trad-IRA:USD -784.04 USD
+
 2026-05-01 * "Traditional IRA deposit: other pattern"
   contribution: 40.00 USD
   Assets:Investment:Broker:Trad-IRA:USD   40.00 USD
@@ -579,7 +583,8 @@ def test_ledger_contributions_by_tax_year(ira_ledger):
     _led, entries = ira_ledger
     got = runway.ledger_contributions(entries, "^Assets:Investment:Broker:Roth-IRA:", TODAY)
     # 2025: the January deposit tagged tax-year 2025. 2026: 100 (metadata, match
-    # excluded) + 50 (funding leg); the buy, the dividend and December are out.
+    # excluded) + 50 (funding leg); the buy, the dividend, the conversion from
+    # the traditional IRA and December are out.
     assert got == {"2025": 290.0, "2026": 150.0}
 
 

@@ -455,3 +455,28 @@ test("a gap between jobs pays nothing and marks both ends", () => {
     sim(alex).rows.map((x) => x.takeHome)
   )
 })
+
+test("a 2nd-check-of-the-month deduction counts checks paid before asof", () => {
+  // asof falls between November's two checks: the 30th is the month's 2nd
+  // check, so the per-month HSA lands on it, not on December's only.
+  const d = demoRunway("2026-11-20")
+  const rec = d.people.find((p) =>
+    p.plan.contributions.some(
+      (c) =>
+        c.account === "hsa" &&
+        c.schedule.some((s) => s.pace === "fixed" && s.per === "month")
+    )
+  )
+  assert.ok(rec)
+  const job = rec.plan.jobs[0]
+  assert.ok(job)
+  const sched = job.schedule ?? rec.plan.pay.schedule
+  assert.equal(sched?.frequency, "semimonthly")
+  const r = simulate({
+    person: runnable(rec, rec.plan, d.start),
+    horizon: horizonOf(d, "year_end"),
+  })
+  const nov = r.paychecks.filter((p) => p.month === "2026-11")
+  assert.equal(nov.length, 1)
+  assert.ok((nov[0]?.hsa ?? 0) > 0)
+})

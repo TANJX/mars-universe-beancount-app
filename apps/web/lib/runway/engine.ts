@@ -31,6 +31,7 @@ import {
 import { activeJobAt, grossAt, resolveJob } from "./jobs"
 import { type Deferral, paycheck } from "./paycheck"
 import {
+  addMonths,
   endOfMonth,
   isoDate,
   monthSpan,
@@ -117,6 +118,20 @@ export function simulate(inputs: RunwayInputs): RunwayResult {
   const hsaOut: Record<string, number> = {}
   const iraOut: Record<string, number> = {}
   const nChecks: Record<string, number> = {}
+  // Checks of the asof month paid on or before asof. They are not simulated,
+  // but a "2nd check of the month" rule must count them: with asof on the
+  // 13th, the 30th is the month's 2nd check, not its 1st.
+  const priorChecks: Record<string, number> = {}
+  const asofMonth = h.asof.slice(0, 7)
+  const asofJob = jobAt(asofMonth)
+  if (asofJob) {
+    const monthStart = isoDate(endOfMonth(addMonths(asofMonth, -1)))
+    priorChecks[asofMonth] = paydates(
+      asofJob.schedule,
+      monthStart,
+      h.asof
+    ).length
+  }
   const toSleeve: Record<string, Partial<Record<string, number>>> = {}
   const events: Record<string, string[]> = {}
   const addEvent = (m: string, e: string) => {
@@ -243,8 +258,9 @@ export function simulate(inputs: RunwayInputs): RunwayResult {
     for (const d of job ? (byMonth[m] ?? []) : []) {
       if (!job) break
       const gross = grossAt(job, m) / periodsPerYear(job.schedule.frequency)
-      const nth = (nChecks[m] ?? 0) + 1
-      nChecks[m] = nth
+      const simulated = (nChecks[m] ?? 0) + 1
+      nChecks[m] = simulated
+      const nth = simulated + (priorChecks[m] ?? 0)
       const t = d.getTime()
       const left = countDates.filter(
         (x) => x.getUTCFullYear() === y && x.getTime() >= t

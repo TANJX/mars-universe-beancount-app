@@ -39,7 +39,7 @@ from beancount.core import data
 
 from . import store
 from .fire import _query, _usd
-from .portfolio import FUNDING_ROOTS, _explicit_amount, _tax_year
+from .portfolio import FUNDING_ROOTS, INVESTMENT_ROOT, _explicit_amount, _tax_year
 from .runway_patch import apply_patch
 
 log = logging.getLogger(__name__)
@@ -326,9 +326,12 @@ def ledger_contributions(entries, pattern: str, asof: datetime.date) -> dict[str
     A transaction counts when it moves USD into a matching account: its largest
     inbound USD leg there is the deposit. The amount is the transaction's (or
     that posting's) `contribution:` metadata, which leaves a broker match out;
-    without it, the USD that left asset or liability accounts outside the
-    pattern. The tax year is `tax-year:` metadata, else the deposit's year, so a
-    January deposit for last year counts toward last year.
+    without it, the USD that left cash, card or payroll-side accounts: asset or
+    liability accounts outside the pattern and outside `Assets:Investment:`.
+    Money moved in from another investment account (a Roth conversion, a
+    rollover, a brokerage transfer) is not new money and counts only with
+    `contribution:` metadata. The tax year is `tax-year:` metadata, else the
+    deposit's year, so a January deposit for last year counts toward last year.
     """
     rx = re.compile(pattern)
     by_year: dict[str, float] = {}
@@ -354,6 +357,7 @@ def ledger_contributions(entries, pattern: str, asof: datetime.date) -> dict[str
                     and p.units.currency == "USD"
                     and p.units.number < 0
                     and p.account.startswith(FUNDING_ROOTS)
+                    and not p.account.startswith(INVESTMENT_ROOT + ":")
                     and not rx.search(p.account)
                 ),
                 start=0,
