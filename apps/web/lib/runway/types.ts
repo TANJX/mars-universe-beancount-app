@@ -452,6 +452,17 @@ export interface MonthRow {
   netWorth: number
   playShare: number
   events: string[]
+  /** A past month read from the ledger (lib/runway/history.ts), not a
+   * forecast; the chart draws it solid and skips forecast-only logic. */
+  actual?: boolean
+  /** Actual months only: money that entered each sleeve from outside it. */
+  deposits?: MonthDeposits
+}
+
+export interface MonthDeposits {
+  ira: number
+  k401: number
+  hsa: number
 }
 
 export interface RunwayResult {

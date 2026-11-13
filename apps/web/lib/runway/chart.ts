@@ -230,6 +230,7 @@ export type GlyphType =
   | "cut"
   | "job"
   | "ira"
+  | "k401"
   | "hsa"
   | "limit"
   | "forfeit"
@@ -242,6 +243,7 @@ export const GLYPH_KEY: { type: GlyphType; label: string }[] = [
   { type: "cut", label: "Pay cut" },
   { type: "job", label: "Job change" },
   { type: "ira", label: "IRA deposit" },
+  { type: "k401", label: "401k deposit" },
   { type: "hsa", label: "HSA deposit" },
   { type: "limit", label: "Limit reached" },
   { type: "forfeit", label: "Match forfeited" },
@@ -268,6 +270,7 @@ export function glyphFor(e: string, row?: MonthRow): GlyphType {
   if (e === "Pay cut") return "cut"
   if (e === "New job starts" || / (starts|ends)$/.test(e)) return "job"
   if (e === "IRA deposit") return "ira"
+  if (e === "401k deposit") return "k401"
   if (e === "HSA deposit") return "hsa"
   if (/ limit reached$/.test(e) || e === "HSA over its limit") return "limit"
   if (e === "Match forfeited") return "forfeit"
@@ -283,6 +286,18 @@ function detailFor(
   result: RunwayResult | null,
   bills: number
 ): string | null {
+  if (row.actual) {
+    const d = row.deposits
+    const v =
+      type === "ira"
+        ? d?.ira
+        : type === "k401"
+          ? d?.k401
+          : type === "hsa"
+            ? d?.hsa
+            : 0
+    return v && v >= 0.5 ? `${money(v)} in` : null
+  }
   switch (type) {
     case "ira":
       return row.iraOut >= 0.5 ? `${money(row.iraOut)} paid from cash` : null
@@ -326,6 +341,12 @@ export function chartEvents(
       })
   })
   return out
+}
+
+/** Items indexed against the forecast, moved `by` months to the right (the
+ * history months drawn before it). */
+export function offsetIndex<T extends { i: number }>(xs: T[], by: number): T[] {
+  return by ? xs.map((x) => ({ ...x, i: x.i + by })) : xs
 }
 
 /** "Raise: take-home up" style line for the tooltip. */

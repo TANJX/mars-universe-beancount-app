@@ -11,7 +11,7 @@ from fava.ext import FavaExtensionBase, extension_endpoint
 from fava.helpers import FavaAPIError
 from flask import request
 
-from . import cc_statements, fire, portfolio, runway, runway_write, store
+from . import cc_statements, fire, portfolio, runway, runway_history, runway_write, store
 from .cc_statements import ApiError
 from .merge import (
     _credit_balance_on,
@@ -420,6 +420,24 @@ class LedgerDataApi(FavaExtensionBase):
                 entries=g.ledger.all_entries,
                 ledger_file_path=self._ledger_path(),
                 today=datetime.date.today(),
+            )
+        )
+
+    @extension_endpoint
+    def runway_history(self):
+        """Actual month-end sleeves and monthly flows for the last `months`
+        months before the plan starts (default 24, at most 36)."""
+        try:
+            months = int(request.args.get("months", 24))
+        except ValueError:
+            return _bad_request("months must be a whole number")
+        return json.dumps(
+            runway_history.build_history(
+                ledger=g.ledger,
+                entries=g.ledger.all_entries,
+                ledger_file_path=self._ledger_path(),
+                today=datetime.date.today(),
+                months=months,
             )
         )
 

@@ -10,6 +10,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { parseRunwayData } from "@/lib/runway/config"
 import type { SaveBody } from "@/lib/runway/drafts"
+import {
+  type HistoryRange,
+  parseRunwayHistory,
+  type RunwayHistory,
+} from "@/lib/runway/history"
 import type { RunwayData, RunwayIssue } from "@/lib/runway/types"
 
 const BASE = "/api/ext"
@@ -39,6 +44,25 @@ export function useRunwayData() {
     queryKey: ["runway"],
     queryFn: async () => parseRunwayData(await call("runway_data")),
     staleTime: 60_000,
+  })
+}
+
+/** Past months for the chart's history range, fetched only once a range is
+ * picked. Never throws: a missing endpoint or a bad payload resolves to
+ * null, which the page shows as "no history" and draws the plan alone. */
+export function useRunwayHistory(range: HistoryRange) {
+  return useQuery<RunwayHistory | null>({
+    queryKey: ["runway-history", range],
+    queryFn: async () => {
+      try {
+        return parseRunwayHistory(await call(`runway_history?months=${range}`))
+      } catch {
+        return null
+      }
+    },
+    enabled: range > 0,
+    staleTime: 60_000,
+    retry: false,
   })
 }
 
@@ -91,6 +115,10 @@ export function useRunwaySave() {
   const qc = useQueryClient()
   return useMutation<RunwaySaveResult, RunwaySaveError, SaveBody>({
     mutationFn: postSave,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["runway"] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["runway"] })
+      // Sleeve rules live in the same files, so history can change too.
+      void qc.invalidateQueries({ queryKey: ["runway-history"] })
+    },
   })
 }

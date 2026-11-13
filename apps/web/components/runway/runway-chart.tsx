@@ -75,8 +75,11 @@ function makeY(
   }
 }
 
-export const pts = (g: Geom, y: YAxis, vals: number[]) =>
-  vals.map((v, i) => `${g.x(i).toFixed(1)},${y.y(v).toFixed(1)}`).join(" ")
+/** Polyline points; `from` is the month index of vals[0]. */
+export const pts = (g: Geom, y: YAxis, vals: number[], from = 0) =>
+  vals
+    .map((v, i) => `${g.x(i + from).toFixed(1)},${y.y(v).toFixed(1)}`)
+    .join(" ")
 
 function useSize(ref: React.RefObject<HTMLElement | null>) {
   const [size, setSize] = React.useState({ w: 0, h: 0 })
@@ -104,12 +107,21 @@ export function Glyph({
   x,
   y,
   hollow = false,
+  scale = 1,
 }: {
   type: GlyphType
   x: number
   y: number
   hollow?: boolean
+  /** Below 1 on a crowded lane (many history months). */
+  scale?: number
 }) {
+  if (scale !== 1)
+    return (
+      <g transform={`translate(${x} ${y}) scale(${scale})`}>
+        <Glyph type={type} x={0} y={0} hollow={hollow} />
+      </g>
+    )
   const r = 4.5
   const paint = hollow
     ? { fill: "none", stroke: "var(--runway-glyph)", strokeWidth: 1.25 }
@@ -131,6 +143,15 @@ export function Glyph({
       )
     case "ira":
       return <circle cx={x} cy={y} r={r - 0.5} {...paint} />
+    case "k401": {
+      const a = 1.6
+      return (
+        <path
+          d={`M${x - a},${y - r}H${x + a}V${y - a}H${x + r}V${y + a}H${x + a}V${y + r}H${x - a}V${y + a}H${x - r}V${y - a}H${x - a}Z`}
+          {...paint}
+        />
+      )
+    }
     case "hsa":
       return (
         <rect
@@ -265,7 +286,8 @@ export function HatchSwatch() {
 
 export interface NetPanel {
   values: number[]
-  other: number[] | null
+  /** The comparison run's net, null in months it does not cover. */
+  other: (number | null)[] | null
   label: string
 }
 
@@ -278,19 +300,31 @@ export interface FrameProps {
   /** A fixed domain (the share view is 0 to 100%). */
   domain?: { lo: number; hi: number }
   fmt: (v: number) => string
-  marks: (g: Geom, y: YAxis, ids: { hatch: string }) => React.ReactNode
+  marks: (g: Geom, y: YAxis, ids: MarkIds) => React.ReactNode
   /** Crosshair dots (plot px) for month i. */
   dots?: (i: number, g: Geom, y: YAxis) => number[]
   events: ChartEvent[]
   warnings: ChartWarning[]
   /** Aligned panel of monthly net under the main plot (Cash view). */
   net?: NetPanel | null
+  /** Months of history before the forecast (0 for none). Draws the "Today"
+   * divider and lets marks fade the forecast through `ids.fade`. */
+  split?: number
   scrub: Scrub
   /** Readout for month i; `docked` is true on a narrow plot (phone). */
   tooltip: (i: number, docked: boolean) => React.ReactNode
   ariaLabel: string
   live: string
 }
+
+export interface MarkIds {
+  hatch: string
+  /** Mask that draws the forecast months lighter; null without history. */
+  fade: string | null
+}
+
+/** Opacity of forecast marks next to solid history. */
+const FORECAST_OPACITY = 0.68
 
 const NET_H = { wide: 76, narrow: 64 }
 
@@ -306,6 +340,7 @@ export function ChartFrame({
   events,
   warnings,
   net,
+  split = 0,
   scrub,
   tooltip,
   ariaLabel,
@@ -337,6 +372,8 @@ export function ChartFrame({
   }
 
   const ready = w > 0 && h > 0 && n > 0
+  const today = split > 0 && split < n ? pad.l + split * g.step : null
+  const fade = today != null ? `fade-${uid}` : null
   const tipX = i != null ? g.x(i) : 0
   const flip = tipX > w / 2
 
@@ -362,14 +399,44 @@ export function ChartFrame({
           >
             <defs>
               <Hatch id={`hatch-${uid}`} />
+              {fade && today != null ? (
+                <mask
+                  id={fade}
+                  maskUnits="userSpaceOnUse"
+                  x={0}
+                  y={0}
+                  width={w}
+                  height={h}
+                  style={{ maskType: "alpha" }}
+                >
+                  <rect x={0} y={0} width={today} height={h} fill="#fff" />
+                  <rect
+                    x={today}
+                    y={0}
+                    width={Math.max(0, w - today)}
+                    height={h}
+                    fill="#fff"
+                    fillOpacity={FORECAST_OPACITY}
+                  />
+                </mask>
+              ) : null}
             </defs>
             <YAxisMarks g={g} y={y} />
-            {marks(g, y, { hatch: `hatch-${uid}` })}
+            {marks(g, y, { hatch: `hatch-${uid}`, fade })}
+            {today != null ? (
+              <TodayDivider
+                x={today}
+                top={compact ? g.top : g.top - 4}
+                bot={g.bot}
+                label={!compact}
+              />
+            ) : null}
             <Lanes
               g={g}
               events={compact ? [] : events}
               warnings={warnings}
               pills={!compact}
+              reserve={today != null && !compact ? today + 22 : null}
             />
             {xLabels(months, g.x).map((l) => (
               <text
@@ -390,6 +457,7 @@ export function ChartFrame({
                 g={g}
                 hatch={`hatch-${uid}`}
                 index={i}
+                split={today != null ? split : 0}
               />
             ) : null}
             {i != null ? (
@@ -479,21 +547,61 @@ function YAxisMarks({ g, y }: { g: Geom; y: YAxis }) {
   )
 }
 
+/** Where the ledger's months end and the forecast begins. */
+function TodayDivider({
+  x,
+  top,
+  bot,
+  label,
+}: {
+  x: number
+  top: number
+  bot: number
+  label: boolean
+}) {
+  return (
+    <g pointerEvents="none">
+      <line
+        x1={x}
+        x2={x}
+        y1={top}
+        y2={bot}
+        stroke="var(--foreground)"
+        strokeOpacity={0.55}
+        strokeWidth={1}
+      />
+      {label ? (
+        <text
+          x={x}
+          y={top - 5}
+          textAnchor="middle"
+          className="fill-muted-foreground font-medium text-[10.5px]"
+        >
+          Today
+        </text>
+      ) : null}
+    </g>
+  )
+}
+
 /** Warning lines through the plot with pills in the lane above it; event
- * glyphs in the lane under it. */
+ * glyphs in the lane under it. `reserve` keeps pills right of that x (the
+ * "Today" label sits left of it). */
 function Lanes({
   g,
   events,
   warnings,
   pills,
+  reserve = null,
 }: {
   g: Geom
   events: ChartEvent[]
   warnings: ChartWarning[]
   pills: boolean
+  reserve?: number | null
 }) {
   const placed: { x: number; w: number; tone: string; text: string }[] = []
-  let right = -Infinity
+  let right = reserve ?? -Infinity
   for (const p of warningPills(warnings)) {
     const tw = p.text.length * 5.9 + 16
     let px = Math.max(g.pad.l, Math.min(g.w - g.pad.r - tw, g.x(p.i) - tw / 2))
@@ -553,19 +661,31 @@ function Lanes({
       {[...byMonth.entries()].flatMap(([i, list]) => {
         const nEv = list.length
         const flat = nEv * 10 <= g.step
-        const cols = flat ? nEv : Math.ceil(nEv / 2)
+        // Narrow months (a long history on a phone) stack one column and
+        // shrink the glyphs so neighbors never touch.
+        const column = !flat && g.step < 20
+        const cols = flat ? nEv : column ? 1 : Math.ceil(nEv / 2)
+        const scale = column
+          ? Math.max(0.5, Math.min(0.8, (g.step - 1) / 9, 22 / (nEv * 9)))
+          : 1
+        const gapY = 9 * scale + 1
         return list.map((e, k) => {
-          const col = flat ? k : Math.floor(k / 2)
-          const row = flat ? 0 : k % 2
+          const col = flat || column ? (column ? 0 : k) : Math.floor(k / 2)
+          const row = flat ? 0 : column ? k : k % 2
           const x = g.x(i) + (col - (cols - 1) / 2) * 10
-          const yy = flat || nEv === 1 ? g.bot + 11 : g.bot + 8 + row * 10
+          const yy = column
+            ? g.bot + 6 + row * gapY
+            : flat || nEv === 1
+              ? g.bot + 11
+              : g.bot + 8 + row * 10
           return (
             <Glyph
               key={`ev-${i}-${e.label}-${e.other ? "o" : "m"}`}
               type={e.type}
               x={Math.round(x * 10) / 10}
-              y={yy}
+              y={Math.round(yy * 10) / 10}
               hollow={e.other}
+              scale={scale}
             />
           )
         })
@@ -582,6 +702,7 @@ function NetMarks({
   g,
   hatch,
   index,
+  split,
 }: {
   net: NetPanel
   top: number
@@ -589,10 +710,15 @@ function NetMarks({
   g: Geom
   hatch: string
   index: number | null
+  /** First forecast month; its bars and later ones draw lighter. */
+  split: number
 }) {
   const t = top + 14
   const b = top + height - 4
-  const all = [...net.values, ...(net.other ?? [])]
+  const all = [
+    ...net.values,
+    ...(net.other ?? []).filter((v): v is number => v != null),
+  ]
   const lo = Math.min(0, ...all)
   const hi = Math.max(0, ...all)
   const range = hi - lo || 1
@@ -636,6 +762,7 @@ function NetMarks({
               height={Math.max(1, Math.abs(y1 - y0))}
               rx={1.5}
               fill={v < 0 ? `url(#${hatch})` : "var(--flow-out)"}
+              fillOpacity={split > 0 && i >= split ? FORECAST_OPACITY : 1}
             />
             {o != null && Math.abs(o - v) >= 0.5 ? (
               <rect
@@ -681,14 +808,23 @@ export function StackMarks({
   hatch,
   compare,
   compact,
+  fade = null,
 }: {
   g: Geom
   y: YAxis
   layers: Layer[]
   deficit?: number[] | null
   hatch: string
-  compare?: { totals: number[]; label: string; diff: string } | null
+  /** `from` is the month index of totals[0] (the first forecast month). */
+  compare?: {
+    totals: number[]
+    label: string
+    diff: string
+    from?: number
+  } | null
   compact: boolean
+  /** Mask id that draws the forecast months lighter. */
+  fade?: string | null
 }) {
   const n = layers[0]?.y1.length ?? 0
   const band = (L: Layer) => {
@@ -701,56 +837,60 @@ export function StackMarks({
   }
   const last = n - 1
   const top = layers.at(-1)?.y1 ?? []
+  const from = compare?.from ?? 0
+  const cLast = compare ? compare.totals.length - 1 : -1
   return (
     <g>
-      {layers.map((L) => (
-        <path key={L.def.id} d={band(L)} fill={`var(${L.def.token})`} />
-      ))}
-      {layers
-        .slice(0, -1)
-        .map((L, k) =>
-          L.def.group !== layers[k + 1].def.group ? (
-            <polyline
-              key={`gap-${L.def.id}`}
-              points={pts(g, y, L.y1)}
-              fill="none"
-              stroke="var(--card)"
-              strokeWidth={2}
-              strokeLinejoin="round"
-            />
-          ) : null
-        )}
-      {deficit?.some((v) => v < 0) ? (
-        <path
-          d={`M${g.x(0)},${y.y(0)}L${pts(g, y, deficit).replace(/ /g, "L")}L${g.x(last)},${y.y(0)}Z`}
-          fill={`url(#${hatch})`}
-          stroke="var(--runway-crit)"
-          strokeWidth={1}
-        />
-      ) : null}
+      <g mask={fade ? `url(#${fade})` : undefined}>
+        {layers.map((L) => (
+          <path key={L.def.id} d={band(L)} fill={`var(${L.def.token})`} />
+        ))}
+        {layers
+          .slice(0, -1)
+          .map((L, k) =>
+            L.def.group !== layers[k + 1].def.group ? (
+              <polyline
+                key={`gap-${L.def.id}`}
+                points={pts(g, y, L.y1)}
+                fill="none"
+                stroke="var(--card)"
+                strokeWidth={2}
+                strokeLinejoin="round"
+              />
+            ) : null
+          )}
+        {deficit?.some((v) => v < 0) ? (
+          <path
+            d={`M${g.x(0)},${y.y(0)}L${pts(g, y, deficit).replace(/ /g, "L")}L${g.x(last)},${y.y(0)}Z`}
+            fill={`url(#${hatch})`}
+            stroke="var(--runway-crit)"
+            strokeWidth={1}
+          />
+        ) : null}
+      </g>
       {compare ? (
         <>
           <polyline
-            points={pts(g, y, compare.totals)}
+            points={pts(g, y, compare.totals, from)}
             fill="none"
             stroke="var(--card)"
             strokeWidth={4}
             strokeLinejoin="round"
           />
           <polyline
-            points={pts(g, y, compare.totals)}
+            points={pts(g, y, compare.totals, from)}
             fill="none"
             stroke="var(--foreground)"
             strokeWidth={1.5}
             strokeDasharray="4 3"
             strokeLinejoin="round"
           />
-          {!compact && last >= 0 ? (
+          {!compact && last >= 0 && cLast >= 0 ? (
             <HaloText
               x={g.x(last) - 2}
               y={Math.max(
                 g.top - 2,
-                Math.min(y.y(compare.totals[last]), y.y(top[last] ?? 0)) - 7
+                Math.min(y.y(compare.totals[cLast]), y.y(top[last] ?? 0)) - 7
               )}
               anchor="end"
             >
@@ -830,22 +970,25 @@ export function DashedLine({
   g,
   y,
   vals,
+  from = 0,
 }: {
   g: Geom
   y: YAxis
   vals: number[]
+  /** Month index of vals[0]. */
+  from?: number
 }) {
   return (
     <g pointerEvents="none">
       <polyline
-        points={pts(g, y, vals)}
+        points={pts(g, y, vals, from)}
         fill="none"
         stroke="var(--card)"
         strokeWidth={4}
         strokeLinejoin="round"
       />
       <polyline
-        points={pts(g, y, vals)}
+        points={pts(g, y, vals, from)}
         fill="none"
         stroke="var(--foreground)"
         strokeWidth={1.5}

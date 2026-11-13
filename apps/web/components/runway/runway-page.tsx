@@ -10,12 +10,21 @@
 // on the right at xl; one column with a sticky chart below it.
 
 import { AlertTriangle, PanelRightOpen } from "lucide-react"
-import { parseAsString, parseAsStringLiteral, useQueryState } from "nuqs"
+import {
+  parseAsNumberLiteral,
+  parseAsString,
+  parseAsStringLiteral,
+  useQueryState,
+} from "nuqs"
 import * as React from "react"
 
 import { usd } from "@/components/fire/controls"
 import { PANE_FILL, SectionNav, usePaneOpen } from "@/components/fire/workbench"
-import { type RunwaySaveError, useRunwaySave } from "@/hooks/use-runway"
+import {
+  type RunwaySaveError,
+  useRunwayHistory,
+  useRunwaySave,
+} from "@/hooks/use-runway"
 import { type RunwayDrafts, useRunwayDrafts } from "@/hooks/use-runway-drafts"
 import { bodyOf, personInputs, runnable } from "@/lib/runway/config"
 import { ACCOUNT_LABEL } from "@/lib/runway/contributions"
@@ -36,6 +45,11 @@ import {
   setBody,
 } from "@/lib/runway/drafts"
 import { compareScenarios, simulate } from "@/lib/runway/engine"
+import {
+  type HistoryRange,
+  historyBefore,
+  historyNote,
+} from "@/lib/runway/history"
 import {
   countChanges,
   countChangesOver,
@@ -63,6 +77,7 @@ import {
 import { cn } from "@/lib/utils"
 import {
   type ChartCompare,
+  type ChartHistory,
   type ChartView,
   RunwayChartCard,
 } from "./chart-card"
@@ -176,6 +191,13 @@ function RunwayPersonView({
     const next = LEGACY_VIEW[viewParam]
     if (next) void setView(next)
   }, [viewParam, setView])
+  // Months of history joined before the plan; absent from the URL is 0.
+  const [historyParam, setHistoryParam] = useQueryState(
+    "history",
+    parseAsNumberLiteral([12, 24] as const)
+  )
+  const historyRange: HistoryRange = historyParam ?? 0
+  const historyQuery = useRunwayHistory(historyRange)
   const [compareId, setCompareId] = React.useState<string | null>(null)
   const [paneOpen, setPane] = usePaneOpen("runway.controlsOpen")
   const paneRef = React.useRef<HTMLElement>(null)
@@ -409,6 +431,31 @@ function RunwayPersonView({
       ? { label: compareChoice.label, result: compared[compareChoice.id] }
       : null
 
+  const historyRows = React.useMemo(
+    () =>
+      historyBefore(
+        historyQuery.data?.people.find((p) => p.id === personId),
+        result?.rows ?? [],
+        historyRange
+      ),
+    [historyQuery.data, personId, result, historyRange]
+  )
+  const chartHistory: ChartHistory = {
+    range: historyRange,
+    onRangeChange: (r) => void setHistoryParam(r === 0 ? null : r),
+    rows: historyRows,
+    note:
+      historyRange && historyQuery.isPending
+        ? "Loading history…"
+        : historyNote(
+            historyRange,
+            historyQuery.data ?? null,
+            personId,
+            historyRows.length,
+            historyQuery.isError || historyQuery.data === null
+          ),
+  }
+
   const issues = [
     ...(result ? limitIssues(result, personId) : []),
     ...issuesFor(data, personId),
@@ -515,6 +562,7 @@ function RunwayPersonView({
               }
               compareId={compareChoice?.id ?? null}
               onCompareChange={setCompareId}
+              history={chartHistory}
             />
             <RunwayKpiStrip
               result={result}

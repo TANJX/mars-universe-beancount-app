@@ -9,6 +9,9 @@
 // Legend values follow the scrub ("At {month}"), events sit on a lane under
 // the axis, warnings are dashed lines with a pill, and the notes under the
 // chart pin it to their month. A comparison run draws dashed.
+// A history range joins past months read from the ledger before the plan:
+// drawn solid, the plan lighter after a "Today" divider. Warnings, the
+// comparison run and forecast-only rows stay on the plan's months.
 
 import { AlertTriangle } from "lucide-react"
 import * as React from "react"
@@ -27,6 +30,8 @@ import {
   moneyK,
   monthAbbr,
   monthLong,
+  monthSpanLabel,
+  offsetIndex,
   percent,
   type SeriesDef,
   shareSeries,
@@ -36,6 +41,7 @@ import {
   stackTotals,
   withOther,
 } from "@/lib/runway/chart"
+import type { HistoryRange } from "@/lib/runway/history"
 import { activeJobAt } from "@/lib/runway/jobs"
 import {
   INVESTED_SLEEVES,
@@ -55,6 +61,7 @@ import {
   type Geom,
   GlyphIcon,
   HatchSwatch,
+  type MarkIds,
   RefLine,
   StackMarks,
   type YAxis,
@@ -67,6 +74,22 @@ export interface ChartCompare {
   label: string
   result: RunwayResult
 }
+
+/** The history range control and the past months it joins to the plan. */
+export interface ChartHistory {
+  range: HistoryRange
+  onRangeChange: (r: HistoryRange) => void
+  /** Actual rows ending the month before the plan starts; empty for none. */
+  rows: MonthRow[]
+  /** Why a history range draws only the plan (no history, loading). */
+  note: string | null
+}
+
+const RANGE_OPTIONS: { value: `${HistoryRange}`; label: string }[] = [
+  { value: "0", label: "Plan" },
+  { value: "12", label: "+12 mo" },
+  { value: "24", label: "+24 mo" },
+]
 
 const TITLE: Record<ChartView, string> = {
   sleeves: "Where the money sits",
@@ -103,6 +126,7 @@ export function RunwayChartCard({
   compareChoices,
   compareId,
   onCompareChange,
+  history,
 }: {
   result: RunwayResult
   inputs: RunwayInputs
@@ -116,10 +140,17 @@ export function RunwayChartCard({
   compareChoices: { id: string; label: string }[] | null
   compareId: string | null
   onCompareChange: (id: string | null) => void
+  history: ChartHistory
 }) {
-  const rows = result.rows
+  // Forecast rows are `plan`; `rows` is the whole span drawn, history first.
+  // Anything indexed against the forecast (warnings, the comparison run)
+  // moves right by `off`.
+  const plan = result.rows
+  const off = history.rows.length
+  const rows = off ? [...history.rows, ...plan] : plan
   const months = rows.map((r) => r.month)
   const n = rows.length
+  const span = off ? monthSpanLabel([months[0], months[n - 1]]) : periodLabel
   const last = n - 1
   const scrub = useScrub(n)
   const shown = Math.min(scrub.index ?? last, last)
@@ -128,14 +159,14 @@ export function RunwayChartCard({
   const [table, setTable] = React.useState(false)
 
   const used = SLEEVES.filter((s) => sleeveUsed(rows, s.id)).map((s) => s.id)
-  const cmpRows = alignRows(rows, compare?.result.rows ?? null)
+  const cmpRows = alignRows(plan, compare?.result.rows ?? null)
   const cmp = compare && cmpRows ? { ...compare, rows: cmpRows } : null
   const cap = inputs.person.playCap
   const efTarget =
     Math.max(0, inputs.person.cash.efMonths) *
     Math.max(0, inputs.person.spendingMonthly)
   const vest =
-    activeJobAt(inputs.person.jobs, rows[0]?.month ?? inputs.horizon.start)
+    activeJobAt(inputs.person.jobs, plan[0]?.month ?? inputs.horizon.start)
       ?.vesting?.date ?? null
 
   // ---- series for the view
@@ -172,17 +203,24 @@ export function RunwayChartCard({
       ? rows.map((r) => Math.min(0, r.checking))
       : null
   const nets = rows.map((r) => r.takeHome - r.outflows)
-  const cmpNets = cmp ? cmp.rows.map((r) => r.takeHome - r.outflows) : null
+  const cmpNets = cmp
+    ? [
+        ...history.rows.map(() => null),
+        ...cmp.rows.map((r) => r.takeHome - r.outflows),
+      ]
+    : null
+  /** The comparison run's row for chart month i (none in history). */
+  const cmpAt = (i: number) => (cmp && i >= off ? cmp.rows[i - off] : null)
 
   // ---- events and warnings (the comparison run's own ones are flagged)
   const events = withOther(
     chartEvents(rows, result),
-    cmp ? chartEvents(cmp.rows, cmp.result) : null,
+    cmp ? offsetIndex(chartEvents(cmp.rows, cmp.result), off) : null,
     (e) => e.label
   )
   const allWarnings = withOther(
-    chartWarnings(result, vest),
-    cmp ? chartWarnings(cmp.result) : null,
+    offsetIndex(chartWarnings(result, vest), off),
+    cmp ? offsetIndex(chartWarnings(cmp.result), off) : null,
     (w) => w.short
   )
   const warnings = allWarnings.filter((w) =>
@@ -206,7 +244,7 @@ export function RunwayChartCard({
   const min = deficit ? Math.min(0, ...deficit) : 0
   const fmt = view === "invested" ? (v: number) => percent(v, 0) : moneyK
 
-  const marks = (g: Geom, y: YAxis, ids: { hatch: string }) => (
+  const marks = (g: Geom, y: YAxis, ids: MarkIds) => (
     <>
       <StackMarks
         g={g}
@@ -214,13 +252,15 @@ export function RunwayChartCard({
         layers={layers}
         deficit={deficit}
         hatch={ids.hatch}
+        fade={ids.fade}
         compact={condensed}
         compare={
           cmp && cmpTotals
             ? {
                 totals: cmpTotals,
+                from: off,
                 label: cmp.label,
-                diff: signedK((cmpTotals[last] ?? 0) - (totals[last] ?? 0)),
+                diff: signedK((cmpTotals.at(-1) ?? 0) - (totals[last] ?? 0)),
               }
             : null
         }
@@ -246,26 +286,29 @@ export function RunwayChartCard({
               g={g}
               y={y}
               vals={cmp.rows.map((r) => 1 - r.playShare)}
+              from={off}
             />
           ) : null}
         </>
       ) : null}
     </>
   )
-  const dots = (i: number, _g: Geom, y: YAxis) =>
-    view === "invested"
-      ? [
-          y.y(1 - rows[i].playShare),
-          ...(cmp ? [y.y(1 - cmp.rows[i].playShare)] : []),
+  const dots = (i: number, _g: Geom, y: YAxis) => {
+    const c = cmpAt(i)
+    return view === "invested"
+      ? [y.y(1 - rows[i].playShare), ...(c ? [y.y(1 - c.playShare)] : [])]
+      : [
+          y.y(totals[i]),
+          ...(cmpTotals && i >= off ? [y.y(cmpTotals[i - off])] : []),
         ]
-      : [y.y(totals[i]), ...(cmpTotals ? [y.y(cmpTotals[i])] : [])]
+  }
 
   // ---- readout
   const evAt = (i: number) => events.filter((e) => e.i === i)
   const warnAt = (i: number) => allWarnings.filter((w) => w.i === i)
   const tooltip = (i: number, docked: boolean) => {
     const r = rows[i]
-    const c = cmp?.rows[i] ?? null
+    const c = cmpAt(i)
     let body: React.ReactNode
     if (view === "sleeves") {
       const tot = defs.reduce((t, d) => t + d.get(r), 0)
@@ -298,6 +341,23 @@ export function RunwayChartCard({
               base={fitted ? tot : r.netWorth}
             />
           ) : null}
+        </>
+      )
+    } else if (view === "cash" && r.actual) {
+      const net = r.takeHome - r.outflows
+      body = (
+        <>
+          <TipRows>
+            <TipRow k="Take-home" v={money(r.takeHome)} />
+            <TipRow k="Spending" v={money(r.spendOut)} />
+          </TipRows>
+          <TipRow
+            total
+            k="Net"
+            v={money(net)}
+            tone={net < -0.5 ? "crit" : undefined}
+          />
+          <TipRow k="Cash" v={money(r.cash)} />
         </>
       )
     } else if (view === "cash") {
@@ -372,6 +432,7 @@ export function RunwayChartCard({
       <DockedContext.Provider value={docked}>
         <TipBody
           month={months[i]}
+          actual={!!r.actual}
           pinned={scrub.pinned}
           events={evAt(i)}
           warnings={warnAt(i)}
@@ -402,12 +463,16 @@ export function RunwayChartCard({
       : ""
   )
 
+  const pastNote = off
+    ? ` ${off} months from the ledger come first, then the plan from ${monthLong(plan[0]?.month ?? "")}.`
+    : ""
   const ariaLabel =
-    view === "sleeves"
-      ? `Stacked balances, ${periodLabel}. Net worth goes from ${money(result.startNetWorth)} to ${money(rows[last]?.netWorth ?? 0)}.`
+    (view === "sleeves"
+      ? `Stacked balances, ${span}. Net worth goes from ${money(off ? (rows[0]?.netWorth ?? 0) : result.startNetWorth)} to ${money(rows[last]?.netWorth ?? 0)}.`
       : view === "cash"
-        ? `Cash balances, ${periodLabel}, with each month's net under them. Take-home falls short in ${result.shortMonths} of ${n} months.`
-        : `Share of invested money by sleeve, ${periodLabel}. The play sleeve ends at ${percent(rows[last]?.playShare ?? 0)} against a ${percent(cap, 0)} cap.`
+        ? `Cash balances, ${span}, with each month's net under them. Take-home falls short in ${result.shortMonths} of ${plan.length} planned months.`
+        : `Share of invested money by sleeve, ${span}. The play sleeve ends at ${percent(rows[last]?.playShare ?? 0)} against a ${percent(cap, 0)} cap.`) +
+    pastNote
 
   const changeView = (v: ChartView) => {
     setIsolate(null)
@@ -530,7 +595,10 @@ export function RunwayChartCard({
             ? [
                 {
                   h: cmp.label,
-                  f: (_x: MonthRow, i: number) => money(cmp.rows[i].netWorth),
+                  f: (_x: MonthRow, i: number) => {
+                    const c = cmpAt(i)
+                    return c ? money(c.netWorth) : ""
+                  },
                 },
               ]
             : []),
@@ -539,7 +607,7 @@ export function RunwayChartCard({
         ? [
             { h: "Take-home", f: (x) => money(x.takeHome) },
             { h: "Spending", f: (x) => money(x.spendOut) },
-            { h: "One-offs", f: (x) => money(x.taxOut) },
+            { h: "One-offs", f: (x) => (x.actual ? "" : money(x.taxOut)) },
             { h: "Net", f: (x) => money(x.takeHome - x.outflows) },
             { h: "Checking", f: (x) => money(x.checking) },
             { h: "Emergency fund", f: (x) => money(x.ef) },
@@ -555,8 +623,10 @@ export function RunwayChartCard({
               ? [
                   {
                     h: `${cmp.label} play`,
-                    f: (_x: MonthRow, i: number) =>
-                      percent(cmp.rows[i].playShare),
+                    f: (_x: MonthRow, i: number) => {
+                      const c = cmpAt(i)
+                      return c ? percent(c.playShare) : ""
+                    },
                   },
                 ]
               : []),
@@ -583,12 +653,19 @@ export function RunwayChartCard({
         <div className="grid min-w-0">
           <h2 className="inline-flex min-w-0 items-center gap-1 font-medium text-muted-foreground text-xs tracking-wide">
             <span className="truncate tabular-nums">{titleText}</span>
-            {condensed ? null : <InfoTip label="Chart">{HELP[view]}</InfoTip>}
+            {condensed ? null : (
+              <InfoTip label="Chart">
+                {HELP[view]}
+                {off
+                  ? " Months before the Today line are actual month-end balances and flows from the ledger; the plan after it is drawn lighter. Warnings and comparisons cover only the plan."
+                  : ""}
+              </InfoTip>
+            )}
           </h2>
           {condensed ? null : (
             <span className="text-[11px] text-muted-foreground">
               {view === "sleeves"
-                ? `Month-end balances, ${periodLabel}`
+                ? `Month-end balances, ${span}`
                 : view === "cash"
                   ? "Checking, emergency fund and reserve, with each month’s net"
                   : "Core index, gold, retirement accounts and the play sleeve"}
@@ -619,6 +696,16 @@ export function RunwayChartCard({
               </select>
             </label>
           ) : null}
+          {condensed ? null : (
+            <Segmented<`${HistoryRange}`>
+              ariaLabel="History"
+              value={`${history.range}`}
+              onChange={(v) => history.onRangeChange(Number(v) as HistoryRange)}
+              className="pointer-coarse:h-9"
+              optionClassName="px-2 tabular-nums pointer-coarse:px-2.5"
+              options={RANGE_OPTIONS}
+            />
+          )}
           <Segmented<ChartView>
             ariaLabel="Chart"
             value={view}
@@ -634,6 +721,11 @@ export function RunwayChartCard({
         </div>
       </div>
       {condensed ? null : legend}
+      {history.note && !condensed ? (
+        <p className="px-3.5 pb-1.5 text-[11px] text-muted-foreground">
+          {history.note}
+        </p>
+      ) : null}
       {fitted && !condensed ? (
         <p className="px-3.5 pb-1.5 text-[11px] text-muted-foreground">
           Scale fitted to{" "}
@@ -669,6 +761,7 @@ export function RunwayChartCard({
                 }
               : null
           }
+          split={off}
           scrub={scrub}
           tooltip={tooltip}
           ariaLabel={ariaLabel}
@@ -682,7 +775,7 @@ export function RunwayChartCard({
             warnings={warnings}
             info={
               view === "cash" && result.shortMonths > 0
-                ? `Take-home falls short in ${result.shortMonths} of ${n} months, ${money(result.shortfallTotal)} in all.`
+                ? `Take-home falls short in ${result.shortMonths} of ${plan.length} planned months, ${money(result.shortfallTotal)} in all.`
                 : null
             }
             otherLabel={cmp?.label ?? null}
@@ -723,22 +816,35 @@ export function RunwayChartCard({
                 </thead>
                 <tbody>
                   {rows.map((x, i) => (
-                    <tr key={x.month} className="border-t">
-                      <th
-                        scope="row"
-                        className="whitespace-nowrap px-2.5 py-1 text-left font-normal"
-                      >
-                        {monthAbbr(x.month)}
-                      </th>
-                      {columns.map((c) => (
-                        <td
-                          key={c.h}
-                          className="whitespace-nowrap px-2.5 py-1 text-right font-mono tabular-nums"
+                    <React.Fragment key={x.month}>
+                      {off && (i === 0 || i === off) ? (
+                        <tr className="border-t">
+                          <th
+                            scope="rowgroup"
+                            colSpan={columns.length + 1}
+                            className="bg-muted/60 px-2.5 py-0.5 text-left font-medium text-[10.5px] text-muted-foreground"
+                          >
+                            {i === 0 ? "Actual, from the ledger" : "Plan"}
+                          </th>
+                        </tr>
+                      ) : null}
+                      <tr className="border-t">
+                        <th
+                          scope="row"
+                          className="whitespace-nowrap px-2.5 py-1 text-left font-normal"
                         >
-                          {c.f(x, i)}
-                        </td>
-                      ))}
-                    </tr>
+                          {monthAbbr(x.month)}
+                        </th>
+                        {columns.map((c) => (
+                          <td
+                            key={c.h}
+                            className="whitespace-nowrap px-2.5 py-1 text-right font-mono tabular-nums"
+                          >
+                            {c.f(x, i)}
+                          </td>
+                        ))}
+                      </tr>
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>
@@ -802,6 +908,7 @@ function RefSwatch() {
 
 function TipBody({
   month,
+  actual,
   pinned,
   events,
   warnings,
@@ -809,6 +916,8 @@ function TipBody({
   children,
 }: {
   month: string
+  /** A past month from the ledger, not the plan. */
+  actual: boolean
   pinned: boolean
   events: ChartEvent[]
   warnings: ChartWarning[]
@@ -821,7 +930,12 @@ function TipBody({
   return (
     <div className={cn("grid", docked && "grid-cols-2 gap-x-3")}>
       <div className="col-span-full mb-1 flex items-baseline justify-between gap-2.5">
-        <b className="font-semibold">{monthLong(month)}</b>
+        <span className="inline-flex items-baseline gap-1.5">
+          <b className="font-semibold">{monthLong(month)}</b>
+          {actual ? (
+            <span className="text-[10.5px] text-muted-foreground">Actual</span>
+          ) : null}
+        </span>
         {pinned ? (
           <span className="text-[10.5px] text-muted-foreground">
             {docked ? "Pinned" : "Pinned, Esc to clear"}
