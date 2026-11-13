@@ -61,7 +61,11 @@ import {
   type UnavailablePerson,
 } from "@/lib/runway/types"
 import { cn } from "@/lib/utils"
-import { RunwayChartCard } from "./chart-card"
+import {
+  type ChartCompare,
+  type ChartView,
+  RunwayChartCard,
+} from "./chart-card"
 import { monthLabel } from "./chart-utils"
 import { ScenarioCompare } from "./compare"
 import {
@@ -91,7 +95,12 @@ const SECTIONS = [
   { id: "runway-sleeves", label: "Sleeves" },
 ]
 
-const VIEWS = ["sleeves", "flow", "play"] as const
+const VIEWS = ["sleeves", "cash", "invested", "flow", "play"] as const
+/** Views from before the chart redesign, kept so old links still open. */
+const LEGACY_VIEW: Record<string, ChartView> = {
+  flow: "cash",
+  play: "invested",
+}
 
 export function RunwayView({
   data,
@@ -158,11 +167,16 @@ function RunwayPersonView({
     "scenario",
     parseAsString
   )
-  const [view, setView] = useQueryState(
+  const [viewParam, setView] = useQueryState(
     "view",
     parseAsStringLiteral(VIEWS).withDefault("sleeves")
   )
-  const [hidden, setHidden] = React.useState<Set<SleeveId>>(new Set())
+  const view: ChartView = LEGACY_VIEW[viewParam] ?? (viewParam as ChartView)
+  React.useEffect(() => {
+    const next = LEGACY_VIEW[viewParam]
+    if (next) void setView(next)
+  }, [viewParam, setView])
+  const [compareId, setCompareId] = React.useState<string | null>(null)
   const [paneOpen, setPane] = usePaneOpen("runway.controlsOpen")
   const paneRef = React.useRef<HTMLElement>(null)
   const [barHeight, setBarHeight] = React.useState(0)
@@ -363,10 +377,15 @@ function RunwayPersonView({
     }
   }
 
-  // Below xl the chart section is sticky over the pane. A sticky block taller
-  // than its scroller would cover the whole page, so stay sticky only while
-  // the section leaves room (120px plus the save bar) for the pane to scroll.
+  // Below xl the chart section is sticky over the pane, condensed (plot only,
+  // about 195px) once the pane scrolls under it and full again near the top.
+  // A sticky block taller than its scroller would cover the whole page, so
+  // stay sticky only while the section leaves room (120px plus the save bar)
+  // for the pane to scroll.
+  const rootRef = React.useRef<HTMLDivElement>(null)
   const stickyRef = React.useRef<HTMLElement>(null)
+  const wide = useMediaQuery("(min-width: 80rem)")
+  const condensed = useCondensed(rootRef, !wide && !!result)
   const stickyOk = useFitsSticky(stickyRef, 120 + barHeight)
 
   const rows = result?.rows ?? []
@@ -378,20 +397,17 @@ function RunwayPersonView({
   const endValues: Partial<Record<SleeveId, number>> = {}
   if (endRow) for (const id of used) endValues[id] = sleeveValue(endRow, id)
 
-  const toggle = (id: SleeveId) =>
-    setHidden((h) => {
-      const next = new Set(h)
-      if (next.has(id)) next.delete(id)
-      else if (used.filter((u) => !next.has(u)).length > 1) next.add(id)
-      return next
-    })
-  const solo = (id: SleeveId) =>
-    setHidden((h) => {
-      const others = used.filter((u) => u !== id)
-      // Solo again on the only visible sleeve brings everything back.
-      if (others.every((u) => h.has(u)) && !h.has(id)) return new Set()
-      return new Set(others)
-    })
+  // The dashed comparison: Plan while a scenario is active; on Plan, the
+  // scenario picked in "Compare with" (off by default).
+  const scenarioChoices = scenarioOptions.filter((s) => s.id !== PLAN_ID)
+  const compareChoice = scenarioChoices.find((s) => s.id === compareId)
+  const compare: ChartCompare | null = !isPlan
+    ? compared[PLAN_ID]
+      ? { label: "Plan", result: compared[PLAN_ID] }
+      : null
+    : compareChoice && compared[compareChoice.id]
+      ? { label: compareChoice.label, result: compared[compareChoice.id] }
+      : null
 
   const issues = [
     ...(result ? limitIssues(result, personId) : []),
@@ -442,8 +458,9 @@ function RunwayPersonView({
   const canSave = data.fromConfig
   return (
     <div
+      ref={rootRef}
       className={cn(
-        "flex flex-col xl:grid xl:h-full",
+        "flex flex-col [overflow-anchor:none] xl:grid xl:h-full",
         paneOpen
           ? "xl:grid-cols-[minmax(0,1.45fr)_minmax(26rem,1fr)]"
           : "xl:grid-cols-[minmax(0,1fr)_auto]"
@@ -453,32 +470,35 @@ function RunwayPersonView({
       <section
         ref={stickyRef}
         className={cn(
-          "z-10 flex flex-col gap-3 bg-background px-4 pt-2 pb-3 md:px-6 xl:static xl:min-h-0 xl:overflow-y-auto",
+          "z-10 flex flex-col gap-3 bg-background px-4 pt-2 md:px-6 xl:static xl:min-h-0 xl:overflow-y-auto",
+          condensed ? "pb-2 shadow-[0_1px_0_var(--border)]" : "pb-3",
           stickyOk && "sticky top-0"
         )}
       >
-        <RunwayHeader
-          people={options}
-          personId={personId}
-          onPersonChange={onPersonChange}
-          scenarioBar={scenarioBar}
-          periodLabel={periodLabel}
-        >
-          {/* Headline numbers sit in the header on wide screens only; below xl
+        <div className={cn("contents", condensed && "hidden")}>
+          <RunwayHeader
+            people={options}
+            personId={personId}
+            onPersonChange={onPersonChange}
+            scenarioBar={scenarioBar}
+            periodLabel={periodLabel}
+          >
+            {/* Headline numbers sit in the header on wide screens only; below xl
               they scroll with the pane so the sticky part stays short. */}
-          {result && inputs ? (
-            <div className="hidden xl:block">
-              <RunwayKpis
-                result={result}
-                inputs={inputs}
-                endLabel={monthLabel(last)}
-              />
-            </div>
+            {result && inputs ? (
+              <div className="hidden xl:block">
+                <RunwayKpis
+                  result={result}
+                  inputs={inputs}
+                  endLabel={monthLabel(last)}
+                />
+              </div>
+            ) : null}
+          </RunwayHeader>
+          {hasNotices ? (
+            <div className="hidden flex-col gap-3 xl:flex">{notices}</div>
           ) : null}
-        </RunwayHeader>
-        {hasNotices ? (
-          <div className="hidden flex-col gap-3 xl:flex">{notices}</div>
-        ) : null}
+        </div>
 
         {result && inputs ? (
           <>
@@ -487,11 +507,14 @@ function RunwayPersonView({
               inputs={inputs}
               view={view}
               onViewChange={(v) => void setView(v)}
-              hidden={hidden}
-              onToggleSleeve={toggle}
-              onSoloSleeve={solo}
-              playCap={inputs.person.playCap}
               periodLabel={periodLabel}
+              condensed={condensed}
+              compare={compare}
+              compareChoices={
+                isPlan && scenarioChoices.length ? scenarioChoices : null
+              }
+              compareId={compareChoice?.id ?? null}
+              onCompareChange={setCompareId}
             />
             <RunwayKpiStrip
               result={result}
@@ -682,12 +705,7 @@ function useFitsSticky(
   React.useEffect(() => {
     const el = ref.current
     if (!el) return
-    let scroller: HTMLElement | null = el.parentElement
-    while (scroller) {
-      const oy = getComputedStyle(scroller).overflowY
-      if (oy === "auto" || oy === "scroll") break
-      scroller = scroller.parentElement
-    }
+    const scroller = scrollParent(el)
     const check = () => {
       const avail = scroller ? scroller.clientHeight : window.innerHeight
       setFits(el.offsetHeight + room <= avail)
@@ -703,6 +721,58 @@ function useFitsSticky(
     }
   }, [ref, room])
   return fits
+}
+
+function useMediaQuery(query: string): boolean {
+  const [match, setMatch] = React.useState(false)
+  React.useEffect(() => {
+    const mq = window.matchMedia(query)
+    const on = () => setMatch(mq.matches)
+    on()
+    mq.addEventListener("change", on)
+    return () => mq.removeEventListener("change", on)
+  }, [query])
+  return match
+}
+
+function scrollParent(el: HTMLElement): HTMLElement | null {
+  let p: HTMLElement | null = el.parentElement
+  while (p) {
+    const oy = getComputedStyle(p).overflowY
+    if (oy === "auto" || oy === "scroll") return p
+    p = p.parentElement
+  }
+  return null
+}
+
+/** True once the page has scrolled 40px past the top of `ref` (the inputs
+ * are under the sticky chart), false again within 8px of it. The gap is
+ * hysteresis: condensing shortens the page, and one threshold would flip
+ * back and forth. Scroll anchoring is off on the page root so the browser
+ * does not move the scroll position when the sticky block changes height. */
+function useCondensed(
+  ref: React.RefObject<HTMLElement | null>,
+  enabled: boolean
+): boolean {
+  const [on, setOn] = React.useState(false)
+  React.useEffect(() => {
+    const el = ref.current
+    if (!el || !enabled) {
+      setOn(false)
+      return
+    }
+    const scroller = scrollParent(el)
+    const target: HTMLElement | Window = scroller ?? window
+    const check = () => {
+      const top = scroller ? scroller.getBoundingClientRect().top : 0
+      const past = top - el.getBoundingClientRect().top
+      setOn((cur) => (past > 40 ? true : past < 8 ? false : cur))
+    }
+    check()
+    target.addEventListener("scroll", check, { passive: true })
+    return () => target.removeEventListener("scroll", check)
+  }, [ref, enabled])
+  return on
 }
 
 /** Contribution limits the current inputs run into, from the live run so

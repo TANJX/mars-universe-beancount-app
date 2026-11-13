@@ -1,185 +1,981 @@
 "use client"
 
-// The main chart card: one of three views (sleeve balances, cash flow, play
-// share) with its legend above and a one-line note below.
+// The main chart card. Three views share one look and one scrub:
+// - Sleeves: balances stacked by family (Cash, Taxable, Retirement, Play,
+//   Other), or every sleeve; tap a family or sleeve to fit the scale to it.
+// - Cash: checking, emergency fund and reserve on their own scale with the
+//   emergency fund target, and each month's net in an aligned panel.
+// - Invested: each invested sleeve's share, play on top against its cap.
+// Legend values follow the scrub ("At {month}"), events sit on a lane under
+// the axis, warnings are dashed lines with a pill, and the notes under the
+// chart pin it to their month. A comparison run draws dashed.
 
 import { AlertTriangle } from "lucide-react"
+import * as React from "react"
 
-import { InfoTip, Segmented, usd } from "@/components/fire/controls"
-import { ClientOnly } from "@/components/primitives/client-only"
+import { InfoTip, Segmented } from "@/components/fire/controls"
 import { Card } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
+import {
+  type ChartEvent,
+  type ChartWarning,
+  chartEvents,
+  chartWarnings,
+  eventText,
+  GLYPH_KEY,
+  groupSeries,
+  money,
+  moneyK,
+  monthAbbr,
+  monthLong,
+  percent,
+  type SeriesDef,
+  shareSeries,
+  signedK,
+  sleeveSeries,
+  stackLayers,
+  stackTotals,
+  withOther,
+} from "@/lib/runway/chart"
 import { activeJobAt } from "@/lib/runway/jobs"
 import {
+  INVESTED_SLEEVES,
+  SLEEVE_BY_ID,
+  SLEEVE_GROUPS,
   SLEEVES,
   type SleeveId,
   sleeveUsed,
-  sleeveValue,
 } from "@/lib/runway/sleeves"
-import type { RunwayInputs, RunwayResult } from "@/lib/runway/types"
+import type { MonthRow, RunwayInputs, RunwayResult } from "@/lib/runway/types"
+import { cn } from "@/lib/utils"
 
-import { CashFlowChart, CashFlowLegend } from "./cash-flow-chart"
-import { monthLabel, monthRange } from "./chart-utils"
-import { firstUnderCap, PlayShareChart } from "./play-share-chart"
-import { SleeveAreaChart, SleeveLegend } from "./sleeve-chart"
+import {
+  ChartFrame,
+  DashedLine,
+  DashIcon,
+  type Geom,
+  GlyphIcon,
+  HatchSwatch,
+  RefLine,
+  StackMarks,
+  type YAxis,
+} from "./runway-chart"
+import { useDebouncedText, useScrub } from "./use-scrub"
 
-export type ChartView = "sleeves" | "flow" | "play"
+export type ChartView = "sleeves" | "cash" | "invested"
+
+export interface ChartCompare {
+  label: string
+  result: RunwayResult
+}
 
 const TITLE: Record<ChartView, string> = {
   sleeves: "Where the money sits",
-  flow: "Take-home vs outflows",
-  play: "Play sleeve share of investments",
+  cash: "Will cash last?",
+  invested: "How the invested money is split",
 }
 
 const HELP: Record<ChartView, string> = {
   sleeves:
-    "Month-end balance of each sleeve, stacked. Card balances are paid off from cash at the start. The reserve keeps earmarks plus the next 12 months of shortfall, so near the end of the horizon it drains down to the earmarks.",
-  flow: "Net pay landing each month against spending, the IRA deposit and one-off bills. The hatched part is what pay does not cover; the reserve pays it.",
-  play: "Play sleeve divided by everything invested (core, IRA, 401k, HSA, gold, play). It gets no new money, so the share falls as the rest grows.",
+    "Month-end balances, stacked by family (or every sleeve). Tap a family or sleeve to fit the scale to it. Card balances are paid off from cash at the start. The reserve keeps earmarks plus the next 12 months of shortfall, so near the end of the horizon it drains down to the earmarks.",
+  cash: "Checking buffer, emergency fund and reserve on their own scale, with the emergency fund target. Under them, each month's take-home minus everything that goes out (spending, IRA and HSA deposits paid from cash, one-off bills). Hatched months are not covered by pay; the reserve pays them.",
+  invested:
+    "Each invested sleeve as a share of everything invested (core, gold, IRA, 401k, HSA, play). The play sleeve sits on top, so its band reads against the cap line. It gets no new money while above its cap, so its share falls as the rest grows.",
 }
+
+const CASH_IDS: SleeveId[] = ["checking", "ef", "reserve"]
+
+// Shared chip look; the pseudo-element grows the hit area on coarse pointers.
+const CHIP =
+  "relative inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-transparent px-1.5 text-[11.5px] select-none before:absolute before:inset-x-0 before:-inset-y-1 pointer-coarse:h-8 pointer-coarse:before:-inset-y-1.5"
+const CHIP_BUTTON =
+  "cursor-pointer outline-none transition-[background-color,border-color,scale] duration-150 ease-out hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 active:scale-[0.96] aria-pressed:border-border aria-pressed:bg-muted motion-reduce:transition-none"
+
+const DockedContext = React.createContext(false)
 
 export function RunwayChartCard({
   result,
   inputs,
   view,
   onViewChange,
-  hidden,
-  onToggleSleeve,
-  onSoloSleeve,
-  playCap,
   periodLabel,
+  condensed,
+  compare,
+  compareChoices,
+  compareId,
+  onCompareChange,
 }: {
   result: RunwayResult
   inputs: RunwayInputs
   view: ChartView
   onViewChange: (v: ChartView) => void
-  hidden: Set<SleeveId>
-  onToggleSleeve: (id: SleeveId) => void
-  onSoloSleeve: (id: SleeveId) => void
-  playCap: number
   periodLabel: string
+  /** Phone, scrolled: plot only, the title doubles as the readout. */
+  condensed: boolean
+  compare: ChartCompare | null
+  /** Scenarios to compare with while on Plan; null hides the control. */
+  compareChoices: { id: string; label: string }[] | null
+  compareId: string | null
+  onCompareChange: (id: string | null) => void
 }) {
   const rows = result.rows
-  const last = rows.at(-1)
+  const months = rows.map((r) => r.month)
+  const n = rows.length
+  const last = n - 1
+  const scrub = useScrub(n)
+  const shown = Math.min(scrub.index ?? last, last)
+  const [split, setSplit] = React.useState(false)
+  const [isolate, setIsolate] = React.useState<string | null>(null)
+  const [table, setTable] = React.useState(false)
+
   const used = SLEEVES.filter((s) => sleeveUsed(rows, s.id)).map((s) => s.id)
-  const endValues: Partial<Record<SleeveId, number>> = {}
-  if (last) for (const id of used) endValues[id] = sleeveValue(last, id)
-  const horizon = rows.length
-  // The paying job at the start owns today's unvested match.
-  const firstMonth = rows[0]?.month ?? inputs.horizon.start
-  const vesting = activeJobAt(inputs.person.jobs, firstMonth)?.vesting ?? null
-  const under = firstUnderCap(rows, playCap)
+  const cmpRows = alignRows(rows, compare?.result.rows ?? null)
+  const cmp = compare && cmpRows ? { ...compare, rows: cmpRows } : null
+  const cap = inputs.person.playCap
+  const efTarget =
+    Math.max(0, inputs.person.cash.efMonths) *
+    Math.max(0, inputs.person.spendingMonthly)
+  const vest =
+    activeJobAt(inputs.person.jobs, rows[0]?.month ?? inputs.horizon.start)
+      ?.vesting?.date ?? null
 
-  const label =
+  // ---- series for the view
+  const groups = SLEEVE_GROUPS.filter((g) =>
+    g.members.some((m) => used.includes(m))
+  )
+  const isoGroup =
+    view === "sleeves" ? groups.find((g) => g.id === isolate) : undefined
+  let defs: SeriesDef[]
+  if (view === "cash")
+    defs = CASH_IDS.filter((id) => used.includes(id)).map(sleeveSeries)
+  else if (view === "invested")
+    defs = INVESTED_SLEEVES.filter((id) => used.includes(id)).map(shareSeries)
+  else if (isoGroup)
+    defs = isoGroup.members.filter((m) => used.includes(m)).map(sleeveSeries)
+  else if (isolate && used.includes(isolate as SleeveId))
+    defs = [sleeveSeries(isolate as SleeveId)]
+  else
+    defs = split
+      ? used.map(sleeveSeries)
+      : groups.map((g) => groupSeries(g.id, used))
+  if (!defs.length && view === "cash") defs = CASH_IDS.map(sleeveSeries)
+  const fitted = view === "sleeves" && isolate != null && defs.length > 0
+  const fitLabel =
+    isoGroup?.label ?? SLEEVE_BY_ID[isolate as SleeveId]?.label ?? ""
+
+  const layers = stackLayers(rows, defs)
+  const totals = stackTotals(rows, defs)
+  const cmpTotals =
+    cmp && view !== "invested" ? stackTotals(cmp.rows, defs) : null
+  const showsChecking = defs.some((d) => d.id === "checking" || d.id === "cash")
+  const deficit =
+    view !== "invested" && showsChecking && rows.some((r) => r.checking < -0.5)
+      ? rows.map((r) => Math.min(0, r.checking))
+      : null
+  const nets = rows.map((r) => r.takeHome - r.outflows)
+  const cmpNets = cmp ? cmp.rows.map((r) => r.takeHome - r.outflows) : null
+
+  // ---- events and warnings (the comparison run's own ones are flagged)
+  const events = withOther(
+    chartEvents(rows, result),
+    cmp ? chartEvents(cmp.rows, cmp.result) : null,
+    (e) => e.label
+  )
+  const allWarnings = withOther(
+    chartWarnings(result, vest),
+    cmp ? chartWarnings(cmp.result) : null,
+    (w) => w.short
+  )
+  const warnings = allWarnings.filter((w) =>
+    view === "cash"
+      ? w.tone === "rose"
+      : view === "invested"
+        ? w.tone === "amber"
+        : true
+  )
+
+  // ---- scale
+  const max =
+    view === "invested"
+      ? 1
+      : Math.max(
+          0,
+          ...totals,
+          ...(cmpTotals ?? []),
+          view === "cash" ? efTarget : 0
+        )
+  const min = deficit ? Math.min(0, ...deficit) : 0
+  const fmt = view === "invested" ? (v: number) => percent(v, 0) : moneyK
+
+  const marks = (g: Geom, y: YAxis, ids: { hatch: string }) => (
+    <>
+      <StackMarks
+        g={g}
+        y={y}
+        layers={layers}
+        deficit={deficit}
+        hatch={ids.hatch}
+        compact={condensed}
+        compare={
+          cmp && cmpTotals
+            ? {
+                totals: cmpTotals,
+                label: cmp.label,
+                diff: signedK((cmpTotals[last] ?? 0) - (totals[last] ?? 0)),
+              }
+            : null
+        }
+      />
+      {view === "cash" && efTarget > 0 ? (
+        <RefLine
+          g={g}
+          yy={y.y(efTarget)}
+          label={condensed ? "" : "Emergency fund target"}
+          side="start"
+        />
+      ) : null}
+      {view === "invested" ? (
+        <>
+          <RefLine
+            g={g}
+            yy={y.y(1 - cap)}
+            label={condensed ? "" : `Play cap ${percent(cap, 0)}`}
+            side="end"
+          />
+          {cmp ? (
+            <DashedLine
+              g={g}
+              y={y}
+              vals={cmp.rows.map((r) => 1 - r.playShare)}
+            />
+          ) : null}
+        </>
+      ) : null}
+    </>
+  )
+  const dots = (i: number, _g: Geom, y: YAxis) =>
+    view === "invested"
+      ? [
+          y.y(1 - rows[i].playShare),
+          ...(cmp ? [y.y(1 - cmp.rows[i].playShare)] : []),
+        ]
+      : [y.y(totals[i]), ...(cmpTotals ? [y.y(cmpTotals[i])] : [])]
+
+  // ---- readout
+  const evAt = (i: number) => events.filter((e) => e.i === i)
+  const warnAt = (i: number) => allWarnings.filter((w) => w.i === i)
+  const tooltip = (i: number, docked: boolean) => {
+    const r = rows[i]
+    const c = cmp?.rows[i] ?? null
+    let body: React.ReactNode
+    if (view === "sleeves") {
+      const tot = defs.reduce((t, d) => t + d.get(r), 0)
+      body = (
+        <>
+          <TipRows>
+            {[...defs].reverse().map((d) => (
+              <TipRow
+                key={d.id}
+                k={d.label}
+                swatch={`var(${d.token})`}
+                v={money(d.get(r))}
+              />
+            ))}
+          </TipRows>
+          {r.checking < -0.5 && showsChecking ? (
+            <TipRow k="Checking below $0" v={money(r.checking)} tone="crit" />
+          ) : null}
+          <TipRow
+            total
+            k={fitted ? "Total" : "Net worth"}
+            v={money(fitted ? tot : r.netWorth)}
+          />
+          {c && cmp ? (
+            <CompareRow
+              label={cmp.label}
+              value={
+                fitted ? defs.reduce((t, d) => t + d.get(c), 0) : c.netWorth
+              }
+              base={fitted ? tot : r.netWorth}
+            />
+          ) : null}
+        </>
+      )
+    } else if (view === "cash") {
+      const bills = inputs.person.oneOffs.filter(
+        (o) => o.month === r.month && o.amount !== 0
+      )
+      const net = r.takeHome - r.outflows
+      body = (
+        <>
+          <TipRows>
+            <TipRow k="Take-home" v={money(r.takeHome)} />
+            <TipRow k="Spending" v={money(r.spendOut)} />
+            {bills.map((o, k) => (
+              <TipRow key={k} k={o.label || "Tax due"} v={money(o.amount)} />
+            ))}
+            {r.iraOut >= 0.5 ? (
+              <TipRow k="IRA deposit" v={money(r.iraOut)} />
+            ) : null}
+            {r.hsaOut >= 0.5 ? (
+              <TipRow k="HSA deposit" v={money(r.hsaOut)} />
+            ) : null}
+          </TipRows>
+          <TipRow
+            total
+            k={net < -0.5 ? "Not covered" : "Left over"}
+            v={money(Math.abs(net))}
+            tone={net < -0.5 ? "crit" : undefined}
+          />
+          <TipRow k="Cash" v={money(r.cash)} />
+          {c && cmp ? (
+            <CompareRow
+              label={`${cmp.label} cash`}
+              value={c.cash}
+              base={r.cash}
+            />
+          ) : null}
+        </>
+      )
+    } else {
+      body = (
+        <>
+          <TipRows>
+            {[...defs].reverse().map((d) => (
+              <TipRow
+                key={d.id}
+                k={d.label}
+                swatch={`var(${d.token})`}
+                v={
+                  docked
+                    ? percent(d.get(r))
+                    : `${percent(d.get(r))}  ${moneyK(r[d.id as SleeveId])}`
+                }
+              />
+            ))}
+          </TipRows>
+          <TipRow total k="Invested" v={money(r.invested)} />
+          <TipRow
+            k={docked ? "Play share" : `Play share (cap ${percent(cap, 0)})`}
+            v={percent(r.playShare)}
+          />
+          {c && cmp ? (
+            <TipRow
+              dash
+              k={`${cmp.label} play share`}
+              v={percent(c.playShare)}
+            />
+          ) : null}
+        </>
+      )
+    }
+    return (
+      <DockedContext.Provider value={docked}>
+        <TipBody
+          month={months[i]}
+          pinned={scrub.pinned}
+          events={evAt(i)}
+          warnings={warnAt(i)}
+          otherLabel={cmp?.label ?? null}
+        >
+          {body}
+        </TipBody>
+      </DockedContext.Provider>
+    )
+  }
+
+  const at = rows[shown]
+  const atNet = at ? at.takeHome - at.outflows : 0
+  const summary = !at
+    ? ""
+    : view === "sleeves"
+      ? `Net worth ${moneyK(at.netWorth)}`
+      : view === "cash"
+        ? `Cash ${moneyK(at.cash)}, ${atNet < -0.5 ? "short" : "left over"} ${moneyK(Math.abs(atNet))}`
+        : `Play ${percent(at.playShare)}`
+  const live = useDebouncedText(
+    scrub.index != null && at
+      ? [
+          `${monthLong(at.month)}. ${summary}.`,
+          ...evAt(shown).map(eventText),
+          ...warnAt(shown).map((w) => w.text),
+        ].join(" ")
+      : ""
+  )
+
+  const ariaLabel =
     view === "sleeves"
-      ? `Stacked sleeve balances, ${periodLabel}. Net worth goes from ${usd(result.startNetWorth)} to ${usd(last?.netWorth ?? 0)}.`
-      : view === "flow"
-        ? `Monthly take-home against outflows, ${periodLabel}. Take-home falls short in ${result.shortMonths} of ${horizon} months, ${usd(result.shortfallTotal)} in all.`
-        : `Play sleeve share of investments, ${periodLabel}, against a ${Math.round(playCap * 100)}% cap. It ends at ${((last?.playShare ?? 0) * 100).toFixed(1)}%.`
+      ? `Stacked balances, ${periodLabel}. Net worth goes from ${money(result.startNetWorth)} to ${money(rows[last]?.netWorth ?? 0)}.`
+      : view === "cash"
+        ? `Cash balances, ${periodLabel}, with each month's net under them. Take-home falls short in ${result.shortMonths} of ${n} months.`
+        : `Share of invested money by sleeve, ${periodLabel}. The play sleeve ends at ${percent(rows[last]?.playShare ?? 0)} against a ${percent(cap, 0)} cap.`
 
-  const notes: { text: string; tone?: "amber" | "rose" }[] = []
-  if (view === "flow")
-    notes.push({
-      text: `Take-home falls short in ${result.shortMonths} of ${horizon} months.`,
-    })
-  if (view === "play")
-    notes.push({
-      text: under
-        ? `Back under the cap in ${monthLabel(under)}.`
-        : last &&
-            rows[0] &&
-            rows[0].playShare > playCap &&
-            last.playShare > playCap
-          ? `Stays above the cap for all ${horizon} months; no new money goes in.`
-          : "Under the cap the whole time.",
-    })
-  if (result.forfeitMonth && vesting)
-    notes.push({
-      text: `Leaving in ${monthLabel(result.forfeitMonth)} forfeits ${usd(result.forfeited)} of unvested match (vests ${monthLabel(vesting.date.slice(0, 7))}).`,
-      tone: "amber",
-    })
-  if (result.unfundedMonths.length > 0)
-    notes.push({ text: unfundedText(result), tone: "rose" })
-  if (result.efDrawn > 0 && result.efDrawnMonth)
-    notes.push({
-      text: `The reserve runs dry in ${monthLabel(result.efDrawnMonth)}; ${usd(result.efDrawn)} comes out of the emergency fund.`,
-      tone: "rose",
-    })
-  if (result.coreDrawn > 0 && result.coreDrawnMonth)
-    notes.push({
-      text: `${usd(result.coreDrawn)} is sold from the core index to cover checking, starting ${monthLabel(result.coreDrawnMonth)}.`,
-      tone: "rose",
-    })
+  const changeView = (v: ChartView) => {
+    setIsolate(null)
+    onViewChange(v)
+  }
+  const fit = (id: string) => setIsolate((cur) => (cur === id ? null : id))
+
+  // ---- legend
+  const legendDefs = [...defs].reverse()
+  const legend = !at ? null : (
+    <div className="flex flex-wrap items-center gap-1 px-3.5 pb-1.5 pointer-coarse:gap-y-2">
+      <span className="mr-1.5 inline-flex min-w-[7.5em] items-baseline gap-1 text-[11px] text-muted-foreground">
+        At <b className="font-medium text-foreground">{monthLong(at.month)}</b>
+      </span>
+      {view === "sleeves" && !fitted ? (
+        <Segmented<"groups" | "sleeves">
+          ariaLabel="Detail"
+          value={split ? "sleeves" : "groups"}
+          onChange={(v) => setSplit(v === "sleeves")}
+          className="mr-1 h-6 pointer-coarse:h-8"
+          optionClassName="px-2 text-[11px]"
+          options={[
+            { value: "groups", label: "Families" },
+            { value: "sleeves", label: "All sleeves" },
+          ]}
+        />
+      ) : null}
+      {legendDefs.map((d) =>
+        view === "sleeves" ? (
+          <button
+            key={d.id}
+            type="button"
+            aria-pressed={isolate === d.id}
+            title={fitted ? undefined : `Fit the scale to ${d.label}`}
+            onClick={() => fit(d.id)}
+            className={cn(CHIP, CHIP_BUTTON)}
+          >
+            <Swatch color={`var(${d.token})`} />
+            <span className="text-foreground">{d.label}</span>
+            <ChipValue>{moneyK(d.get(at))}</ChipValue>
+          </button>
+        ) : (
+          <span key={d.id} className={CHIP}>
+            <Swatch color={`var(${d.token})`} />
+            <span className="text-foreground">{d.label}</span>
+            <ChipValue>
+              {view === "invested" ? percent(d.get(at)) : moneyK(d.get(at))}
+            </ChipValue>
+          </span>
+        )
+      )}
+      {deficit ? (
+        <span className={CHIP}>
+          <HatchSwatch />
+          <span className="text-foreground">Checking below $0</span>
+          <ChipValue>{moneyK(Math.min(0, at.checking))}</ChipValue>
+        </span>
+      ) : null}
+      {view === "cash" && efTarget > 0 ? (
+        <span className={CHIP}>
+          <RefSwatch />
+          <span className="text-foreground">Emergency fund target</span>
+          <ChipValue>{moneyK(efTarget)}</ChipValue>
+        </span>
+      ) : null}
+      {view === "invested" ? (
+        <span className={CHIP}>
+          <RefSwatch />
+          <span className="text-foreground">Play cap {percent(cap, 0)}</span>
+        </span>
+      ) : null}
+      {fitted ? (
+        <button
+          type="button"
+          onClick={() => setIsolate(null)}
+          className={cn(CHIP, CHIP_BUTTON, "text-muted-foreground")}
+        >
+          Show all
+        </button>
+      ) : null}
+    </div>
+  )
+
+  // ---- event key
+  const keyTypes = GLYPH_KEY.filter((k) =>
+    events.some((e) => e.type === k.type && !e.other)
+  )
+  const firstOther = events.find((e) => e.other)
+  const eventKey =
+    keyTypes.length || firstOther ? (
+      <div
+        aria-hidden="true"
+        className="flex flex-wrap gap-x-3 gap-y-1 px-3.5 pt-0.5 pb-2 text-[11px] text-muted-foreground"
+      >
+        {keyTypes.map((k) => (
+          <span key={k.type} className="inline-flex items-center gap-1.5">
+            <GlyphIcon type={k.type} />
+            {k.label}
+          </span>
+        ))}
+        {firstOther && cmp ? (
+          <span className="inline-flex items-center gap-1.5">
+            <GlyphIcon type={firstOther.type} hollow />
+            Only in {cmp.label}
+          </span>
+        ) : null}
+      </div>
+    ) : null
+
+  // ---- table
+  const columns: { h: string; f: (x: MonthRow, i: number) => string }[] =
+    view === "sleeves"
+      ? [
+          ...legendDefs.map((d) => ({
+            h: d.label,
+            f: (x: MonthRow) => money(d.get(x)),
+          })),
+          { h: "Net worth", f: (x) => money(x.netWorth) },
+          ...(cmp
+            ? [
+                {
+                  h: cmp.label,
+                  f: (_x: MonthRow, i: number) => money(cmp.rows[i].netWorth),
+                },
+              ]
+            : []),
+        ]
+      : view === "cash"
+        ? [
+            { h: "Take-home", f: (x) => money(x.takeHome) },
+            { h: "Spending", f: (x) => money(x.spendOut) },
+            { h: "One-offs", f: (x) => money(x.taxOut) },
+            { h: "Net", f: (x) => money(x.takeHome - x.outflows) },
+            { h: "Checking", f: (x) => money(x.checking) },
+            { h: "Emergency fund", f: (x) => money(x.ef) },
+            { h: "Reserve", f: (x) => money(x.reserve) },
+          ]
+        : [
+            ...legendDefs.map((d) => ({
+              h: d.label,
+              f: (x: MonthRow) => percent(d.get(x)),
+            })),
+            { h: "Invested", f: (x) => money(x.invested) },
+            ...(cmp
+              ? [
+                  {
+                    h: `${cmp.label} play`,
+                    f: (_x: MonthRow, i: number) =>
+                      percent(cmp.rows[i].playShare),
+                  },
+                ]
+              : []),
+          ]
+
+  const heights: Record<ChartView, string> = {
+    sleeves: "h-[220px] md:h-[300px]",
+    cash: "h-[224px] md:h-[276px]",
+    invested: "h-[210px] md:h-[280px]",
+  }
+  const titleText =
+    condensed && scrub.index != null && at
+      ? `${monthAbbr(at.month)} · ${summary}`
+      : TITLE[view]
 
   return (
     <Card className="gap-0 overflow-hidden p-0 xl:min-h-0 xl:flex-1">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 px-4 pt-3 pb-2">
-        <span className="inline-flex items-center gap-1 font-medium text-muted-foreground text-xs tracking-wide">
-          {TITLE[view]}
-          <InfoTip label="Chart">{HELP[view]}</InfoTip>
-        </span>
-        <Segmented<ChartView>
-          ariaLabel="Chart"
-          value={view}
-          onChange={onViewChange}
-          options={[
-            { value: "sleeves", label: "Sleeves" },
-            { value: "flow", label: "Cash flow" },
-            { value: "play", label: "Play share" },
-          ]}
+      <div
+        className={cn(
+          "flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5",
+          condensed ? "px-3 pt-2 pb-0.5" : "px-3.5 pt-3 pb-1.5"
+        )}
+      >
+        <div className="grid min-w-0">
+          <h2 className="inline-flex min-w-0 items-center gap-1 font-medium text-muted-foreground text-xs tracking-wide">
+            <span className="truncate tabular-nums">{titleText}</span>
+            {condensed ? null : <InfoTip label="Chart">{HELP[view]}</InfoTip>}
+          </h2>
+          {condensed ? null : (
+            <span className="text-[11px] text-muted-foreground">
+              {view === "sleeves"
+                ? `Month-end balances, ${periodLabel}`
+                : view === "cash"
+                  ? "Checking, emergency fund and reserve, with each month’s net"
+                  : "Core index, gold, retirement accounts and the play sleeve"}
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {cmp && !condensed ? (
+            <span className="inline-flex h-6 items-center gap-1.5 rounded-full bg-muted px-2 text-[11px] text-foreground/80">
+              <DashIcon />
+              {cmp.label}
+            </span>
+          ) : null}
+          {compareChoices?.length && !condensed ? (
+            <label className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              Compare with
+              <select
+                value={compareId ?? ""}
+                onChange={(e) => onCompareChange(e.target.value || null)}
+                className="h-8 rounded-md border bg-background px-1.5 text-base text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50 md:h-6 md:text-[11px]"
+              >
+                <option value="">Off</option>
+                {compareChoices.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          <Segmented<ChartView>
+            ariaLabel="Chart"
+            value={view}
+            onChange={changeView}
+            className="pointer-coarse:h-9"
+            optionClassName="pointer-coarse:px-3"
+            options={[
+              { value: "sleeves", label: "Sleeves" },
+              { value: "cash", label: "Cash" },
+              { value: "invested", label: "Invested" },
+            ]}
+          />
+        </div>
+      </div>
+      {condensed ? null : legend}
+      {fitted && !condensed ? (
+        <p className="px-3.5 pb-1.5 text-[11px] text-muted-foreground">
+          Scale fitted to{" "}
+          <b className="font-medium text-foreground">{fitLabel}</b>. Sleeves too
+          thin to read in the full stack get room here.
+        </p>
+      ) : null}
+      <div
+        className={cn(
+          "px-1.5 pb-1",
+          condensed
+            ? "h-[124px]"
+            : cn(heights[view], "xl:h-auto xl:min-h-56 xl:flex-1")
+        )}
+      >
+        <ChartFrame
+          months={months}
+          compact={condensed}
+          max={max}
+          min={min}
+          domain={view === "invested" ? { lo: 0, hi: 1 } : undefined}
+          fmt={fmt}
+          marks={marks}
+          dots={dots}
+          events={events}
+          warnings={warnings}
+          net={
+            view === "cash"
+              ? {
+                  values: nets,
+                  other: cmpNets,
+                  label: "Monthly net: take-home minus outflows",
+                }
+              : null
+          }
+          scrub={scrub}
+          tooltip={tooltip}
+          ariaLabel={ariaLabel}
+          live={live}
         />
       </div>
-      <div className="px-4 pb-1">
-        {view === "sleeves" ? (
-          <SleeveLegend
-            sleeves={used}
-            hidden={hidden}
-            onToggle={onToggleSleeve}
-            onSolo={onSoloSleeve}
-            values={endValues}
-            deficit={result.unfundedPeak}
-            className="-mx-4 flex-nowrap overflow-x-auto px-4 py-1 md:mx-0 md:flex-wrap md:overflow-visible md:px-0"
+      {condensed ? null : (
+        <>
+          {eventKey}
+          <Notes
+            warnings={warnings}
+            info={
+              view === "cash" && result.shortMonths > 0
+                ? `Take-home falls short in ${result.shortMonths} of ${n} months, ${money(result.shortfallTotal)} in all.`
+                : null
+            }
+            otherLabel={cmp?.label ?? null}
+            pinnedIndex={scrub.pinned ? scrub.index : null}
+            onPin={scrub.toggle}
           />
-        ) : view === "flow" ? (
-          <CashFlowLegend />
-        ) : null}
-      </div>
-      <div className="h-[28dvh] px-2 pb-3 md:h-[34dvh] xl:h-auto xl:min-h-56 xl:flex-1">
-        <ClientOnly fallback={<Skeleton className="h-full w-full" />}>
-          {view === "sleeves" ? (
-            <SleeveAreaChart rows={rows} hidden={hidden} ariaLabel={label} />
-          ) : view === "flow" ? (
-            <CashFlowChart rows={rows} ariaLabel={label} />
-          ) : (
-            <PlayShareChart rows={rows} cap={playCap} ariaLabel={label} />
-          )}
-        </ClientOnly>
-      </div>
-      {notes.length ? (
-        <div className="flex flex-col gap-0.5 border-t px-4 py-2 text-xs">
-          {notes.map((n) => (
-            <span
-              key={n.text}
-              className={
-                n.tone === "rose"
-                  ? "flex items-center gap-1.5 text-rose-600 dark:text-rose-400"
-                  : n.tone === "amber"
-                    ? "flex items-center gap-1.5 text-amber-600 dark:text-amber-400"
-                    : "text-muted-foreground"
-              }
+          <div className="flex justify-end px-2.5 pb-2">
+            <button
+              type="button"
+              aria-expanded={table}
+              onClick={() => setTable((t) => !t)}
+              className="relative h-7 rounded-md px-2 text-[11.5px] text-muted-foreground outline-none transition-[color,background-color,scale] duration-150 ease-out before:absolute before:inset-x-0 before:-inset-y-1 hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 active:scale-[0.96] pointer-coarse:h-9 motion-reduce:transition-none"
             >
-              {n.tone ? <AlertTriangle size={12} className="shrink-0" /> : null}
-              {n.text}
-            </span>
-          ))}
-        </div>
-      ) : null}
+              {table ? "Hide table" : "Show table"}
+            </button>
+          </div>
+          {table ? (
+            <div className="max-h-60 overflow-auto border-t">
+              <table className="w-full border-collapse text-[11.5px]">
+                <thead>
+                  <tr>
+                    <th
+                      scope="col"
+                      className="sticky top-0 bg-card px-2.5 py-1 text-left font-medium text-muted-foreground"
+                    >
+                      Month
+                    </th>
+                    {columns.map((c) => (
+                      <th
+                        key={c.h}
+                        scope="col"
+                        className="sticky top-0 whitespace-nowrap bg-card px-2.5 py-1 text-right font-medium text-muted-foreground"
+                      >
+                        {c.h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((x, i) => (
+                    <tr key={x.month} className="border-t">
+                      <th
+                        scope="row"
+                        className="whitespace-nowrap px-2.5 py-1 text-left font-normal"
+                      >
+                        {monthAbbr(x.month)}
+                      </th>
+                      {columns.map((c) => (
+                        <td
+                          key={c.h}
+                          className="whitespace-nowrap px-2.5 py-1 text-right font-mono tabular-nums"
+                        >
+                          {c.f(x, i)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </>
+      )}
     </Card>
   )
 }
 
-/** "Checking goes $7,533 negative (Jan to May 2027): reserve, emergency fund
- * and core are empty." Unfunded months can be split; the range spans them. */
-export function unfundedText(result: RunwayResult): string {
-  return `Checking goes ${usd(result.unfundedPeak)} negative (${monthRange(result.unfundedMonths)}): reserve, emergency fund and core are empty.`
+/** Comparison rows matched to the main run by month; null when the runs do
+ * not cover the same months. */
+function alignRows(
+  rows: MonthRow[],
+  other: MonthRow[] | null
+): MonthRow[] | null {
+  if (!other) return null
+  const by = new Map(other.map((r) => [r.month, r]))
+  const out: MonthRow[] = []
+  for (const r of rows) {
+    const o = by.get(r.month)
+    if (!o) return null
+    out.push(o)
+  }
+  return out
+}
+
+function Swatch({ color }: { color: string }) {
+  return (
+    <span
+      className="size-2 shrink-0 rounded-[2px]"
+      style={{ background: color }}
+    />
+  )
+}
+
+function ChipValue({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="min-w-[3em] font-mono text-[11px] text-muted-foreground tabular-nums">
+      {children}
+    </span>
+  )
+}
+
+function RefSwatch() {
+  return (
+    <svg width="12" height="8" aria-hidden="true" className="shrink-0">
+      <line
+        x1="0"
+        x2="12"
+        y1="4"
+        y2="4"
+        stroke="var(--foreground)"
+        strokeOpacity="0.6"
+        strokeDasharray="2 2"
+      />
+    </svg>
+  )
+}
+
+function TipBody({
+  month,
+  pinned,
+  events,
+  warnings,
+  otherLabel,
+  children,
+}: {
+  month: string
+  pinned: boolean
+  events: ChartEvent[]
+  warnings: ChartWarning[]
+  otherLabel: string | null
+  children: React.ReactNode
+}) {
+  // Docked on a phone the readout sits over a short plot, so it packs into
+  // two columns and folds the month's events into one line.
+  const docked = React.useContext(DockedContext)
+  return (
+    <div className={cn("grid", docked && "grid-cols-2 gap-x-3")}>
+      <div className="col-span-full mb-1 flex items-baseline justify-between gap-2.5">
+        <b className="font-semibold">{monthLong(month)}</b>
+        {pinned ? (
+          <span className="text-[10.5px] text-muted-foreground">
+            {docked ? "Pinned" : "Pinned, Esc to clear"}
+          </span>
+        ) : null}
+      </div>
+      {docked && events.length ? (
+        <div className="col-span-full mb-0.5 truncate text-[11px] text-muted-foreground">
+          {events.map(eventText).join(" \u00b7 ")}
+        </div>
+      ) : null}
+      {(docked ? [] : events).map((e) => (
+        <div
+          key={`${e.label}-${e.other ? "o" : "m"}`}
+          className="mb-1 flex items-center gap-1.5 text-[11px] text-muted-foreground"
+        >
+          <GlyphIcon type={e.type} hollow={e.other} />
+          <span>
+            {eventText(e)}
+            {e.other && otherLabel ? ` (${otherLabel})` : ""}
+          </span>
+        </div>
+      ))}
+      {warnings.map((w) => (
+        <div
+          key={`${w.short}-${w.other ? "o" : "m"}`}
+          className={cn(
+            "col-span-full mb-1 text-[11px]",
+            docked && "mb-0.5 line-clamp-2",
+            w.tone === "rose" ? "text-runway-crit" : "text-runway-warn"
+          )}
+        >
+          {w.text}
+          {w.other && otherLabel ? ` (${otherLabel})` : ""}
+        </div>
+      ))}
+      {children}
+    </div>
+  )
+}
+
+/** Value rows; two columns when the tooltip is docked on a phone. */
+function TipRows({ children }: { children: React.ReactNode }) {
+  const docked = React.useContext(DockedContext)
+  return <div className={cn(docked ? "contents" : "grid")}>{children}</div>
+}
+
+function TipRow({
+  k,
+  v,
+  swatch,
+  total = false,
+  tone,
+  dash = false,
+}: {
+  k: string
+  v: string
+  swatch?: string
+  total?: boolean
+  tone?: "crit"
+  dash?: boolean
+}) {
+  const docked = React.useContext(DockedContext)
+  return (
+    <div
+      className={cn(
+        "flex min-w-0 items-center justify-between gap-2 leading-[1.7]",
+        total && !docked && "mt-0.5 border-t pt-0.5"
+      )}
+    >
+      <span
+        className={cn(
+          "inline-flex min-w-0 items-center gap-1.5",
+          total ? "text-foreground" : "text-muted-foreground",
+          tone === "crit" && "text-runway-crit"
+        )}
+      >
+        {swatch ? (
+          <i
+            className="inline-block h-0.5 w-2.5 shrink-0 rounded-[1px]"
+            style={{ background: swatch }}
+          />
+        ) : null}
+        {dash ? <DashIcon /> : null}
+        <span className="truncate">{k}</span>
+      </span>
+      <span
+        className={cn(
+          "whitespace-pre font-medium font-mono text-foreground tabular-nums",
+          tone === "crit" && "text-runway-crit"
+        )}
+      >
+        {v}
+      </span>
+    </div>
+  )
+}
+
+function CompareRow({
+  label,
+  value,
+  base,
+}: {
+  label: string
+  value: number
+  base: number
+}) {
+  return (
+    <TipRow dash k={label} v={`${money(value)}  ${signedK(value - base)}`} />
+  )
+}
+
+function Notes({
+  warnings,
+  info,
+  otherLabel,
+  pinnedIndex,
+  onPin,
+}: {
+  warnings: ChartWarning[]
+  info: string | null
+  otherLabel: string | null
+  pinnedIndex: number | null
+  onPin: (i: number) => void
+}) {
+  if (!warnings.length && !info) return null
+  return (
+    <div className="grid gap-0.5 border-t px-2 py-1.5">
+      {warnings.map((w) => (
+        <button
+          key={`${w.i}-${w.short}-${w.other ? "o" : "m"}`}
+          type="button"
+          aria-current={pinnedIndex === w.i ? "true" : undefined}
+          onClick={() => onPin(w.i)}
+          className={cn(
+            "flex w-full items-start gap-2 rounded-md p-1.5 text-left text-xs outline-none transition-colors duration-150 ease-out hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 aria-[current=true]:bg-muted pointer-coarse:min-h-11 motion-reduce:transition-none",
+            w.tone === "rose" ? "text-runway-crit" : "text-runway-warn"
+          )}
+        >
+          <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+          <span className="text-pretty">{w.text}</span>
+          {w.other && otherLabel ? (
+            <span className="inline-flex h-[18px] shrink-0 items-center rounded-full bg-muted px-1.5 text-[10.5px] text-foreground/80">
+              {otherLabel}
+            </span>
+          ) : null}
+          <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">
+            {monthAbbr(w.month)}
+          </span>
+        </button>
+      ))}
+      {info ? (
+        <p className="p-1.5 text-muted-foreground text-xs">{info}</p>
+      ) : null}
+    </div>
+  )
 }

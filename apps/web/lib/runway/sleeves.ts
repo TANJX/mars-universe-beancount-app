@@ -17,6 +17,9 @@ export type SleeveId =
   | "hsa"
   | "play"
 
+/** Families the chart folds sleeves into by default. */
+export type SleeveGroupId = "other" | "cash" | "taxable" | "retire" | "play"
+
 export interface SleeveDef {
   id: SleeveId
   label: string
@@ -25,10 +28,11 @@ export interface SleeveDef {
   token: string
   /** Step in the "where the money goes" walk-through (flow order). */
   flow: number
+  group: SleeveGroupId
 }
 
-/** Stack order, bottom to top: cash-like at the base, play on top so its
- * share reads at the edge. */
+/** Stack order, bottom to top, by family: other, cash, taxable, retirement,
+ * play on top so its share reads at the edge. */
 export const SLEEVES: SleeveDef[] = [
   {
     id: "other",
@@ -36,6 +40,7 @@ export const SLEEVES: SleeveDef[] = [
     short: "Other",
     token: "--sleeve-other",
     flow: 10,
+    group: "other",
   },
   {
     id: "checking",
@@ -43,6 +48,7 @@ export const SLEEVES: SleeveDef[] = [
     short: "Checking",
     token: "--sleeve-checking",
     flow: 1,
+    group: "cash",
   },
   {
     id: "ef",
@@ -50,6 +56,7 @@ export const SLEEVES: SleeveDef[] = [
     short: "Emergency",
     token: "--sleeve-ef",
     flow: 2,
+    group: "cash",
   },
   {
     id: "reserve",
@@ -57,6 +64,7 @@ export const SLEEVES: SleeveDef[] = [
     short: "Reserve",
     token: "--sleeve-reserve",
     flow: 3,
+    group: "cash",
   },
   {
     id: "core",
@@ -64,18 +72,90 @@ export const SLEEVES: SleeveDef[] = [
     short: "Core",
     token: "--sleeve-core",
     flow: 4,
+    group: "taxable",
   },
-  { id: "ira", label: "IRA", short: "IRA", token: "--sleeve-ira", flow: 5 },
-  { id: "gold", label: "Gold", short: "Gold", token: "--sleeve-gold", flow: 9 },
-  { id: "k401", label: "401k", short: "401k", token: "--sleeve-k401", flow: 6 },
-  { id: "hsa", label: "HSA", short: "HSA", token: "--sleeve-hsa", flow: 7 },
+  {
+    id: "gold",
+    label: "Gold",
+    short: "Gold",
+    token: "--sleeve-gold",
+    flow: 9,
+    group: "taxable",
+  },
+  {
+    id: "ira",
+    label: "IRA",
+    short: "IRA",
+    token: "--sleeve-ira",
+    flow: 5,
+    group: "retire",
+  },
+  {
+    id: "k401",
+    label: "401k",
+    short: "401k",
+    token: "--sleeve-k401",
+    flow: 6,
+    group: "retire",
+  },
+  {
+    id: "hsa",
+    label: "HSA",
+    short: "HSA",
+    token: "--sleeve-hsa",
+    flow: 7,
+    group: "retire",
+  },
   {
     id: "play",
     label: "Play sleeve",
     short: "Play",
     token: "--sleeve-play",
     flow: 8,
+    group: "play",
   },
+]
+
+export interface SleeveGroup {
+  id: SleeveGroupId
+  label: string
+  members: SleeveId[]
+  /** A family reuses one member's color. */
+  token: string
+}
+
+/** Families in stack order, bottom to top. */
+export const SLEEVE_GROUPS: SleeveGroup[] = [
+  { id: "other", label: "Other", members: ["other"], token: "--sleeve-other" },
+  {
+    id: "cash",
+    label: "Cash",
+    members: ["checking", "ef", "reserve"],
+    token: "--sleeve-ef",
+  },
+  {
+    id: "taxable",
+    label: "Taxable",
+    members: ["core", "gold"],
+    token: "--sleeve-core",
+  },
+  {
+    id: "retire",
+    label: "Retirement",
+    members: ["ira", "k401", "hsa"],
+    token: "--sleeve-k401",
+  },
+  { id: "play", label: "Play", members: ["play"], token: "--sleeve-play" },
+]
+
+/** Invested sleeves (what play share divides by), bottom to top. */
+export const INVESTED_SLEEVES: SleeveId[] = [
+  "core",
+  "gold",
+  "ira",
+  "k401",
+  "hsa",
+  "play",
 ]
 
 export const SLEEVE_BY_ID = Object.fromEntries(

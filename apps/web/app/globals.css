@@ -30,7 +30,9 @@
   --color-sleeve-hsa: var(--sleeve-hsa);
   --color-sleeve-play: var(--sleeve-play);
   --color-sleeve-other: var(--sleeve-other);
-  --color-shortfall: var(--shortfall);
+  --color-runway-crit: var(--runway-crit);
+  --color-runway-warn: var(--runway-warn);
+  --color-flow-out: var(--flow-out);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -107,29 +109,34 @@
   --alloc-6: oklch(0.77 0.01 40);
   --alloc-7: oklch(0.86 0.007 40);
 
-  /* Runway sleeves: the one categorical set in the app. Nine named money
+  /* Runway sleeves: the one categorical set in the app. Ten named money
    * sleeves are an identity job a neutral ramp cannot carry, so the /runway
    * charts get a fixed hue per sleeve (never per rank or visibility). Order is
-   * the stack order; validated adjacent pairs for CVD and normal vision on the
-   * light card. Gold never sits next to Play. HSA sits between 401k and Play:
-   * a cyan well apart in hue and lightness from both. "Other" (receivables)
-   * is a neutral so it never competes with the nine. */
-  --sleeve-other: oklch(0.77 0.01 40);
-  --sleeve-checking: oklch(0.669 0.141 162.1);
-  --sleeve-ef: oklch(0.671 0.175 40.6);
-  --sleeve-reserve: oklch(0.575 0.163 255.5);
-  --sleeve-core: oklch(0.529 0.18 142.5);
-  --sleeve-ira: oklch(0.716 0.141 357.4);
-  --sleeve-gold: oklch(0.764 0.161 75.1);
-  --sleeve-k401: oklch(0.527 0.197 283.4);
-  --sleeve-hsa: oklch(0.74 0.115 212);
-  --sleeve-play: oklch(0.623 0.191 24.9);
-  /* Shortfall is only ever hatched or a faint wash, never a solid fill, so
-   * it cannot read as the Play sleeve. */
-  --shortfall: oklch(0.586 0.222 17.6);
-  /* Runway cash flow: take-home strong, covered outflows lighter. */
-  --flow-in: var(--chart-4);
-  --flow-out: var(--chart-2);
+   * the stack order, grouped by family (other; cash: checking, emergency
+   * fund, reserve; taxable: core, gold; retirement: IRA, 401k, HSA; play).
+   * Adjacent pairs validated on the light card: CVD worst 13.7, normal vision
+   * worst 16.1. A family reuses one member's color (cash = ef, taxable =
+   * core, retirement = 401k). Contrast WARNs (checking, reserve, gold, HSA)
+   * are covered by the chart's readout and table view. */
+  --sleeve-other: oklch(0.8 0.008 60);
+  --sleeve-checking: oklch(0.765 0.1 225);
+  --sleeve-ef: oklch(0.55 0.15 255);
+  --sleeve-reserve: oklch(0.72 0.12 185);
+  --sleeve-core: oklch(0.5 0.15 145);
+  --sleeve-gold: oklch(0.765 0.155 85);
+  --sleeve-ira: oklch(0.45 0.17 305);
+  --sleeve-k401: oklch(0.6 0.15 285);
+  --sleeve-hsa: oklch(0.74 0.13 350);
+  --sleeve-play: oklch(0.65 0.17 45);
+  /* Runway chart status: warnings only, never a series (the hatch for a
+   * shortfall or checking below $0 uses crit too). Crimson --primary stays
+   * out of the chart so it never reads as a warning. */
+  --runway-crit: oklch(0.56 0.2 25);
+  --runway-warn: oklch(0.56 0.13 65);
+  /* Event glyph ink. */
+  --runway-glyph: oklch(0.45 0.015 45);
+  /* Runway monthly net bars (a shortfall month is hatched instead). */
+  --flow-out: oklch(0.78 0.01 40);
 }
 
 .dark {
@@ -174,22 +181,22 @@
   --alloc-6: oklch(0.48 0.013 40);
   --alloc-7: oklch(0.39 0.012 40);
 
-  /* Runway sleeves, stepped for the dark card (validated separately). */
-  --sleeve-other: oklch(0.48 0.013 40);
-  --sleeve-checking: oklch(0.621 0.128 163.1);
-  --sleeve-ef: oklch(0.622 0.173 40.1);
-  --sleeve-reserve: oklch(0.622 0.161 255.1);
-  --sleeve-core: oklch(0.529 0.18 142.5);
-  --sleeve-ira: oklch(0.622 0.171 0.8);
-  --sleeve-gold: oklch(0.67 0.143 73.2);
-  --sleeve-k401: oklch(0.67 0.145 286.8);
-  --sleeve-hsa: oklch(0.78 0.11 212);
-  --sleeve-play: oklch(0.669 0.159 22.3);
-  --shortfall: oklch(0.719 0.169 13.4);
-  /* --chart-* does not flip in dark mode; pick the steps that read on the
-   * dark card. */
-  --flow-in: var(--chart-1);
-  --flow-out: var(--chart-2);
+  /* Runway sleeves, stepped for the dark card (validated separately: CVD
+   * worst 8.4, normal vision worst 15.3). */
+  --sleeve-other: oklch(0.45 0.008 60);
+  --sleeve-checking: oklch(0.665 0.1 225);
+  --sleeve-ef: oklch(0.52 0.14 255);
+  --sleeve-reserve: oklch(0.66 0.11 185);
+  --sleeve-core: oklch(0.52 0.15 145);
+  --sleeve-gold: oklch(0.665 0.13 88);
+  --sleeve-ira: oklch(0.49 0.18 310);
+  --sleeve-k401: oklch(0.625 0.12 272);
+  --sleeve-hsa: oklch(0.66 0.13 352);
+  --sleeve-play: oklch(0.665 0.15 58);
+  --runway-crit: oklch(0.72 0.16 22);
+  --runway-warn: oklch(0.8 0.13 78);
+  --runway-glyph: oklch(0.78 0.01 50);
+  --flow-out: oklch(0.47 0.012 40);
 }
 
 @layer base {

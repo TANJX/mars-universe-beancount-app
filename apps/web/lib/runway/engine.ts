@@ -469,8 +469,12 @@ export function simulate(inputs: RunwayInputs): RunwayResult {
   const resNeed = (i: number) =>
     earmarks +
     months.slice(i + 1, i + 1 + look).reduce((a, m) => a + need[m], 0)
+  // Only the excess already in the reserve today is spread over N months;
+  // `pending` is what is left of it. Excess that builds up later moves to
+  // the core the month it appears.
   const startExcess = Math.max(0, b.reserve - resNeed(0))
   const step = startExcess / N
+  let pending = startExcess
 
   const r = {
     eq: p.returns.equity / 12,
@@ -564,7 +568,11 @@ export function simulate(inputs: RunwayInputs): RunwayResult {
       b.reserve -= t
     }
     const excess = Math.max(0, b.reserve - resNeed(i))
-    const moved = i < N ? Math.min(excess, step) : excess
+    // The starting pool shrinks if the reserve was drawn below it.
+    pending = Math.min(pending, excess)
+    const drip = Math.min(step, pending)
+    pending -= drip
+    const moved = excess - pending
     b.reserve -= moved
     b.core += moved
 

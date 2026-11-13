@@ -456,6 +456,62 @@ test("a gap between jobs pays nothing and marks both ends", () => {
   )
 })
 
+/** Sam with no shortfall months at all: low spending, no streams or bills,
+ * emergency fund already at target, reserve set to `reserve`. */
+function surplusOnly(reserve: number): RunwayPerson {
+  const spendingMonthly = 2_000
+  return flat({
+    ...sam,
+    spendingMonthly,
+    contributions: [],
+    oneOffs: [],
+    cash: { ...sam.cash, dcaMonths: 12, earmarks: [] },
+    starting: {
+      ...sam.starting,
+      cards: 0,
+      sleeves: {
+        ...sam.starting.sleeves,
+        reserve,
+        ef: sam.cash.efMonths * spendingMonthly,
+      },
+    },
+  })
+}
+
+test("surplus that builds up later moves to core the month it appears", () => {
+  const r = sim(surplusOnly(0))
+  assert.ok(
+    r.rows.every((row) => row.shortfall === 0),
+    "no shortfall months"
+  )
+  // Nothing is starting excess, so nothing waits out the 12-month spread:
+  // the reserve stays empty and each month's surplus goes straight to core.
+  for (const row of r.rows) {
+    assert.ok(row.reserve < 1, `${row.month} reserve ${row.reserve}`)
+    assert.ok(row.reserveToCore > 0, `${row.month} moved nothing`)
+  }
+  const moves = r.rows.map((row) => row.reserveToCore)
+  assert.ok(
+    moves[12] < 2 * Math.max(...moves.slice(1, 12)),
+    "no catch-up dump in month 13"
+  )
+})
+
+test("only the reserve's starting excess is spread over the DCA months", () => {
+  const withStart = sim(surplusOnly(24_000)).rows
+  const without = sim(surplusOnly(0)).rows
+  // The first 12 months each move 2,000 more than the same plan with an
+  // empty reserve; after that the two match.
+  withStart.forEach((row, k) => {
+    const extra = row.reserveToCore - without[k].reserveToCore
+    const want = k < 12 ? 2_000 : 0
+    assert.ok(
+      Math.abs(extra - want) < 1,
+      `${row.month}: extra ${extra} vs ${want}`
+    )
+  })
+})
+
 test("a 2nd-check-of-the-month deduction counts checks paid before asof", () => {
   // asof falls between November's two checks: the 30th is the month's 2nd
   // check, so the per-month HSA lands on it, not on December's only.
