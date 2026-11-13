@@ -11,7 +11,7 @@ from fava.ext import FavaExtensionBase, extension_endpoint
 from fava.helpers import FavaAPIError
 from flask import request
 
-from . import cc_statements, fire, portfolio, runway, store
+from . import cc_statements, fire, portfolio, runway, runway_write, store
 from .cc_statements import ApiError
 from .merge import (
     _credit_balance_on,
@@ -413,17 +413,33 @@ class LedgerDataApi(FavaExtensionBase):
     @extension_endpoint
     def runway_data(self):
         """Everything the /runway page loads: config/runway.yaml resolved per
-        person (includes, fire.yaml inheritance, ledger starting balances)."""
-        path = self._ledger_path()
+        person (includes, scenario patches, ledger starting balances)."""
         return json.dumps(
             runway.build_runway_data(
                 ledger=g.ledger,
                 entries=g.ledger.all_entries,
-                ledger_file_path=path,
-                fire_config=fire.read_fire_config(path),
+                ledger_file_path=self._ledger_path(),
                 today=datetime.date.today(),
             )
         )
+
+    @extension_endpoint(methods=["POST"])
+    def runway_save(self):
+        """Write /runway page edits back to runway.yaml (and the person's
+        included file). 409 when the files changed since the page loaded,
+        422 with `issues` when the result would not validate."""
+        try:
+            result = runway_write.save(
+                ledger=g.ledger,
+                entries=g.ledger.all_entries,
+                ledger_file_path=self._ledger_path(),
+                today=datetime.date.today(),
+                body=request.json or {},
+            )
+        except runway_write.SaveError as ex:
+            return json.dumps({"status": "error", "message": ex.message, "issues": ex.issues}), ex.status
+        result["version"] = runway.config_version(self._ledger_path())
+        return json.dumps(result)
 
     @extension_endpoint(methods=["POST"])
     def fire_scenario_save(self):

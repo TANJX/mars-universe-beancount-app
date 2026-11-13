@@ -2,12 +2,12 @@
 // says so). Synthetic round numbers that describe nobody; the same people as
 // runway.example.yaml.
 
-import { defaultLimits } from "./contributions"
 import { addMonths } from "./schedule"
 import type {
-  Job,
+  Pay,
+  PersonRecord,
+  PlanBody,
   RunwayData,
-  RunwayPerson,
   SleeveKey,
   Withholding,
 } from "./types"
@@ -36,10 +36,7 @@ export const DEFAULT_WITHHOLDING: Withholding = {
   ssWageBase: 184_500,
 }
 
-const ALEX_JOB: Job = {
-  employer: "Current job",
-  grossAnnual: 90_000,
-  raise: { month: 2, pct: 0.03 },
+const ALEX_PAY: Pay = {
   schedule: { frequency: "biweekly", anchor: "2026-11-13", days: [] },
   deductions: [
     {
@@ -71,40 +68,46 @@ const ALEX_JOB: Job = {
     },
   ],
   withholding: DEFAULT_WITHHOLDING,
-  match: { type: "threshold", minPct: 0.04, pct: 0.02 },
-  vesting: { date: "2027-09-01", unvestedStart: 500 },
-  hsaEmployer: null,
-  hsaTier: null,
 }
 
-const SAM_JOB: Job = {
-  employer: "Current job",
-  grossAnnual: 140_000,
-  raise: null,
+const SAM_PAY: Pay = {
   schedule: { frequency: "semimonthly", anchor: null, days: [15, -1] },
   deductions: [],
   withholding: {
     ...DEFAULT_WITHHOLDING,
     statePayroll: { flatPerPaycheck: 0, rate: 0.00432, annualCap: 411.91 },
   },
-  match: { type: "none" },
-  vesting: null,
-  hsaEmployer: { amount: 500, month: 1 },
-  hsaTier: null,
 }
 
-function demoPeople(asof: string, start: string): RunwayPerson[] {
+const NO_OVERRIDES = { schedule: null, deductions: null, withholding: null }
+
+function demoPeople(asof: string, start: string): PersonRecord[] {
   const y = Number(start.slice(0, 4))
-  const limits = {
-    [y]: defaultLimits(y, null),
-    [y + 1]: defaultLimits(y + 1, null),
-    [y + 2]: { ...defaultLimits(y + 2, null), k401: 25_000 },
-  }
+  const limits = { [y + 2]: { k401: 25_000 } }
   const next = (n: number) => addMonths(start, n)
-  const alex: RunwayPerson = {
-    id: "alex",
+  const alexPlan: PlanBody = {
     label: "Alex",
-    job: ALEX_JOB,
+    birthYear: null,
+    pay: ALEX_PAY,
+    jobs: [
+      {
+        id: "current",
+        employer: "Current job",
+        start: null,
+        leave: null,
+        enabled: true,
+        note: null,
+        salary: [
+          { from: `${y}-01`, gross: 90_000, enabled: true, note: null },
+          { from: `${y + 1}-02`, gross: 92_700, enabled: true, note: "Review" },
+          { from: `${y + 2}-02`, gross: 95_481, enabled: true, note: "Review" },
+        ],
+        match: { type: "threshold", minPct: 0.04, pct: 0.02 },
+        vesting: { date: "2027-09-01", unvestedStart: 500 },
+        hsaEmployer: null,
+        ...NO_OVERRIDES,
+      },
+    ],
     contributions: [
       {
         id: "k401-pretax",
@@ -148,19 +151,37 @@ function demoPeople(asof: string, start: string): RunwayPerson[] {
       cardPayoff: { checking: 1 },
     },
     returns: { equity: 0.07, reserve: 0.039, ef: 0.0365, gold: 0.03 },
+    playCap: 0.1,
+    spreadThrough: "year_end",
+  }
+  const alex: PersonRecord = {
+    id: "alex",
+    plan: alexPlan,
+    overrides: [],
+    readOnly: false,
+    file: "config/runway.yaml",
     scenarios: [
-      { id: "stay", label: "Stay", start: null, job: null },
       {
         id: "offer-a",
         label: "Offer A",
-        start: next(8),
-        job: {
-          ...ALEX_JOB,
-          employer: "Offer A",
-          grossAnnual: 110_000,
-          raise: null,
-          match: { type: "flat", pct: 0.04 },
-          vesting: null,
+        patch: {
+          jobs: [
+            {
+              id: "offer-a",
+              employer: "Offer A",
+              start: next(8),
+              leave: null,
+              enabled: true,
+              note: null,
+              salary: [
+                { from: next(8), gross: 110_000, enabled: true, note: null },
+              ],
+              match: { type: "flat", pct: 0.04 },
+              vesting: null,
+              hsaEmployer: null,
+              ...NO_OVERRIDES,
+            },
+          ],
         },
       },
     ],
@@ -183,16 +204,30 @@ function demoPeople(asof: string, start: string): RunwayPerson[] {
       accounts: [],
       unmapped: [],
     },
-    inherited: [],
     sleeveText: {},
     notModeled: null,
-    playCap: 0.1,
   }
-  const sam: RunwayPerson = {
-    ...alex,
-    id: "sam",
+  const samPlan: PlanBody = {
+    ...alexPlan,
     label: "Sam",
-    job: SAM_JOB,
+    pay: SAM_PAY,
+    jobs: [
+      {
+        id: "current",
+        employer: "Current job",
+        start: null,
+        leave: null,
+        enabled: true,
+        note: null,
+        salary: [
+          { from: `${y}-01`, gross: 140_000, enabled: true, note: null },
+        ],
+        match: { type: "none" },
+        vesting: null,
+        hsaEmployer: { amount: 500, month: 1 },
+        ...NO_OVERRIDES,
+      },
+    ],
     contributions: [
       {
         id: "k401-pretax",
@@ -246,7 +281,12 @@ function demoPeople(asof: string, start: string): RunwayPerson[] {
       dcaMonths: 6,
       cardPayoff: { checking: 1 },
     },
-    scenarios: [{ id: "stay", label: "Stay", start: null, job: null }],
+  }
+  const sam: PersonRecord = {
+    ...alex,
+    id: "sam",
+    plan: samPlan,
+    scenarios: [],
     starting: {
       ...alex.starting,
       sleeves: {
@@ -283,9 +323,15 @@ export function demoRunway(today: string): RunwayData {
     start,
     months: 24,
     firstMonthSpendFraction: spendFraction(today),
-    spreadThrough: "year_end",
     reserveLookahead: 12,
     fromConfig: false,
+    version: "",
+    shared: {
+      returns: { equity: 0.07, reserve: 0.039, ef: 0.0365, gold: 0.03 },
+      limits: { [Number(start.slice(0, 4)) + 2]: { k401: 25_000 } },
+      playCap: 0.1,
+      spreadThrough: "year_end",
+    },
     people: demoPeople(today, start),
     unavailable: [],
     order: ["alex", "sam"],

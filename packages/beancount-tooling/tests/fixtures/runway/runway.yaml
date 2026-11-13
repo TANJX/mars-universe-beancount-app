@@ -5,28 +5,50 @@ start: 2026-11
 months: 24
 defaults:
   returns: { equity: 0.06 }
-  k401_limits: { 2026: 24500, 2027: 24500 }
+  limits: { 2028: { k401: 25000 } }
   spread_through: horizon
 people:
   - id: alex
-    job:
-      employer: Current job
-      raise: { month: 2, pct: 0.03 }
+    label: Alex
+    pay:
       schedule: { frequency: semimonthly, days: [15, -1] }
       deductions:
         - { label: Commuter, amount: 100, per: month, paycheck: 1, pretax: true }
-        - { label: HSA, amount: 200, per: month, paycheck: 2, pretax: true, sleeve: hsa }
       withholding: { state: ny_nonresident, state_payroll: { rate: 0.005, annual_cap: 400 } }
-    k401:
-      ytd: { 2026: 0 }
-      elections:
-        - { from: 2026-11, mode: fixed, pretax: 3000 }
-    ira: { amount: 7000, month: 1 }
+    jobs:
+      - id: cur
+        employer: Current job
+        start: 2024-06
+        salary:
+          - { from: 2026-01, gross: 100000 }
+          - { from: 2027-02, gross: 103000, note: review }
+    contributions:
+      - id: k401-pretax
+        account: k401
+        tax: traditional
+        ytd: { 2026: 0 }
+        schedule:
+          - { from: 2026-11, pace: fixed, amount: 3000 }
+      - id: ira-roth
+        account: ira
+        tax: roth
+        schedule:
+          - { from: 2026-11, pace: lump, month: 1, amount: 7000 }
+    returns: { reserve: 0.04 }
+    spending: { monthly: 3000 }
     cash: { buffer: 1000, ef_months: 3, earmarks: [], dca_months: 6 }
     scenarios:
       - id: next
         label: Next job
-        job: { start: 2028-01, gross_annual: 120000, match: { type: flat, pct: 0.04 }, raise: null }
+        patch:
+          jobs:
+            - { id: next, employer: New job, start: 2028-01, salary: [ { from: 2028-01, gross: 120000 } ], match: { type: flat, pct: 0.04 } }
+      - id: no-ira
+        label: No IRA
+        patch:
+          contributions:
+            - { id: ira-roth, remove: true }
+          spending: { monthly: 3200 }
     starting:
       source: ledger
       rules:

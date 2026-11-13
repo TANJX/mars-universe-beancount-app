@@ -9,6 +9,7 @@ import { InfoTip, Segmented, usd } from "@/components/fire/controls"
 import { ClientOnly } from "@/components/primitives/client-only"
 import { Card } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { activeJobAt } from "@/lib/runway/jobs"
 import {
   SLEEVES,
   type SleeveId,
@@ -64,7 +65,9 @@ export function RunwayChartCard({
   const endValues: Partial<Record<SleeveId, number>> = {}
   if (last) for (const id of used) endValues[id] = sleeveValue(last, id)
   const horizon = rows.length
-  const vesting = inputs.person.job.vesting
+  // The paying job at the start owns today's unvested match.
+  const firstMonth = rows[0]?.month ?? inputs.horizon.start
+  const vesting = activeJobAt(inputs.person.jobs, firstMonth)?.vesting ?? null
   const under = firstUnderCap(rows, playCap)
 
   const label =

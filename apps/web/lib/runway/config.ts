@@ -14,31 +14,39 @@ import { z } from "zod"
 
 import { CHANNELS, defaultLimits, paceAllowed } from "./contributions"
 import { DEFAULT_WITHHOLDING, demoRunway, zeroSleeves } from "./demo"
+import { applyPatch, diffPatch } from "./patch"
 import type {
   Channel,
   Contribution,
-  ContributionAccount,
   Deduction,
   Horizon,
   HsaCoverage,
   HsaTier,
   Job,
-  JobScenario,
+  LimitsGiven,
   Match,
   Pace,
   PaySchedule,
+  PersonRecord,
   Phase,
+  PlanBody,
+  Returns,
   RunwayData,
   RunwayInputs,
   RunwayIssue,
   RunwayPerson,
+  SalaryStep,
+  ScenarioDef,
+  SharedSettings,
   SleeveKey,
   SleeveText,
+  SpreadThrough,
   StateCode,
   UnavailablePerson,
+  Withholding,
   YearLimits,
 } from "./types"
-import { SLEEVE_KEYS } from "./types"
+import { PLAN_ID, SLEEVE_KEYS } from "./types"
 
 export const RunwayDataSchema = z
   .object({
@@ -47,8 +55,9 @@ export const RunwayDataSchema = z
     start: z.string().optional(),
     months: z.number().optional(),
     firstMonthSpendFraction: z.number().optional(),
-    spreadThrough: z.string().optional(),
     reserveLookahead: z.number().optional(),
+    version: z.string().optional(),
+    shared: z.record(z.string(), z.unknown()).optional(),
     defaults: z.record(z.string(), z.unknown()).optional(),
     people: z.array(z.record(z.string(), z.unknown())).optional(),
     errors: z.array(z.unknown()).optional(),
@@ -83,15 +92,12 @@ function numRecord(v: unknown): Record<string, number> {
   return out
 }
 
-function parseSchedule(v: unknown, d: PaySchedule): PaySchedule {
+function parseSchedule(v: unknown): PaySchedule | null {
   const o = obj(v)
-  const frequency =
-    o.frequency === "biweekly" || o.frequency === "semimonthly"
-      ? o.frequency
-      : d.frequency
+  if (o.frequency !== "biweekly" && o.frequency !== "semimonthly") return null
   return {
-    frequency,
-    anchor: typeof o.anchor === "string" ? o.anchor : d.anchor,
+    frequency: o.frequency,
+    anchor: typeof o.anchor === "string" ? o.anchor : null,
     days: arr(o.days).filter((x): x is number => typeof x === "number"),
   }
 }
@@ -137,69 +143,75 @@ const TIERS: HsaTier[] = ["self", "family", "none"]
 const isTier = (v: unknown): v is HsaTier =>
   typeof v === "string" && (TIERS as string[]).includes(v)
 
-function parseJob(v: unknown, d: Job): Job {
-  const o = obj(v)
-  const w = obj(o.withholding)
+function parseWithholding(v: unknown): Withholding {
+  const w = obj(v)
   const sp = obj(w.statePayroll)
-  const dw = d.withholding
-  const raise = o.raise === null ? null : isObj(o.raise) ? o.raise : undefined
-  const vesting =
-    o.vesting === null ? null : isObj(o.vesting) ? o.vesting : undefined
+  const dw = DEFAULT_WITHHOLDING
+  const ytd = numRecord(sp.ytd)
   return {
-    employer: str(o.employer, d.employer),
-    grossAnnual: num(o.grossAnnual, d.grossAnnual),
-    raise:
-      raise === undefined
-        ? d.raise
-        : raise === null
-          ? null
-          : { month: num(raise.month, 1), pct: num(raise.pct, 0) },
-    schedule: parseSchedule(o.schedule, d.schedule),
-    deductions: Array.isArray(o.deductions)
-      ? o.deductions
-          .map(parseDeduction)
-          .filter((x): x is Deduction => x !== null)
-      : d.deductions,
-    withholding: {
-      filing: w.filing === "joint" ? "joint" : dw.filing,
-      federalStd: num(w.federalStd, dw.federalStd),
-      state: STATES.includes(w.state as StateCode)
-        ? (w.state as StateCode)
-        : dw.state,
-      stateStd: num(w.stateStd, dw.stateStd),
-      statePayroll: {
-        flatPerPaycheck: num(
-          sp.flatPerPaycheck,
-          dw.statePayroll.flatPerPaycheck
-        ),
-        rate: num(sp.rate, dw.statePayroll.rate),
-        annualCap:
-          "annualCap" in sp
-            ? numOrNull(sp.annualCap)
-            : dw.statePayroll.annualCap,
-      },
-      ssWageBase: num(w.ssWageBase, dw.ssWageBase),
+    filing: w.filing === "joint" ? "joint" : "single",
+    federalStd: num(w.federalStd, dw.federalStd),
+    state: STATES.includes(w.state as StateCode)
+      ? (w.state as StateCode)
+      : dw.state,
+    stateStd: num(w.stateStd, dw.stateStd),
+    statePayroll: {
+      flatPerPaycheck: num(sp.flatPerPaycheck, 0),
+      rate: num(sp.rate, 0),
+      annualCap: numOrNull(sp.annualCap),
+      ...(Object.keys(ytd).length ? { ytd } : {}),
     },
-    match: "match" in o ? parseMatch(o.match) : d.match,
-    hsaEmployer:
-      "hsaEmployer" in o
-        ? isObj(o.hsaEmployer)
-          ? {
-              amount: Math.max(0, num(o.hsaEmployer.amount, 0)),
-              month: Math.max(1, Math.min(12, num(o.hsaEmployer.month, 1))),
-            }
-          : null
-        : d.hsaEmployer,
-    hsaTier: isTier(o.hsaTier) ? o.hsaTier : null,
-    vesting:
-      vesting === undefined
-        ? d.vesting
-        : vesting === null
-          ? null
-          : {
-              date: str(vesting.date, "2100-01-01"),
-              unvestedStart: num(vesting.unvestedStart, 0),
-            },
+    ssWageBase: num(w.ssWageBase, dw.ssWageBase),
+  }
+}
+
+const parseDeductions = (v: unknown): Deduction[] =>
+  arr(v)
+    .map(parseDeduction)
+    .filter((x): x is Deduction => x !== null)
+
+function parseSalary(v: unknown, start: string): SalaryStep[] {
+  return byFrom(
+    arr(v)
+      .map(obj)
+      .filter((x) => typeof x.from === "string")
+      .map((x) => ({
+        from: month(x.from, start),
+        gross: Math.max(0, num(x.gross, 0)),
+        enabled: bool(x.enabled, true),
+        note: typeof x.note === "string" && x.note ? x.note : null,
+      }))
+  )
+}
+
+function parseJob(v: unknown, i: number, start: string): Job {
+  const o = obj(v)
+  const he = isObj(o.hsaEmployer) ? o.hsaEmployer : null
+  const ve = isObj(o.vesting) ? o.vesting : null
+  return {
+    id: str(o.id, `job-${i + 1}`),
+    employer: str(o.employer, `Job ${i + 1}`),
+    start: o.start == null ? null : month(o.start, start),
+    leave: o.leave == null ? null : month(o.leave, start),
+    enabled: bool(o.enabled, true),
+    note: typeof o.note === "string" && o.note ? o.note : null,
+    salary: parseSalary(o.salary, start),
+    match: parseMatch(o.match),
+    vesting: ve
+      ? {
+          date: str(ve.date, "2100-01-01"),
+          unvestedStart: num(ve.unvestedStart, 0),
+        }
+      : null,
+    hsaEmployer: he
+      ? {
+          amount: Math.max(0, num(he.amount, 0)),
+          month: Math.max(1, Math.min(12, num(he.month, 1))),
+        }
+      : null,
+    schedule: o.schedule == null ? null : parseSchedule(o.schedule),
+    deductions: o.deductions == null ? null : parseDeductions(o.deductions),
+    withholding: o.withholding == null ? null : parseWithholding(o.withholding),
   }
 }
 
@@ -280,151 +292,33 @@ function parseContribution(
   }
 }
 
-/** The pre-contributions shape (`k401.elections`, `ira`, an HSA paycheck
- * deduction) as streams. Each account converts only when the new list has no
- * stream for it, so a half-migrated config never counts money twice. Returns
- * the labels of deductions that became streams. */
-function legacyContributions(
-  o: Obj,
-  job: Job,
-  start: string,
-  have: Set<ContributionAccount>
-): { list: Contribution[]; hsaDeductions: Set<string> } {
-  const list: Contribution[] = []
-  const hsaDeductions = new Set<string>()
-  const k = obj(o.k401)
-  const elections = byFrom(
-    arr(k.elections)
-      .map(obj)
-      .filter((e) => typeof e.mode === "string")
-      .map((e): Obj & { from: string } => ({
-        ...e,
-        from: month(e.from, start),
-      }))
-  )
-  const ytd = numRecord(k.ytd)
-  if (!have.has("k401") && (elections.length || Object.keys(ytd).length)) {
-    const pre: Phase[] = []
-    const roth: Phase[] = []
-    let rothOn = false
-    for (const e of elections) {
-      const from = e.from
-      const both = (a: Pace, b: Pace, on: boolean) => {
-        pre.push({ from, ...a })
-        if (on || rothOn) roth.push({ from, ...(on ? b : { pace: "off" }) })
-        rothOn = on
-      }
-      if (e.mode === "fixed") {
-        const r = num(e.roth, 0)
-        both(
-          {
-            pace: "fixed",
-            amount: num(e.pretax, 0),
-            per: "paycheck",
-            paycheckOfMonth: null,
-          },
-          { pace: "fixed", amount: r, per: "paycheck", paycheckOfMonth: null },
-          r > 0
-        )
-      } else if (e.mode === "percent") {
-        const r = num(e.rothPct, 0)
-        both(
-          { pace: "percent", pct: num(e.pretaxPct, 0) },
-          { pace: "percent", pct: r },
-          r > 0
-        )
-      } else if (e.mode === "max_spread") {
-        const cap = num(e.capPct, 1)
-        const r = Math.max(0, Math.min(1, num(e.rothShare, 0)))
-        both(
-          { pace: "even", share: 1 - r, capPct: cap * (1 - r) },
-          { pace: "even", share: r, capPct: cap * r },
-          r > 0
-        )
-      }
-    }
-    list.push({
-      id: "k401-pretax",
-      account: "k401",
-      tax: "traditional",
-      channel: "payroll",
-      ytd,
-      schedule: pre,
-    })
-    if (roth.length)
-      list.push({
-        id: "k401-roth",
-        account: "k401",
-        tax: "roth",
-        channel: "payroll",
-        ytd: {},
-        schedule: roth,
-      })
-  }
-  if (!have.has("hsa"))
-    for (const d of job.deductions) {
-      if (d.sleeve !== "hsa" || !d.pretax || !d.ficaExempt) continue
-      hsaDeductions.add(d.label)
-      list.push({
-        id: hsaDeductions.size > 1 ? `hsa-${hsaDeductions.size}` : "hsa",
-        account: "hsa",
-        tax: "traditional",
-        channel: "payroll",
-        ytd: {},
-        schedule: [
-          {
-            from: start,
-            pace: "fixed",
-            amount: d.amount,
-            per: d.per,
-            paycheckOfMonth: d.paycheckOfMonth,
-          },
-        ],
-      })
-    }
-  if (!have.has("ira") && isObj(o.ira))
-    list.push({
-      id: "ira-roth",
-      account: "ira",
-      tax: "roth",
-      channel: "direct",
-      ytd: {},
-      schedule: [
-        {
-          from: start,
-          pace: "lump",
-          month: Math.max(1, Math.min(12, num(o.ira.month, 1))),
-          amount: num(o.ira.amount, 0),
-        },
-      ],
-    })
-  return { list, hsaDeductions }
-}
-
 const LIMIT_KEYS = ["k401", "ira", "hsaSelf", "hsaFamily"] as const
 /** Years of limits kept on a person: the longest horizon is ten years. */
 const LIMIT_YEARS = 11
 
-/** Limits for every year the horizon can reach. Each field takes the config
- * value for that year, else the closest earlier configured year, else the
- * bundled IRS table (with catch-up from the birth year). */
-function parseLimits(
-  v: unknown,
-  legacyK401: Record<string, number>,
-  start: string,
-  birthYear: number | null
-): Record<string, YearLimits> {
-  const given: Record<string, Partial<YearLimits>> = {}
-  for (const [y, n] of Object.entries(legacyK401)) given[y] = { k401: n }
+/** Configured limits as served: by year, any subset of the four keys. */
+function parseGiven(v: unknown): LimitsGiven {
+  const out: LimitsGiven = {}
   for (const [y, raw] of Object.entries(obj(v))) {
     const o = obj(raw)
-    const row: Partial<YearLimits> = { ...given[y] }
+    const row: Partial<YearLimits> = {}
     for (const k of LIMIT_KEYS) {
       const n = numOrNull(o[k])
       if (n != null) row[k] = Math.max(0, n)
     }
-    given[y] = row
+    if (Object.keys(row).length) out[y] = row
   }
+  return out
+}
+
+/** Limits for every year the horizon can reach. Each field takes the config
+ * value for that year, else the closest earlier configured year, else the
+ * bundled IRS table (with catch-up from the birth year). */
+export function resolveLimits(
+  given: LimitsGiven,
+  start: string,
+  birthYear: number | null
+): Record<string, YearLimits> {
   const years = Object.keys(given)
     .map(Number)
     .filter((y) => Number.isFinite(y))
@@ -434,8 +328,8 @@ function parseLimits(
   for (let y = first; y < first + LIMIT_YEARS; y++) {
     const row = defaultLimits(y, birthYear)
     for (const k of LIMIT_KEYS) {
-      const at = years.filter((g) => g <= y && given[g][k] != null).at(-1)
-      const n = at != null ? given[at][k] : undefined
+      const at = years.filter((g) => g <= y && given[g]?.[k] != null).at(-1)
+      const n = at != null ? given[at]?.[k] : undefined
       if (n != null) row[k] = n
     }
     out[y] = row
@@ -443,17 +337,98 @@ function parseLimits(
   return out
 }
 
-const BLANK_JOB: Job = {
-  employer: "Current job",
-  grossAnnual: 0,
-  raise: null,
-  schedule: { frequency: "biweekly", anchor: null, days: [] },
-  deductions: [],
-  withholding: DEFAULT_WITHHOLDING,
-  match: { type: "none" },
-  vesting: null,
-  hsaEmployer: null,
-  hsaTier: null,
+const DEFAULT_RETURNS: Returns = {
+  equity: 0.07,
+  reserve: 0.039,
+  ef: 0.0365,
+  gold: 0.03,
+}
+const spreadOf = (v: unknown, d: SpreadThrough): SpreadThrough =>
+  v === "horizon" || v === "year_end" ? v : d
+
+function parseReturns(v: unknown, d: Returns = DEFAULT_RETURNS): Returns {
+  const r = obj(v)
+  return {
+    equity: num(r.equity, d.equity),
+    reserve: num(r.reserve, d.reserve),
+    ef: num(r.ef, d.ef),
+    gold: num(r.gold, d.gold),
+  }
+}
+
+export function parseShared(v: unknown): SharedSettings {
+  const o = obj(v)
+  return {
+    returns: parseReturns(o.returns),
+    limits: parseGiven(o.limits),
+    playCap: num(o.playCap, 0.1),
+    spreadThrough: spreadOf(o.spreadThrough, "year_end"),
+  }
+}
+
+/** One plan body (the person's or a scenario's) exactly as served. */
+export function parseBody(
+  v: unknown,
+  start: string,
+  fallbackLabel: string
+): PlanBody {
+  const o = obj(v)
+  const c = obj(o.cash)
+  const pay = obj(o.pay)
+  const cardPayoff: PlanBody["cash"]["cardPayoff"] = {}
+  for (const key of ["checking", "ef", "reserve"] as const) {
+    const x = numOrNull(obj(c.cardPayoff)[key])
+    if (x != null) cardPayoff[key] = x
+  }
+  if (Object.keys(cardPayoff).length === 0) cardPayoff.checking = 1
+  return {
+    label: str(o.label, fallbackLabel),
+    birthYear: numOrNull(o.birthYear),
+    pay: {
+      schedule: parseSchedule(pay.schedule),
+      deductions: parseDeductions(pay.deductions),
+      withholding: parseWithholding(pay.withholding),
+    },
+    jobs: arr(o.jobs).map((j, i) => parseJob(j, i, start)),
+    contributions: arr(o.contributions)
+      .map((x, i) => parseContribution(x, i, start))
+      .filter((x): x is Contribution => x !== null),
+    limits: parseGiven(o.limits),
+    hsaCoverage: byFrom(
+      arr(o.hsaCoverage)
+        .map(obj)
+        .filter((x) => isTier(x.tier))
+        .map(
+          (x): HsaCoverage => ({
+            from: month(x.from, start),
+            tier: x.tier as HsaTier,
+          })
+        )
+    ),
+    spendingMonthly: num(o.spendingMonthly, 0),
+    oneOffs: arr(o.oneOffs)
+      .map((x) => obj(x))
+      .filter((x) => typeof x.month === "string")
+      .map((x) => ({
+        ...(typeof x.id === "string" ? { id: x.id } : {}),
+        month: month(x.month, start),
+        amount: num(x.amount, 0),
+        label: str(x.label, "One-off"),
+      })),
+    cash: {
+      buffer: num(c.buffer, 0),
+      efMonths: num(c.efMonths, 6),
+      earmarks: arr(c.earmarks).map((e) => ({
+        label: str(obj(e).label, "Earmark"),
+        amount: num(obj(e).amount, 0),
+      })),
+      dcaMonths: num(c.dcaMonths, 12),
+      cardPayoff,
+    },
+    returns: parseReturns(o.returns),
+    playCap: num(o.playCap, 0.1),
+    spreadThrough: spreadOf(o.spreadThrough, "year_end"),
+  }
 }
 
 /** One resolved person from the endpoint, every field defaulted. */
@@ -461,48 +436,33 @@ export function normalizePerson(
   v: unknown,
   index: number,
   start: string,
-  asof: string,
-  playCap = 0.1
-): RunwayPerson {
+  asof: string
+): PersonRecord {
   const o = obj(v)
-  const parsedJob = parseJob(o.job, BLANK_JOB)
-  const c = obj(o.cash)
-  const r = obj(o.returns)
   const s = obj(o.starting)
-
-  const given = arr(o.contributions)
-    .map((x, i) => parseContribution(x, i, start))
-    .filter((x): x is Contribution => x !== null)
-  const legacy = legacyContributions(
+  const id = str(o.id, `person-${index + 1}`)
+  const plan = parseBody(
     o,
-    parsedJob,
     start,
-    new Set(given.map((x) => x.account))
+    str(o.name, str(o.id, `Person ${index + 1}`))
   )
-  const contributions = [...legacy.list, ...given]
-  // A deduction that became an HSA stream leaves every job's deduction list.
-  const strip = (j: Job): Job =>
-    legacy.hsaDeductions.size
-      ? {
-          ...j,
-          deductions: j.deductions.filter(
-            (d) => !(d.sleeve === "hsa" && legacy.hsaDeductions.has(d.label))
-          ),
-        }
-      : j
-  const job = strip(parsedJob)
 
-  const scenarios: JobScenario[] = arr(o.scenarios).map((x, i) => {
+  const scenarios: ScenarioDef[] = []
+  for (const [i, x] of arr(o.scenarios).entries()) {
     const so = obj(x)
-    return {
-      id: str(so.id, `scenario-${i}`),
-      label: str(so.label, str(so.id, `Scenario ${i + 1}`)),
-      start: so.start == null ? null : month(so.start, start),
-      job: so.job == null ? null : strip(parseJob(so.job, parsedJob)),
-    }
-  })
-  if (!scenarios.some((x) => x.id === "stay"))
-    scenarios.unshift({ id: "stay", label: "Stay", start: null, job: null })
+    const sid = str(so.id, `scenario-${i + 1}`)
+    if (sid === PLAN_ID || scenarios.some((y) => y.id === sid)) continue
+    // Served as a whole body; kept as a patch over the plan so plan edits
+    // flow into every scenario.
+    const body = isObj(so.person)
+      ? parseBody(so.person, start, plan.label)
+      : plan
+    scenarios.push({
+      id: sid,
+      label: str(so.label, sid),
+      patch: diffPatch(body, plan) as Record<string, unknown>,
+    })
+  }
 
   const sleeves = zeroSleeves()
   for (const [key, val] of Object.entries(obj(s.sleeves))) {
@@ -510,13 +470,6 @@ export function normalizePerson(
     const kk = key === "roth" ? "ira" : key
     if (isSleeve(kk)) sleeves[kk] = num(val, 0)
   }
-
-  const cardPayoff: RunwayPerson["cash"]["cardPayoff"] = {}
-  for (const key of ["checking", "ef", "reserve"] as const) {
-    const x = numOrNull(obj(c.cardPayoff)[key])
-    if (x != null) cardPayoff[key] = x
-  }
-  if (Object.keys(cardPayoff).length === 0) cardPayoff.checking = 1
 
   const sleeveText: Partial<Record<SleeveKey, SleeveText>> = {}
   // `sleeve_info` in YAML is a list of { id, title, body }.
@@ -545,53 +498,14 @@ export function normalizePerson(
     : null
 
   return {
-    id: str(o.id, `person-${index + 1}`),
-    label: str(o.label, str(o.name, str(o.id, `Person ${index + 1}`))),
-    job,
-    contributions,
-    limits: parseLimits(
-      o.limits,
-      numRecord(obj(o.k401).limits),
-      start,
-      numOrNull(o.birthYear)
-    ),
-    hsaCoverage: byFrom(
-      arr(o.hsaCoverage)
-        .map(obj)
-        .filter((x) => isTier(x.tier))
-        .map(
-          (x): HsaCoverage => ({
-            from: month(x.from, start),
-            tier: x.tier as HsaTier,
-          })
-        )
-    ),
-    spendingMonthly: num(o.spendingMonthly, 0),
-    oneOffs: arr(o.oneOffs)
-      .map((x) => obj(x))
-      .filter((x) => typeof x.month === "string")
-      .map((x) => ({
-        month: month(x.month, start),
-        amount: num(x.amount, 0),
-        label: str(x.label, "One-off"),
-      })),
-    cash: {
-      buffer: num(c.buffer, 0),
-      efMonths: num(c.efMonths, 6),
-      earmarks: arr(c.earmarks).map((e) => ({
-        label: str(obj(e).label, "Earmark"),
-        amount: num(obj(e).amount, 0),
-      })),
-      dcaMonths: num(c.dcaMonths, 12),
-      cardPayoff,
-    },
-    returns: {
-      equity: num(r.equity, 0.07),
-      reserve: num(r.reserve, 0.04),
-      ef: num(r.ef, 0.035),
-      gold: num(r.gold, 0.03),
-    },
+    id,
+    plan,
     scenarios,
+    overrides: arr(o.overrides).filter(
+      (x): x is string => typeof x === "string"
+    ),
+    readOnly: bool(o.readOnly, false),
+    file: str(o.file, "config/runway.yaml"),
     starting: {
       source: s.source === "ledger" ? "ledger" : "static",
       asof: str(s.asof, asof),
@@ -617,12 +531,54 @@ export function normalizePerson(
         }
       }),
     },
-    inherited: arr(o.inherited).filter(
-      (x): x is string => typeof x === "string"
-    ),
     sleeveText,
     notModeled,
-    playCap: num(o.playCap, playCap),
+  }
+}
+
+/** The plan body of a scenario (or the plan itself for PLAN_ID). */
+export function scenarioBody(
+  record: PersonRecord,
+  scenarioId: string
+): PlanBody {
+  const s = record.scenarios.find((x) => x.id === scenarioId)
+  return s ? applyPatch(record.plan, s.patch) : record.plan
+}
+
+/** A plan body made runnable: limits resolved, balances attached. */
+export function runnable(
+  record: PersonRecord,
+  body: PlanBody,
+  start: string
+): RunwayPerson {
+  const { limits, ...rest } = body
+  return {
+    ...rest,
+    id: record.id,
+    limits: resolveLimits(limits, start, body.birthYear),
+    limitsGiven: limits,
+    starting: record.starting,
+    sleeveText: record.sleeveText,
+    notModeled: record.notModeled,
+  }
+}
+
+/** Back from the runnable shape to the plan body (what is saved). */
+export function bodyOf(p: RunwayPerson): PlanBody {
+  return {
+    label: p.label,
+    birthYear: p.birthYear,
+    pay: p.pay,
+    jobs: p.jobs,
+    contributions: p.contributions,
+    limits: p.limitsGiven,
+    hsaCoverage: p.hsaCoverage,
+    spendingMonthly: p.spendingMonthly,
+    oneOffs: p.oneOffs,
+    cash: p.cash,
+    returns: p.returns,
+    playCap: p.playCap,
+    spreadThrough: p.spreadThrough,
   }
 }
 
@@ -672,11 +628,10 @@ export function parseRunwayData(raw: unknown, today = todayIso()): RunwayData {
   const d = parsed.data
   const asof = str(d.asof, today).slice(0, 10)
   const start = month(d.start, asof.slice(0, 7))
-  const playCap = num((d as Obj).playCap, 0.1)
   const errors = arr(d.errors).map(parseIssue)
   const warnings = arr(d.warnings).map(parseIssue)
 
-  const people: RunwayPerson[] = []
+  const people: PersonRecord[] = []
   const unavailable: UnavailablePerson[] = []
   arr(d.people).forEach((p, i) => {
     const o = obj(p)
@@ -688,7 +643,7 @@ export function parseRunwayData(raw: unknown, today = todayIso()): RunwayData {
     const body = isObj(o.data)
       ? { id: o.id, label: o.name ?? o.label, ...o.data }
       : o
-    people.push(normalizePerson(body, i, start, asof, playCap))
+    people.push(normalizePerson(body, i, start, asof))
   })
   // The roster lists every configured person in config order, including the
   // ones that could not be resolved (encrypted, missing, invalid).
@@ -701,6 +656,10 @@ export function parseRunwayData(raw: unknown, today = todayIso()): RunwayData {
     unavailable.push(unavailableFrom(o, i))
   })
   const rank = new Map(roster.map((o, i) => [str(o.id, ""), i]))
+  for (const p of people) {
+    const r = roster.find((o) => o.id === p.id)
+    if (r && typeof r.file === "string" && r.file) p.file = r.file
+  }
 
   // Flat shape: a person whose include could not be read is dropped and
   // reported as an error on `people[n]`. Surface it so the page can say why.
@@ -724,10 +683,6 @@ export function parseRunwayData(raw: unknown, today = todayIso()): RunwayData {
   if (!fromConfig || (people.length === 0 && unavailable.length === 0))
     return { ...demo, errors, warnings }
 
-  const spread =
-    d.spreadThrough === "horizon" || d.spreadThrough === "year_end"
-      ? d.spreadThrough
-      : "year_end"
   return {
     asof,
     start,
@@ -736,7 +691,8 @@ export function parseRunwayData(raw: unknown, today = todayIso()): RunwayData {
       0,
       Math.min(1, num(d.firstMonthSpendFraction, demo.firstMonthSpendFraction))
     ),
-    spreadThrough: spread,
+    version: str(d.version, ""),
+    shared: parseShared(d.shared),
     reserveLookahead: Math.max(0, Math.round(num(d.reserveLookahead, 12))),
     fromConfig: true,
     people,
@@ -749,22 +705,26 @@ export function parseRunwayData(raw: unknown, today = todayIso()): RunwayData {
   }
 }
 
-export function horizonOf(data: RunwayData): Horizon {
+export function horizonOf(
+  data: RunwayData,
+  spreadThrough: SpreadThrough
+): Horizon {
   return {
     asof: data.asof,
     start: data.start,
     months: data.months,
     firstMonthSpendFraction: data.firstMonthSpendFraction,
-    spreadThrough: data.spreadThrough,
+    spreadThrough,
     reserveLookahead: data.reserveLookahead,
   }
 }
 
+/** Engine inputs for one runnable plan. */
 export function personInputs(
   person: RunwayPerson,
   data: RunwayData
 ): RunwayInputs {
-  return { person, horizon: horizonOf(data) }
+  return { person, horizon: horizonOf(data, person.spreadThrough) }
 }
 
 export const DEMO_RUNWAY: RunwayData = demoRunway("2026-11-08")

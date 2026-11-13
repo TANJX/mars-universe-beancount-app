@@ -1,9 +1,10 @@
 "use client"
 
-// The /runway page. Person, scenario and chart view live in the URL; the
-// inputs are ephemeral page edits over the person's config (they reset when
-// the person changes). The active scenario re-runs on every edit; the
-// comparison of all scenarios runs on a deferred copy so typing stays quick.
+// The /runway page. Person, scenario and chart view live in the URL. Edits
+// are drafts per person (hooks/use-runway-drafts.ts) that survive switching
+// person or scenario; Save writes them back to the YAML. The active plan
+// re-runs on every edit; the comparison of all scenarios runs on a deferred
+// copy so typing stays quick.
 //
 // Same workbench as /fire: chart pinned on the left, controls pane scrolling
 // on the right at xl; one column with a sticky chart below it.
@@ -14,9 +15,36 @@ import * as React from "react"
 
 import { usd } from "@/components/fire/controls"
 import { PANE_FILL, SectionNav, usePaneOpen } from "@/components/fire/workbench"
-import { personInputs } from "@/lib/runway/config"
+import { type RunwaySaveError, useRunwaySave } from "@/hooks/use-runway"
+import { type RunwayDrafts, useRunwayDrafts } from "@/hooks/use-runway-drafts"
+import { bodyOf, personInputs, runnable } from "@/lib/runway/config"
 import { ACCOUNT_LABEL } from "@/lib/runway/contributions"
+import {
+  addScenario,
+  bodyIn,
+  deleteScenario,
+  draftChanges,
+  isDirty,
+  isSharedDirty,
+  issueTarget,
+  type PersonDraft,
+  renameScenario,
+  resetToShared,
+  saveBody,
+  savedBodyIn,
+  scenarioNameError,
+  setBody,
+} from "@/lib/runway/drafts"
 import { compareScenarios, simulate } from "@/lib/runway/engine"
+import {
+  countChanges,
+  countChangesOver,
+  deepEqual,
+  diffPatch,
+  getPath,
+  setPath,
+} from "@/lib/runway/patch"
+import { monthSpan } from "@/lib/runway/schedule"
 import {
   SLEEVES,
   type SleeveId,
@@ -25,15 +53,14 @@ import {
 } from "@/lib/runway/sleeves"
 import {
   CONTRIBUTION_ACCOUNTS,
+  PLAN_ID,
+  type PlanBody,
   type RunwayData,
-  type RunwayInputs,
   type RunwayIssue,
-  type RunwayPerson,
   type RunwayResult,
   type UnavailablePerson,
 } from "@/lib/runway/types"
 import { cn } from "@/lib/utils"
-
 import { RunwayChartCard } from "./chart-card"
 import { monthLabel } from "./chart-utils"
 import { ScenarioCompare } from "./compare"
@@ -49,11 +76,16 @@ import {
   RunwayKpiStrip,
   RunwayKpis,
 } from "./header"
-import { RunwayInputsPanel } from "./inputs"
+import { type FallbackFor, RunwayInputsPanel } from "./inputs"
+import { JobsSection } from "./jobs"
 import { MonthlyTable } from "./monthly-table"
+import { SaveBar, type SaveState } from "./save-bar"
+import { ReadOnlyBanner, ScenarioBar, ScenarioNote } from "./scenario-bar"
+import { SharedSection, valueIn } from "./shared"
 
 const SECTIONS = [
   { id: "runway-inputs", label: "Inputs" },
+  { id: "runway-shared", label: "Shared" },
   { id: "runway-compare", label: "Compare" },
   { id: "runway-months", label: "Months" },
   { id: "runway-sleeves", label: "Sleeves" },
@@ -68,12 +100,14 @@ export function RunwayView({
   data: RunwayData
   onReload: () => void
 }) {
+  const drafts = useRunwayDrafts(data)
   const order = new Map(data.order.map((id, i) => [id, i]))
   const options: PersonOption[] = [
     ...data.people.map((p) => ({
       id: p.id,
-      name: p.label,
+      name: drafts.people[p.id]?.plan.label ?? p.plan.label,
       status: "ok" as const,
+      dirty: drafts.people[p.id] ? isDirty(drafts.people[p.id]) : false,
     })),
     ...data.unavailable.map((u) => ({
       id: u.id,
@@ -84,18 +118,18 @@ export function RunwayView({
   const [personParam, setPersonParam] = useQueryState("person", parseAsString)
   const personId =
     options.find((o) => o.id === personParam)?.id ?? options[0]?.id ?? ""
-  const person = data.people.find((p) => p.id === personId)
   const unavailable = data.unavailable.find((u) => u.id === personId)
 
   return (
     <RunwayPersonView
-      // Edits belong to one person: switching remounts with fresh inputs.
+      // View state (hidden sleeves, chart) belongs to one person; edits live
+      // in `drafts`, above this remount.
       key={personId}
       data={data}
+      drafts={drafts}
       options={options}
       personId={personId}
       onPersonChange={(id) => void setPersonParam(id)}
-      person={person ?? null}
       unavailable={unavailable ?? null}
       onReload={onReload}
     />
@@ -104,26 +138,22 @@ export function RunwayView({
 
 function RunwayPersonView({
   data,
+  drafts,
   options,
   personId,
   onPersonChange,
-  person,
   unavailable,
   onReload,
 }: {
   data: RunwayData
+  drafts: RunwayDrafts
   options: PersonOption[]
   personId: string
   onPersonChange: (id: string) => void
-  person: RunwayPerson | null
   unavailable: UnavailablePerson | null
   onReload: () => void
 }) {
-  const config = React.useMemo<RunwayInputs | null>(
-    () => (person ? personInputs(person, data) : null),
-    [person, data]
-  )
-  const [inputs, setInputs] = React.useState<RunwayInputs | null>(config)
+  const draft: PersonDraft | null = drafts.people[personId] ?? null
   const [scenarioParam, setScenarioParam] = useQueryState(
     "scenario",
     parseAsString
@@ -135,33 +165,214 @@ function RunwayPersonView({
   const [hidden, setHidden] = React.useState<Set<SleeveId>>(new Set())
   const [paneOpen, setPane] = usePaneOpen("runway.controlsOpen")
   const paneRef = React.useRef<HTMLElement>(null)
+  const [barHeight, setBarHeight] = React.useState(0)
+  const months = React.useMemo(
+    () => monthSpan(data.start, data.months),
+    [data.start, data.months]
+  )
 
-  const scenarios = inputs?.person.scenarios ?? []
-  const scenario =
-    scenarios.find((s) => s.id === scenarioParam) ?? scenarios[0] ?? null
-  const scenarioId = scenario?.id ?? "stay"
+  const scenarioId =
+    draft?.scenarios.find((s) => s.id === scenarioParam)?.id ?? PLAN_ID
+  const isPlan = scenarioId === PLAN_ID
+  const selectScenario = (id: string) =>
+    void setScenarioParam(id === PLAN_ID ? null : id)
+
+  const body = draft ? bodyIn(draft, scenarioId) : null
+  const savedBody = draft ? savedBodyIn(draft, scenarioId) : null
+  const base = draft && !isPlan ? draft.plan : null
+  const person = draft && body ? runnable(draft.saved, body, data.start) : null
+  const inputs = person ? personInputs(person, data) : null
+  const config =
+    draft && person
+      ? personInputs(
+          runnable(draft.saved, savedBody ?? body ?? draft.plan, data.start),
+          data
+        )
+      : null
+  const readOnly = draft?.saved.readOnly ?? false
 
   const result = React.useMemo(
-    () => (inputs ? simulate(inputs, scenarioId) : null),
-    [inputs, scenarioId]
+    () => (inputs ? simulate(inputs) : null),
+    [inputs]
   )
-  const deferred = React.useDeferredValue(inputs)
+  const runs = React.useMemo(
+    () =>
+      draft
+        ? [
+            { id: PLAN_ID, body: draft.plan },
+            ...draft.scenarios.map((s) => ({
+              id: s.id,
+              body: bodyIn(draft, s.id),
+            })),
+          ].map((r) => ({
+            id: r.id,
+            inputs: personInputs(
+              runnable(draft.saved, r.body, data.start),
+              data
+            ),
+          }))
+        : [],
+    [draft, data]
+  )
+  const deferredRuns = React.useDeferredValue(runs)
   const compared = React.useMemo(
-    () => (deferred ? compareScenarios(deferred) : {}),
-    [deferred]
+    () => compareScenarios(deferredRuns),
+    [deferredRuns]
   )
+  const scenarioOptions = [
+    { id: PLAN_ID, label: "Plan" },
+    ...(draft?.scenarios.map((s) => ({ id: s.id, label: s.label })) ?? []),
+  ]
+
+  const update = (fn: (d: PersonDraft) => PersonDraft) =>
+    drafts.update(personId, fn)
+  const setActiveBody = (next: PlanBody) =>
+    update((d) => setBody(d, scenarioId, next))
+
+  // ---- save
+  const save = useRunwaySave()
+  const [saveState, setSaveState] = React.useState<SaveState>({ kind: "idle" })
+  const undoRef = React.useRef<ReturnType<RunwayDrafts["discard"]> | null>(null)
+  const timer = React.useRef<number | undefined>(undefined)
+  const later = (ms: number, fn: () => void) => {
+    window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(fn, ms)
+  }
+  React.useEffect(() => () => window.clearTimeout(timer.current), [])
+
+  const changes = draft ? draftChanges(draft) : null
+  const sharedDirty = isSharedDirty(drafts.shared)
+  const sharedChanges = sharedDirty
+    ? countChanges(diffPatch(drafts.shared.edited, drafts.shared.saved))
+    : 0
+  const totalChanges = (changes?.total ?? 0) + sharedChanges
+  const label = draft?.plan.label ?? ""
+  const targets = [
+    changes?.total
+      ? `${label}: ${[
+          ...(changes.plan || changes.overrides ? ["Plan"] : []),
+          ...changes.scenarios.map((s) => s.label),
+        ].join(", ")}`
+      : null,
+    sharedDirty ? "Shared (changes both people)" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ")
+  const otherDirty = options.find((o) => o.id !== personId && o.dirty)
+
+  const onSave = () => {
+    const req = saveBody(data.version, draft, drafts.shared)
+    if (!req.person && !req.shared) return
+    const files = [
+      ...(req.person && draft ? [draft.saved.file] : []),
+      ...(req.shared ? ["config/runway.yaml"] : []),
+    ].filter((f, i, all) => all.indexOf(f) === i)
+    setSaveState({ kind: "saving", files })
+    save.mutate(req, {
+      onSuccess: (r) => {
+        drafts.expectReset([
+          ...(req.person ? [personId] : []),
+          ...(req.shared ? ["shared"] : []),
+        ])
+        setSaveState({
+          kind: "saved",
+          files: r.written.length ? r.written : files,
+        })
+        later(2500, () => setSaveState({ kind: "idle" }))
+      },
+      onError: (e: RunwaySaveError) => {
+        if (e.status === 0) setSaveState({ kind: "unreachable" })
+        else if (e.status === 409) {
+          onReload()
+          setSaveState({
+            kind: "conflict",
+            message:
+              "The YAML files changed since the page loaded. They are reloaded and your edits are kept; Save again to write them.",
+          })
+        } else if (e.status === 422 && e.issues.length) {
+          const unmapped = e.issues.filter(
+            (i) => !issueTarget(i.path, draft?.scenarios ?? [])
+          )
+          setSaveState({ kind: "invalid", issues: e.issues, unmapped })
+        } else
+          setSaveState({
+            kind: "failed",
+            message: `Couldn't save: ${e.message}`,
+          })
+      },
+    })
+  }
+  const onDiscard = () => {
+    const n = totalChanges
+    undoRef.current = drafts.discard(personId)
+    setSaveState({ kind: "discarded", n })
+    later(6000, () => {
+      undoRef.current = null
+      setSaveState({ kind: "idle" })
+    })
+  }
+  const onUndo = () => {
+    if (undoRef.current) drafts.restore(undoRef.current)
+    undoRef.current = null
+    setSaveState({ kind: "idle" })
+  }
+
+  // Server errors for the active target, by body-relative path.
+  const errors: Record<string, string> = {}
+  if (saveState.kind === "invalid" && draft)
+    for (const i of saveState.issues) {
+      const t = issueTarget(i.path, draft.scenarios)
+      if (t && t.scenarioId === scenarioId && i.personId === personId)
+        errors[t.path] = i.message
+    }
+  const showFirstError = () => {
+    const el = paneRef.current?.querySelector("[data-field-error]")
+    el?.scrollIntoView({ block: "center", behavior: "smooth" })
+    const input = el?.parentElement?.querySelector<HTMLElement>(
+      "input, select, button"
+    )
+    input?.focus({ preventScroll: true })
+  }
+
+  // ---- override markers
+  const fallbackFor: FallbackFor = (path, format) => {
+    if (!draft || !body || readOnly) return null
+    if (base) {
+      const mine = getPath(body, path)
+      const theirs = getPath(base, path)
+      if (deepEqual(mine, theirs)) return null
+      const shared = draft.overrides.includes(path)
+        ? ""
+        : getPath(drafts.shared.edited, path) !== undefined
+          ? " (shared)"
+          : ""
+      return {
+        source: "Plan",
+        text: `${format(theirs)}${shared}`,
+        onReset: () => setActiveBody(setPath(body, path, theirs)),
+      }
+    }
+    if (!draft.overrides.includes(path)) return null
+    const v = getPath(drafts.shared.edited, path)
+    if (v === undefined) return null
+    return {
+      source: "Shared",
+      text: format(v),
+      onReset: () =>
+        update((d) => resetToShared(d, path, drafts.shared.edited)),
+    }
+  }
 
   // Below xl the chart section is sticky over the pane. A sticky block taller
   // than its scroller would cover the whole page, so stay sticky only while
-  // the section leaves room (120px) for the pane to scroll under it.
+  // the section leaves room (120px plus the save bar) for the pane to scroll.
   const stickyRef = React.useRef<HTMLElement>(null)
-  const stickyOk = useFitsSticky(stickyRef, 120)
+  const stickyOk = useFitsSticky(stickyRef, 120 + barHeight)
 
   const rows = result?.rows ?? []
   const first = rows[0]?.month ?? data.start
   const last = rows.at(-1)?.month ?? data.start
   const periodLabel = `${monthLabel(first)} to ${monthLabel(last)}`
-  const dirty = JSON.stringify(inputs) !== JSON.stringify(config)
   const used = SLEEVES.filter((s) => sleeveUsed(rows, s.id)).map((s) => s.id)
   const endRow = rows.at(-1)
   const endValues: Partial<Record<SleeveId, number>> = {}
@@ -200,6 +411,35 @@ function RunwayPersonView({
     </>
   )
 
+  const scenarioChanges = (id: string) => {
+    const s = draft?.scenarios.find((x) => x.id === id)
+    return s && draft && Object.keys(s.patch).length
+      ? countChangesOver(draft.plan, s.patch)
+      : 0
+  }
+
+  const scenarioBar = draft ? (
+    <ScenarioBar
+      scenarios={scenarioOptions}
+      activeId={scenarioId}
+      onSelect={selectScenario}
+      readOnly={readOnly || !data.fromConfig}
+      nameError={(v, selfId) => scenarioNameError(draft, v, label, selfId)}
+      changesIn={scenarioChanges}
+      onCreate={(name, from) => {
+        const made = addScenario(draft, name, from)
+        update(() => made.draft)
+        selectScenario(made.id)
+      }}
+      onRename={(id, name) => update((d) => renameScenario(d, id, name))}
+      onDelete={(id) => {
+        update((d) => deleteScenario(d, id))
+        selectScenario(PLAN_ID)
+      }}
+    />
+  ) : null
+
+  const canSave = data.fromConfig
   return (
     <div
       className={cn(
@@ -208,6 +448,7 @@ function RunwayPersonView({
           ? "xl:grid-cols-[minmax(0,1.45fr)_minmax(26rem,1fr)]"
           : "xl:grid-cols-[minmax(0,1fr)_auto]"
       )}
+      style={{ "--savebar-h": `${barHeight}px` } as React.CSSProperties}
     >
       <section
         ref={stickyRef}
@@ -220,11 +461,7 @@ function RunwayPersonView({
           people={options}
           personId={personId}
           onPersonChange={onPersonChange}
-          scenarios={scenarios}
-          scenarioId={scenarioId}
-          onScenarioChange={(id) => void setScenarioParam(id)}
-          dirty={dirty}
-          onReset={() => setInputs(config)}
+          scenarioBar={scenarioBar}
           periodLabel={periodLabel}
         >
           {/* Headline numbers sit in the header on wide screens only; below xl
@@ -308,11 +545,13 @@ function RunwayPersonView({
         </button>
       )}
 
-      {inputs && config && result && scenario ? (
+      {inputs && config && result && draft && body ? (
         <section
           ref={paneRef}
+          inert={saveState.kind === "saving" || undefined}
+          aria-busy={saveState.kind === "saving" || undefined}
           className={cn(
-            "mx-4 mb-4 flex min-w-0 flex-col gap-4 rounded-xl px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] xl:mx-0 xl:my-3 xl:mr-3 xl:min-h-0 xl:overflow-x-hidden xl:overflow-y-auto",
+            "mx-4 mb-4 flex min-w-0 flex-col gap-4 rounded-xl px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] max-xl:mb-[calc(1rem+var(--savebar-h))] xl:mx-0 xl:my-3 xl:mr-3 xl:min-h-0 xl:overflow-x-hidden xl:overflow-y-auto xl:pb-0",
             PANE_FILL,
             !paneOpen && "xl:hidden"
           )}
@@ -322,7 +561,21 @@ function RunwayPersonView({
             paneRef={paneRef}
             onFold={() => setPane(false)}
           />
-          <div id="runway-inputs" className="flex scroll-mt-12 flex-col gap-4">
+          {readOnly ? <ReadOnlyBanner file={draft.saved.file} /> : null}
+          <ScenarioNote
+            label={
+              scenarioOptions.find((s) => s.id === scenarioId)?.label ?? ""
+            }
+            isPlan={isPlan}
+            changes={scenarioChanges(scenarioId)}
+            hasScenarios={draft.scenarios.length > 0}
+            onEditPlan={() => selectScenario(PLAN_ID)}
+          />
+          <fieldset
+            id="runway-inputs"
+            disabled={readOnly}
+            className="m-0 flex min-w-0 scroll-mt-12 flex-col gap-4 border-0 p-0"
+          >
             <RunwayKpiStrip
               result={result}
               inputs={inputs}
@@ -331,36 +584,87 @@ function RunwayPersonView({
             <RunwayInputsPanel
               inputs={inputs}
               config={config}
-              scenario={scenario}
               result={result}
-              onChange={setInputs}
+              fallbackFor={fallbackFor}
+              onChange={(next) => setActiveBody(bodyOf(next.person))}
+              jobs={
+                <JobsSection
+                  key={scenarioId}
+                  body={body}
+                  saved={savedBody}
+                  base={base}
+                  months={months}
+                  readOnly={readOnly}
+                  errors={errors}
+                  onChange={setActiveBody}
+                />
+              }
+            />
+          </fieldset>
+          <div id="runway-shared" className="scroll-mt-12">
+            <SharedSection
+              shared={drafts.shared.edited}
+              saved={drafts.shared.saved}
+              inScenario={!isPlan}
+              onChange={drafts.setShared}
+              people={data.people.map((p) => {
+                const d = drafts.people[p.id]
+                return {
+                  label: d?.plan.label ?? p.plan.label,
+                  overrides: d?.overrides ?? p.overrides,
+                  value: valueIn(d?.plan ?? p.plan),
+                }
+              })}
             />
           </div>
           <div id="runway-compare" className="scroll-mt-12">
-            {scenarios.length > 1 ? (
+            {scenarioOptions.length > 1 ? (
               <ScenarioCompare
-                scenarios={scenarios}
+                scenarios={scenarioOptions}
                 results={compared}
                 activeId={scenarioId}
-                onSelect={(id) => void setScenarioParam(id)}
+                onSelect={selectScenario}
               />
             ) : (
               <p className="px-1 text-muted-foreground text-xs">
-                One job scenario in config. Add a scenario (a new job from a
-                given month) to compare.
+                Only Plan so far. Create a scenario from the ⋯ menu beside the
+                scenario switch to compare what changes.
               </p>
             )}
           </div>
           <div id="runway-months" className="scroll-mt-12">
             <MonthlyTable rows={rows} showOther={used.includes("other")} />
           </div>
-          <div id="runway-sleeves" className="flex scroll-mt-12 flex-col gap-4">
+          <div
+            id="runway-sleeves"
+            className="flex scroll-mt-12 flex-col gap-4 pb-4"
+          >
             <SleeveExplainer
               sleeves={sleeveInfos(inputs.person.sleeveText, used)}
               endValues={endValues}
             />
             <NotModeled items={inputs.person.notModeled} />
           </div>
+          {canSave ? (
+            <SaveBar
+              state={saveState}
+              changes={totalChanges}
+              targets={targets}
+              restored={drafts.restored.includes(personId)}
+              stale={drafts.stale.includes(personId) ? draft.saved.file : null}
+              others={
+                otherDirty
+                  ? { id: otherDirty.id, label: otherDirty.name }
+                  : null
+              }
+              onSave={onSave}
+              onDiscard={onDiscard}
+              onUndo={onUndo}
+              onShow={showFirstError}
+              onSwitch={onPersonChange}
+              onHeight={setBarHeight}
+            />
+          ) : null}
         </section>
       ) : null}
     </div>

@@ -1,6 +1,6 @@
 "use client"
 
-// Job scenarios side by side: a net-worth overlay (neutral lines; scenarios
+// Scenarios side by side: a net-worth overlay (neutral lines; scenarios
 // are not categorical identities, so dash pattern and a direct label carry
 // identity) and the comparison table. Clicking a column switches to it.
 
@@ -18,10 +18,11 @@ import {
 } from "@/components/ui/chart"
 import { Skeleton } from "@/components/ui/skeleton"
 import { avgTakeHome } from "@/lib/runway/engine"
-import type { JobScenario, RunwayResult } from "@/lib/runway/types"
+import type { RunwayResult } from "@/lib/runway/types"
 import { cn } from "@/lib/utils"
 
 import { AXIS, monthLabel, monthTick, monthTicks } from "./chart-utils"
+import type { ScenarioOption } from "./scenario-bar"
 
 const OVERLAY_DASH = ["6 3", "2 3", "8 3 2 3"]
 const CONFIG: ChartConfig = {}
@@ -31,7 +32,7 @@ export function ScenarioNetWorthChart({
   results,
   activeId,
 }: {
-  scenarios: JobScenario[]
+  scenarios: ScenarioOption[]
   results: Record<string, RunwayResult>
   activeId: string
 }) {
@@ -79,7 +80,7 @@ export function ScenarioNetWorthChart({
         config={CONFIG}
         className="aspect-auto h-40 w-full"
         role="img"
-        aria-label={`Net worth by job scenario. ${scenarios
+        aria-label={`Net worth by scenario. ${scenarios
           .map(
             (s) =>
               `${s.label} ends at ${usd(results[s.id]?.rows.at(-1)?.netWorth ?? 0)}`
@@ -178,7 +179,7 @@ function CompareTooltip({
 }: {
   active?: boolean
   payload?: Array<{ payload?: Record<string, unknown> }>
-  scenarios: JobScenario[]
+  scenarios: ScenarioOption[]
   activeId: string
 }) {
   const d = payload?.[0]?.payload
@@ -228,7 +229,7 @@ export function ScenarioCompare({
   activeId,
   onSelect,
 }: {
-  scenarios: JobScenario[]
+  scenarios: ScenarioOption[]
   results: Record<string, RunwayResult>
   activeId: string
   onSelect: (id: string) => void

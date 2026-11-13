@@ -14,7 +14,7 @@ import {
   NY,
 } from "../fire/tax"
 import { periodsPerYear } from "./schedule"
-import type { Deduction, Job, StateCode } from "./types"
+import type { Deduction, ResolvedJob, StateCode } from "./types"
 
 const SS_RATE = 0.062
 const MEDICARE = 0.0145
@@ -43,7 +43,7 @@ export interface PaycheckInput {
   gross: number
   /** Payroll contributions this check (401k, HSA). */
   deferrals: Deferral[]
-  job: Job
+  job: ResolvedJob
   /** 1-based position of this check within its month. */
   paycheckOfMonth: number
   /** State payroll tax (SDI/PFL) already withheld this year. */

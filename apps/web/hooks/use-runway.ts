@@ -6,10 +6,11 @@
 
 "use client"
 
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { parseRunwayData } from "@/lib/runway/config"
-import type { RunwayData } from "@/lib/runway/types"
+import type { SaveBody } from "@/lib/runway/drafts"
+import type { RunwayData, RunwayIssue } from "@/lib/runway/types"
 
 const BASE = "/api/ext"
 
@@ -38,5 +39,58 @@ export function useRunwayData() {
     queryKey: ["runway"],
     queryFn: async () => parseRunwayData(await call("runway_data")),
     staleTime: 60_000,
+  })
+}
+
+/** A rejected save. `status` 0 means the server could not be reached; 409
+ * means the YAML changed since the page loaded; 422 carries `issues`. */
+export class RunwaySaveError extends Error {
+  status: number
+  issues: RunwayIssue[]
+  constructor(message: string, status: number, issues: RunwayIssue[] = []) {
+    super(message)
+    this.status = status
+    this.issues = issues
+  }
+}
+
+export interface RunwaySaveResult {
+  status: "ok"
+  written: string[]
+  version: string
+}
+
+async function postSave(body: SaveBody): Promise<RunwaySaveResult> {
+  let res: Response
+  try {
+    res = await fetch(`${BASE}/runway_save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  } catch {
+    throw new RunwaySaveError("Couldn't reach the ledger server.", 0)
+  }
+  let json: Record<string, unknown> = {}
+  try {
+    json = (await res.json()) as Record<string, unknown>
+  } catch {
+    // An HTML error page; the status says enough.
+  }
+  if (!res.ok)
+    throw new RunwaySaveError(
+      typeof json.message === "string" ? json.message : `HTTP ${res.status}`,
+      res.status,
+      Array.isArray(json.issues) ? (json.issues as RunwayIssue[]) : []
+    )
+  return json as unknown as RunwaySaveResult
+}
+
+/** Saves page edits, then reloads the runway data. */
+export function useRunwaySave() {
+  const qc = useQueryClient()
+  return useMutation<RunwaySaveResult, RunwaySaveError, SaveBody>({
+    mutationFn: postSave,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["runway"] }),
   })
 }

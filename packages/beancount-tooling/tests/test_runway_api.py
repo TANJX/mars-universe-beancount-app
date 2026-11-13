@@ -47,30 +47,6 @@ LEDGER = """
   Equity:Opening
 """
 
-FIRE = {
-    "assumptions": {"k401_limit": 23000},
-    "people": [
-        {
-            "id": "alex",
-            "name": "Alex",
-            "work_state": "nj",
-            "jobs": [
-                {"id": "old", "enabled": False, "salary": [{"year": 2026, "gross": 1}]},
-                {
-                    "id": "cur",
-                    "salary": [
-                        {"year": 2025, "gross": 90000},
-                        {"year": 2026, "gross": 100000},
-                        {"year": 2027, "gross": 110000},
-                    ],
-                },
-            ],
-            "spending": {"housing": 24000, "other": 12000},
-        }
-    ],
-}
-
-
 @pytest.fixture
 def ledger():
     entries, errors, options = loader.load_string(LEDGER)
@@ -89,13 +65,12 @@ def make_root(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def build(root: Path, ledger, fire=None) -> dict:
+def build(root: Path, ledger) -> dict:
     led, entries = ledger
     return runway.build_runway_data(
         ledger=led,
         entries=entries,
         ledger_file_path=str(root / "journal" / "journal.beancount"),
-        fire_config=FIRE if fire is None else fire,
         today=TODAY,
     )
 
@@ -228,49 +203,61 @@ def test_build_end_to_end(tmp_path, ledger):
         {"account": "Assets:Receivable:Friend", "currency": "USD", "usd": 50.0}
     ]
 
-    # fire.yaml inheritance fills only what runway.yaml leaves out
     assert alex["label"] == "Alex"
-    assert alex["job"]["grossAnnual"] == 100000.0  # latest step with year <= 2026
-    assert alex["job"]["withholding"]["state"] == "ny_nonresident"  # set explicitly
     assert alex["spendingMonthly"] == 3000.0
-    assert sorted(alex["inherited"]) == ["job.grossAnnual", "label", "spendingMonthly"]
+    assert alex["readOnly"] is False
 
-    # defaults deep-merge; horizon years without a limit reuse the last one
-    assert alex["returns"] == {"equity": 0.06, "reserve": 0.039, "ef": 0.0365, "gold": 0.03}
-    assert alex["k401"]["limits"] == {"2026": 24500.0, "2027": 24500.0, "2028": 24500.0}
-    assert alex["k401"]["elections"] == [
-        {"from": "2026-11", "mode": "fixed", "pretax": 3000.0, "roth": 0.0}
-    ]
-    deductions = alex["job"]["deductions"]
-    assert deductions[1] == {
-        "label": "HSA",
-        "amount": 200.0,
-        "per": "month",
-        "paycheckOfMonth": 2,
-        "pretax": True,
-        "ficaExempt": True,
-        "sleeve": "hsa",
+    # defaults deep-merge under the person; the person's own keys win
+    assert alex["returns"] == {"equity": 0.06, "reserve": 0.04, "ef": 0.0365, "gold": 0.03}
+    assert alex["overrides"] == ["returns.reserve"]
+    assert alex["limits"] == {"2028": {"k401": 25000.0}}
+    assert alex["spreadThrough"] == "horizon" and alex["playCap"] == 0.10
+    assert data["shared"] == {
+        "returns": {"equity": 0.06, "reserve": 0.039, "ef": 0.0365, "gold": 0.03},
+        "limits": {"2028": {"k401": 25000.0}},
+        "playCap": 0.10,
+        "spreadThrough": "horizon",
+    }
+    assert len(data["version"]) == 16
+
+    # pay settings at person level; jobs carry salary steps and nulls for pay
+    assert alex["pay"]["schedule"] == {"frequency": "semimonthly", "anchor": None, "days": [15, -1]}
+    assert alex["pay"]["deductions"][0]["paycheckOfMonth"] == 1
+    assert alex["pay"]["withholding"]["state"] == "ny_nonresident"
+    (cur,) = alex["jobs"]
+    assert cur == {
+        "id": "cur",
+        "employer": "Current job",
+        "start": "2024-06",
+        "leave": None,
+        "enabled": True,
+        "note": None,
+        "salary": [
+            {"from": "2026-01", "gross": 100000.0, "enabled": True, "note": None},
+            {"from": "2027-02", "gross": 103000.0, "enabled": True, "note": "review"},
+        ],
+        "match": {"type": "none"},
+        "vesting": None,
+        "hsaEmployer": None,
+        "schedule": None,
+        "deductions": None,
+        "withholding": None,
     }
     assert alex["cash"]["cardPayoff"] == {"checking": 1.0}
-    assert alex["ira"] == {"amount": 7000.0, "month": 1}
-    # the older shape passes through untouched; nothing is written as streams
-    assert alex["contributions"] == []
-    assert alex["limits"] == {}
     assert alex["hsaCoverage"] == []
     assert alex["birthYear"] is None
 
-    # scenarios: stay first; a switch inherits schedule/withholding, not vesting
-    assert [s["id"] for s in alex["scenarios"]] == ["stay", "next"]
-    nxt = alex["scenarios"][1]
-    assert nxt["start"] == "2028-01"
-    assert nxt["job"]["employer"] == "New job"
-    assert nxt["job"]["grossAnnual"] == 120000.0
-    assert nxt["job"]["raise"] is None
-    assert nxt["job"]["schedule"] == alex["job"]["schedule"]
-    assert nxt["job"]["match"] == {"type": "flat", "pct": 0.04}
+    # scenarios: patches over the plan, resolved into whole plan bodies
+    assert [s["id"] for s in alex["scenarios"]] == ["next", "no-ira"]
+    nxt, no_ira = (s["person"] for s in alex["scenarios"])
+    assert [j["id"] for j in nxt["jobs"]] == ["cur", "next"]
+    assert nxt["jobs"][1]["match"] == {"type": "flat", "pct": 0.04}
+    assert nxt["contributions"] == alex["contributions"]
+    assert [c["id"] for c in no_ira["contributions"]] == ["k401-pretax"]
+    assert no_ira["spendingMonthly"] == 3200.0
+    assert "starting" not in nxt and "scenarios" not in nxt
 
     msgs = [(w["personId"], w["message"]) for w in data["warnings"]]
-    assert ("alex", "No 401k limit for 2028; reusing 2027") in msgs
     assert any(pid == "alex" and "matches no sleeve rule" in m for pid, m in msgs)
 
 
@@ -278,16 +265,13 @@ def test_build_partner_include_static_and_inline_override(tmp_path, ledger):
     data = build(make_root(tmp_path), ledger)
     sam = data["people"][1]
     assert sam["label"] == "Sam (inline)"  # inline key beside include wins
-    assert sam["inherited"] == []  # no fire.yaml person "sam"
     assert sam["starting"]["source"] == "static"
     assert sam["starting"]["asof"] == "2026-11-01"
     assert sam["starting"]["sleeves"]["reserve"] == 40000.0
     assert sam["starting"]["cards"] == 2000.0
     assert sam["starting"]["unvested"] == 300.0
-    assert sam["job"]["vesting"] == {"date": "2027-05-01", "unvestedStart": 300.0}
+    assert sam["jobs"][0]["vesting"] == {"date": "2027-05-01", "unvestedStart": 300.0}
     # contribution streams: ids default from (account, tax), phases sort by month
-    assert sam["k401"]["elections"] == []  # defaults.k401_limits still apply
-    assert sam["ira"] is None
     assert [c["id"] for c in sam["contributions"]] == [
         "k401-pretax",
         "k401-roth",
@@ -314,16 +298,20 @@ def test_build_partner_include_static_and_inline_override(tmp_path, ledger):
     ]
     assert ira["channel"] == "direct"
     assert ira["schedule"] == [{"from": "2026-11", "pace": "lump", "month": 1, "amount": None}]
-    assert sam["limits"] == {"2027": {"hsaSelf": 4500.0}}
+    assert sam["limits"] == {"2027": {"hsaSelf": 4500.0}, "2028": {"k401": 25000.0}}
+    assert sam["overrides"] == ["limits.2027.hsaSelf"]
     assert sam["hsaCoverage"] == [
         {"from": "2026-01", "tier": "self"},
         {"from": "2027-06", "tier": "none"},
     ]
-    assert sam["job"]["hsaEmployer"] == {"amount": 500.0, "month": 1}
-    assert sam["job"]["hsaTier"] is None
-    assert sam["scenarios"][1]["job"]["hsaTier"] == "none"
+    assert sam["jobs"][0]["hsaEmployer"] == {"amount": 500.0, "month": 1}
+    offer = sam["scenarios"][0]["person"]
+    assert offer["hsaCoverage"] == [
+        {"from": "2026-01", "tier": "self"},
+        {"from": "2027-06", "tier": "family"},
+    ]
+    assert offer["jobs"][1]["vesting"] is None
     assert sam["cash"]["cardPayoff"] == {"checking": 0.5, "ef": 0.5}
-    assert sam["scenarios"][1]["job"]["vesting"] is None
 
 
 def test_build_locked_partner_listed_in_roster(tmp_path, ledger):
@@ -367,9 +355,11 @@ def _write(root: Path, text: str) -> None:
 
 BASE_PERSON = """
   - id: p
-    job:
-      gross_annual: 50000
+    pay:
       schedule: { frequency: biweekly, anchor: 2026-11-13 }
+    jobs:
+      - id: j
+        salary: [ { from: 2026-01, gross: 50000 } ]
     spending: { monthly: 1000 }
     starting: { source: static, balances: { checking: 100 } }
 """
@@ -378,8 +368,8 @@ BASE_PERSON = """
 @pytest.mark.parametrize(
     ("patch", "path", "fragment"),
     [
-        (("frequency: biweekly", "frequency: weekly"), "job.schedule.frequency", "unknown pay"),
-        (("anchor: 2026-11-13", "anchor: soon"), "job.schedule.anchor", "YYYY-MM-DD"),
+        (("frequency: biweekly", "frequency: weekly"), "pay.schedule.frequency", "unknown pay"),
+        (("anchor: 2026-11-13", "anchor: soon"), "pay.schedule.anchor", "YYYY-MM-DD"),
         (("monthly: 1000 }", "monthly: 1000 }\n    one_offs: [ { month: 2027-4, amount: 1 } ]"),
          "one_offs[0].month", "YYYY-MM"),
         (("checking: 100", "cash: 100"), "starting.balances.cash", "unknown sleeve"),
@@ -387,8 +377,14 @@ BASE_PERSON = """
          "starting.rules[0].accounts", "bad regex"),
         (("monthly: 1000 }", "monthly: 1000 }\n    cash: { card_payoff: { checking: 0.5 } }"),
          "cash.card_payoff", "sum to 1"),
-        (("monthly: 1000 }", "monthly: 1000 }\n    k401: { elections: [ { from: 2026-11, mode: yolo } ] }"),
-         "k401.elections[0].mode", "unknown election"),
+        (("monthly: 1000 }", "monthly: 1000 }\n    k401: { ytd: { 2026: 0 } }"), "k401", "contributions"),
+        (("jobs:", "job: { gross_annual: 1 }\n    jobs:"), "job", "became `jobs:`"),
+        (("gross: 50000 }", "gross: 50000 }, { from: 2026-01, gross: 1 }"),
+         "jobs[0].salary[1].from", "already starts"),
+        (("- id: j", "- id: j\n        leave: 2025-01\n        start: 2026-01"), "jobs[0].leave", "before start"),
+        (("- id: j", "- id: j\n      - id: j"), "jobs[1].id", "duplicate job"),
+        (("pay:\n      schedule: { frequency: biweekly, anchor: 2026-11-13 }", "pay: {}"),
+         "pay.schedule", "no pay schedule"),
         (("monthly: 1000 }", "monthly: 1000 }\n    contributions: [ { account: roth } ]"),
          "contributions[0].account", "unknown account"),
         (("monthly: 1000 }", "monthly: 1000 }\n    contributions: [ { account: ira, channel: payroll } ]"),
@@ -403,24 +399,20 @@ BASE_PERSON = """
            "[ { from: 2026-11, pace: off }, { from: 2026-11, pace: max } ] } ]")),
          "contributions[0].schedule[1].from", "already starts"),
         (("monthly: 1000 }",
-          ("monthly: 1000 }\n    contributions: [ { account: k401 } ]"
-           "\n    k401: { elections: [ { from: 2026-11, mode: max } ] }")),
-         "k401.elections", "keep one"),
-        (("monthly: 1000 }", "monthly: 1000 }\n    contributions: [ { account: ira } ]\n    ira: { amount: 1 }"),
-         "ira", "keep one"),
+          "monthly: 1000 }\n    contributions: [ { account: hsa } ]\n    pay: { deductions: [ { label: H, amount: 1, sleeve: hsa } ] }"),
+         "pay.deductions[0]", "keep one"),
         (("monthly: 1000 }", "monthly: 1000 }\n    hsa_coverage: [ { from: 2026-11, tier: plus } ]"),
          "hsa_coverage[0].tier", "tier must be"),
         (("monthly: 1000 }", "monthly: 1000 }\n    limits: { 2026: { roth: 1 } }"),
          "limits.2026.roth", "unknown limit"),
-        (("gross_annual: 50000\n", "gross_annual: 50000\n      match: { type: magic }\n"),
-         "job.match.type", "unknown match"),
-        (("schedule:", "withholding: { state: ca }\n      schedule:"), "job.withholding.state", "unknown state"),
+        (("- id: j", "- id: j\n        match: { type: magic }"), "jobs[0].match.type", "unknown match"),
+        (("schedule:", "withholding: { state: ca }\n      schedule:"), "pay.withholding.state", "unknown state"),
     ],
 )
 def test_validation_errors_drop_person(tmp_path, ledger, patch, path, fragment):
     root = make_root(tmp_path)
     _write(root, "people:" + BASE_PERSON.replace(*patch))
-    data = build(root, ledger, fire={})
+    data = build(root, ledger)
     assert data["people"] == []
     assert data["roster"][0]["status"] == "error"
     assert any(e["path"] == f"people[0].{path}" and fragment in e["message"] for e in data["errors"]), data[
@@ -431,7 +423,7 @@ def test_validation_errors_drop_person(tmp_path, ledger, patch, path, fragment):
 def test_duplicate_person_id(tmp_path, ledger):
     root = make_root(tmp_path)
     _write(root, "people:" + BASE_PERSON + BASE_PERSON)
-    data = build(root, ledger, fire={})
+    data = build(root, ledger)
     assert [p["id"] for p in data["people"]] == ["p"]
     assert any("duplicate person id" in e["message"] for e in data["errors"])
 
@@ -443,40 +435,51 @@ def test_missing_id_and_semimonthly_without_days(tmp_path, ledger):
         "frequency: biweekly, anchor: 2026-11-13", "frequency: semimonthly"
     )
     _write(root, "people:" + person + other)
-    data = build(root, ledger, fire={})
+    data = build(root, ledger)
     assert data["people"] == []
     paths = {e["path"] for e in data["errors"]}
     assert "people[0].id" in paths
-    assert "people[1].job.schedule.days" in paths
+    assert "people[1].pay.schedule.days" in paths
 
 
-def test_fire_limit_fallback_and_warnings(tmp_path, ledger):
+def test_warnings(tmp_path, ledger):
     root = make_root(tmp_path)
     _write(
         root,
         "asof: 2026-11-08\npeople:"
-        + BASE_PERSON.replace("balances: { checking: 100 }", "balances: { checking: -5 }")
+        + BASE_PERSON.replace("balances: { checking: 100 }", "balances: { checking: -5 }").replace(
+            "salary: [ { from: 2026-01", "salary: [ { from: 2027-03"
+        )
         + "    cash: { earmarks: [ { label: Big, amount: 999 } ] }\n",
     )
-    data = build(root, ledger, fire={"assumptions": {"k401_limit": 23000}})
+    data = build(root, ledger)
     person = data["people"][0]
-    assert person["k401"]["limits"] == {"2026": 23000.0, "2027": 23000.0, "2028": 23000.0}
-    assert person["inherited"] == ["k401.limits"]
+    assert person["limits"] == {}
     messages = [w["message"] for w in data["warnings"]]
     assert "negative starting balance" in messages
     assert "earmarks are larger than the starting reserve" in messages
+    assert "the first salary step starts 2027-03; nothing is paid before it" in messages
 
 
-def test_no_limits_configured_leaves_them_to_the_page(tmp_path, ledger):
+def test_scenario_errors_keep_the_person(tmp_path, ledger):
     root = make_root(tmp_path)
-    _write(root, "asof: 2026-11-08\npeople:" + BASE_PERSON)
-    data = build(root, ledger, fire={"people": [{"id": "p", "birth_year": 1970}]})
-    person = data["people"][0]
-    assert person["k401"]["limits"] == {}
-    assert person["limits"] == {}
-    assert person["birthYear"] == 1970  # inherited: drives catch-up on the page
-    assert "birthYear" in person["inherited"]
-    assert data["warnings"] == []
+    _write(
+        root,
+        "people:"
+        + BASE_PERSON
+        + "    scenarios:\n"
+        + "      - { id: bad, patch: { jobs: [ { id: j, match: { type: magic } } ] } }\n"
+        + "      - { id: old, job: { start: 2027-01 } }\n"
+        + "      - { id: plan }\n"
+        + "      - { id: ok, label: Fine, patch: { spending: { monthly: 2000 } } }\n",
+    )
+    data = build(root, ledger)
+    (person,) = data["people"]
+    assert [s["id"] for s in person["scenarios"]] == ["ok"]
+    paths = {e["path"] for e in data["errors"]}
+    assert "people[0].scenarios[0].patch.jobs[0].match.type" in paths
+    assert "people[0].scenarios[1]" in paths
+    assert "people[0].scenarios[2].id" in paths
 
 
 def test_example_config_resolves_cleanly(tmp_path):
@@ -500,7 +503,7 @@ def test_example_config_resolves_cleanly(tmp_path):
 """
     )
     assert not errors
-    data = build(tmp_path, (SimpleNamespace(options=options), entries), fire={})
+    data = build(tmp_path, (SimpleNamespace(options=options), entries))
     assert data["errors"] == []
     person = data["people"][0]
     assert person["id"] == "alex"
@@ -511,7 +514,7 @@ def test_example_config_resolves_cleanly(tmp_path):
         ("ira", "roth", "direct"),
     ]
     assert data["warnings"] == []
-    assert [s["id"] for s in person["scenarios"]] == ["stay", "new-job"]
+    assert [s["id"] for s in person["scenarios"]] == ["new-job"]
     assert person["starting"]["sleeves"]["reserve"] == 30000.0
-    assert data["spreadThrough"] == "year_end"
-    assert data["playCap"] == 0.10
+    assert person["spreadThrough"] == "year_end"
+    assert person["playCap"] == 0.10

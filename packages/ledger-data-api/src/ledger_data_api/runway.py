@@ -10,11 +10,9 @@ resolves its inputs into one JSON payload:
             snake_case. Lists people plus shared defaults. A person entry may
             `include:` a file elsewhere in the ledger folder (a partner's file
             under a git-crypt encrypted path, say), which is deep-merged under
-            the inline keys.
-  fire      `config/fire.yaml`: when a runway person's id matches a fire
-            person, missing fields (label, gross salary, work state, monthly
-            spending, birth year, 401k limit) are inherited instead of
-            duplicated.
+            the inline keys. Each person lists its `jobs` (pay settings
+            under `pay`, salary as dated steps) and `scenarios`: named
+            patches over the person's own plan (runway_patch.py).
   ledger    `starting.source: ledger` fills starting balances from the ledger
             at `asof`, mapping each account to a sleeve by ordered regex rules.
 
@@ -26,7 +24,9 @@ from __future__ import annotations
 
 import calendar
 import datetime
+import hashlib
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -35,6 +35,7 @@ import yaml
 
 from . import store
 from .fire import _query, _usd
+from .runway_patch import apply_patch
 
 log = logging.getLogger(__name__)
 
@@ -53,22 +54,7 @@ SLEEVES = (
 CASH_SLEEVES = ("checking", "ef", "reserve")
 PERIODS_PER_YEAR = {"biweekly": 26, "semimonthly": 24}
 STATES = ("ny", "ny_nonresident", "nj", "none")
-#: fire.yaml `work_state` -> runway withholding state.
-FIRE_STATE = {
-    "ny_from_nj": "ny_nonresident",
-    "ny": "ny",
-    "nj": "nj",
-    "none": "none",
-}
 MATCH_TYPES = ("none", "flat", "threshold", "tiered")
-#: Accepted election mode spellings. `max` and `per_paycheck` are the UI names.
-ELECTION_MODES = {
-    "fixed": "fixed",
-    "per_paycheck": "fixed",
-    "percent": "percent",
-    "max_spread": "max_spread",
-    "max": "max_spread",
-}
 #: Contribution streams: one account, one tax treatment, one channel.
 ACCOUNTS = ("k401", "ira", "hsa")
 #: Channels an account allows; the first is its default.
@@ -513,22 +499,80 @@ def _norm_match(ctx: _Ctx, raw: Any, path: str) -> dict:
     return {"type": "none"}
 
 
-def _norm_job(ctx: _Ctx, raw: Any, path: str, default_employer: str) -> dict | None:
-    raw = _dict(ctx, raw, path)
-    gross = raw.get("gross_annual")
-    if gross is None:
-        ctx.err(f"{path}.gross_annual", "missing gross_annual")
+def _month_of_year(ctx: _Ctx, value: Any, path: str, default: int = 1) -> int | None:
+    value = default if value is None else value
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 12:
+        ctx.err(path, f"month must be 1..12, got {value!r}")
         return None
-    schedule = _norm_schedule(ctx, raw.get("schedule"), f"{path}.schedule")
-    raise_raw = raw.get("raise")
-    raise_ = None
-    if raise_raw is not None:
-        rr = _dict(ctx, raise_raw, f"{path}.raise")
-        month = rr.get("month")
-        if isinstance(month, bool) or not isinstance(month, int) or not 1 <= month <= 12:
-            ctx.err(f"{path}.raise.month", f"raise month must be 1..12, got {month!r}")
-        else:
-            raise_ = {"month": month, "pct": _num(ctx, rr.get("pct"), f"{path}.raise.pct", 0.0)}
+    return value
+
+
+def _enabled(ctx: _Ctx, value: Any, path: str) -> bool:
+    if value is None:
+        return True
+    if not isinstance(value, bool):
+        ctx.err(path, "enabled must be true or false")
+        return True
+    return value
+
+
+def _note(value: Any) -> str | None:
+    return str(value) if value not in (None, "") else None
+
+
+def _norm_pay(ctx: _Ctx, raw: Any, path: str) -> dict:
+    """Person-level pay settings every job uses unless it overrides them."""
+    raw = _dict(ctx, raw, path)
+    return {
+        "schedule": (
+            _norm_schedule(ctx, raw["schedule"], f"{path}.schedule")
+            if raw.get("schedule") is not None
+            else None
+        ),
+        "deductions": _norm_deductions(ctx, raw.get("deductions"), f"{path}.deductions"),
+        "withholding": _norm_withholding(ctx, raw.get("withholding"), f"{path}.withholding"),
+    }
+
+
+def _norm_salary(ctx: _Ctx, raw: Any, path: str) -> list[dict]:
+    out: list[dict] = []
+    seen: set[str] = set()
+    for i, s in enumerate(_list(ctx, raw, path)):
+        p = f"{path}[{i}]"
+        if not isinstance(s, dict):
+            ctx.err(p, "expected a mapping")
+            continue
+        start = _month(ctx, s.get("from"), f"{p}.from", required=True)
+        if start is None:
+            continue
+        if start in seen:
+            ctx.err(f"{p}.from", f"another salary step already starts {start}")
+            continue
+        seen.add(start)
+        if s.get("gross") is None:
+            ctx.err(f"{p}.gross", "missing gross (annual salary)")
+            continue
+        out.append(
+            {
+                "from": start,
+                "gross": _num(ctx, s.get("gross"), f"{p}.gross", 0.0, minimum=0),
+                "enabled": _enabled(ctx, s.get("enabled"), f"{p}.enabled"),
+                "note": _note(s.get("note")),
+            }
+        )
+    return sorted(out, key=lambda s: s["from"])
+
+
+def _norm_job(ctx: _Ctx, raw: Any, path: str, index: int, horizon_start: str) -> dict | None:
+    """One entry of `jobs`. Pay settings (schedule, deductions, withholding)
+    are null unless the job overrides the person's `pay`."""
+    if not isinstance(raw, dict):
+        ctx.err(path, "expected a mapping")
+        return None
+    start = _month(ctx, raw.get("start"), f"{path}.start")
+    leave = _month(ctx, raw.get("leave"), f"{path}.leave")
+    if start and leave and leave < start:
+        ctx.err(f"{path}.leave", "leave is before start")
     vesting = None
     if raw.get("vesting") is not None:
         v = _dict(ctx, raw["vesting"], f"{path}.vesting")
@@ -539,75 +583,63 @@ def _norm_job(ctx: _Ctx, raw: Any, path: str, default_employer: str) -> dict | N
     hsa_employer = None
     if raw.get("hsa_employer") is not None:
         he = _dict(ctx, raw["hsa_employer"], f"{path}.hsa_employer")
-        month = he.get("month", 1)
-        if isinstance(month, bool) or not isinstance(month, int) or not 1 <= month <= 12:
-            ctx.err(f"{path}.hsa_employer.month", f"month must be 1..12, got {month!r}")
-        else:
+        month = _month_of_year(ctx, he.get("month"), f"{path}.hsa_employer.month")
+        if month is not None:
             hsa_employer = {
                 "amount": _num(ctx, he.get("amount"), f"{path}.hsa_employer.amount", 0.0, 0),
                 "month": month,
             }
-    hsa_tier = raw.get("hsa_coverage")
-    if hsa_tier is not None and hsa_tier not in HSA_TIERS:
-        ctx.err(f"{path}.hsa_coverage", f"hsa_coverage must be one of {' | '.join(HSA_TIERS)}")
-        hsa_tier = None
-    job = {
-        "employer": str(raw.get("employer") or default_employer),
-        "grossAnnual": _num(ctx, gross, f"{path}.gross_annual", 0.0, minimum=0),
-        "raise": raise_,
-        "schedule": schedule,
-        "deductions": _norm_deductions(ctx, raw.get("deductions"), f"{path}.deductions"),
-        "withholding": _norm_withholding(ctx, raw.get("withholding"), f"{path}.withholding"),
+    salary = _norm_salary(ctx, raw.get("salary"), f"{path}.salary")
+    enabled = _enabled(ctx, raw.get("enabled"), f"{path}.enabled")
+    on = [s for s in salary if s["enabled"]]
+    if enabled and not on:
+        ctx.warn(f"{path}.salary", "no enabled salary step: this job pays nothing")
+    elif enabled and on[0]["from"] > max(start or "", horizon_start):
+        ctx.warn(f"{path}.salary", f"the first salary step starts {on[0]['from']}; nothing is paid before it")
+    return {
+        "id": str(raw.get("id") or f"job-{index + 1}"),
+        "employer": str(raw.get("employer") or f"Job {index + 1}"),
+        "start": start,
+        "leave": leave,
+        "enabled": enabled,
+        "note": _note(raw.get("note")),
+        "salary": salary,
         "match": _norm_match(ctx, raw.get("match"), f"{path}.match"),
         "vesting": vesting,
         "hsaEmployer": hsa_employer,
-        "hsaTier": hsa_tier,
+        "schedule": (
+            _norm_schedule(ctx, raw["schedule"], f"{path}.schedule")
+            if raw.get("schedule") is not None
+            else None
+        ),
+        "deductions": (
+            _norm_deductions(ctx, raw["deductions"], f"{path}.deductions")
+            if raw.get("deductions") is not None
+            else None
+        ),
+        "withholding": (
+            _norm_withholding(ctx, raw["withholding"], f"{path}.withholding")
+            if raw.get("withholding") is not None
+            else None
+        ),
     }
-    return job if schedule is not None else None
 
 
-def _norm_elections(ctx: _Ctx, raw: Any, path: str) -> list[dict]:
-    out = []
-    for i, e in enumerate(_list(ctx, raw, path)):
-        p = f"{path}[{i}]"
-        if not isinstance(e, dict):
-            ctx.err(p, "expected a mapping")
+def _norm_jobs(ctx: _Ctx, raw: Any, path: str, pay: dict, horizon_start: str) -> list[dict]:
+    out: list[dict] = []
+    seen: set[str] = set()
+    for i, j in enumerate(_list(ctx, raw, path)):
+        job = _norm_job(ctx, j, f"{path}[{i}]", i, horizon_start)
+        if job is None:
             continue
-        mode = ELECTION_MODES.get(e.get("mode"))
-        if mode is None:
-            ctx.err(f"{p}.mode", f"unknown election mode {e.get('mode')!r} (fixed | percent | max_spread)")
+        if job["id"] in seen:
+            ctx.err(f"{path}[{i}].id", f"duplicate job id {job['id']!r}")
             continue
-        start = _month(ctx, e.get("from"), f"{p}.from", required=True)
-        if start is None:
-            continue
-        if mode == "fixed":
-            out.append(
-                {
-                    "from": start,
-                    "mode": "fixed",
-                    "pretax": _num(ctx, e.get("pretax"), f"{p}.pretax", 0.0, 0),
-                    "roth": _num(ctx, e.get("roth"), f"{p}.roth", 0.0, 0),
-                }
-            )
-        elif mode == "percent":
-            out.append(
-                {
-                    "from": start,
-                    "mode": "percent",
-                    "pretaxPct": _num(ctx, e.get("pretax_pct"), f"{p}.pretax_pct", 0.0, 0),
-                    "rothPct": _num(ctx, e.get("roth_pct"), f"{p}.roth_pct", 0.0, 0),
-                }
-            )
-        else:
-            out.append(
-                {
-                    "from": start,
-                    "mode": "max_spread",
-                    "capPct": _num(ctx, e.get("cap_pct"), f"{p}.cap_pct", 1.0, 0),
-                    "rothShare": _num(ctx, e.get("roth_share"), f"{p}.roth_share", 0.0, 0),
-                }
-            )
-    return sorted(out, key=lambda e: e["from"])
+        seen.add(job["id"])
+        if job["enabled"] and job["schedule"] is None and pay["schedule"] is None:
+            ctx.err("pay.schedule", f"job {job['id']!r} has no pay schedule; set pay.schedule")
+        out.append(job)
+    return out
 
 
 def _norm_phase(ctx: _Ctx, e: Any, p: str, channel: str) -> dict | None:
@@ -757,33 +789,6 @@ def _horizon_years(start: str, months: int) -> list[str]:
     return [str(y) for y in range(int(start[:4]), int(end[:4]) + 1)]
 
 
-def _norm_limits(
-    ctx: _Ctx, raw: Any, path: str, years: list[str], fire_limit: Any
-) -> tuple[dict[str, float], bool]:
-    """Per-year 401k limits for every horizon year. Returns (limits,
-    inherited_from_fire)."""
-    given = {
-        str(y): _num(ctx, v, f"{path}.{y}", 0.0, minimum=0)
-        for y, v in _dict(ctx, raw, path).items()
-    }
-    inherited = False
-    if not given and isinstance(fire_limit, int | float) and not isinstance(fire_limit, bool):
-        given = {y: float(fire_limit) for y in years}
-        inherited = True
-    if not given:
-        # Nothing configured: the page falls back to its bundled IRS table.
-        return {}, False
-    out = dict(given)
-    for y in years:
-        if y in out:
-            continue
-        earlier = [k for k in sorted(out) if k < y]
-        prev = earlier[-1] if earlier else min(out)
-        out[y] = out[prev]
-        ctx.warn(path, f"No 401k limit for {y}; reusing {prev}")
-    return dict(sorted(out.items())), inherited
-
-
 def _norm_starting(
     ctx: _Ctx,
     raw: Any,
@@ -911,101 +916,79 @@ def _norm_cash(ctx: _Ctx, raw: Any, path: str) -> dict:
     }
 
 
-def resolve_person(
-    raw: dict,
-    *,
-    index: int,
-    defaults: dict,
-    fire_config: dict,
-    horizon: dict,
-    positions_fn,
-) -> tuple[dict | None, list[dict], list[dict]]:
-    """Normalize one merged person mapping (include already applied).
+#: Keys of the old schema, with what replaced them.
+LEGACY_KEYS = {
+    "job": "`job:` became `jobs:` (a list) plus `pay:`; see runway.example.yaml",
+    "k401": "`k401:` became `contributions:` streams",
+    "ira": "`ira:` became an `ira` stream in `contributions:`",
+    "k401_limits": "`k401_limits:` became `limits: { <year>: { k401: ... } }`",
+}
+#: Settings `defaults:` shares with every person. A person may override any of
+#: them; `overrides` in the payload lists the leaves a person sets itself.
+SHARED_KEYS = ("returns", "limits", "play_cap", "spread_through")
+#: Person keys that are not part of the editable plan body.
+_NOT_BODY = ("scenarios", "starting", "sleeve_info", "not_modeled", "include", "file")
 
-    Merge order: defaults < fire.yaml inherited < the person mapping.
-    Returns (person or None, errors, warnings).
-    """
-    pid = raw.get("id")
-    ctx = _Ctx(pid if isinstance(pid, str) else None, f"people[{index}]")
-    if not isinstance(pid, str) or not pid:
-        ctx.err("id", "missing person id")
-        return None, ctx.errors, ctx.warnings
 
-    asof = datetime.date.fromisoformat(horizon["asof"])
-    years = _horizon_years(horizon["start"], horizon["months"])
-    merged = _deep_merge(defaults, raw)
+def _norm_spread(ctx: _Ctx, value: Any, path: str) -> str:
+    value = "year_end" if value is None else value
+    if value not in ("horizon", "year_end"):
+        ctx.err(path, "spread_through must be horizon or year_end")
+        return "year_end"
+    return value
 
-    # fire.yaml inheritance, only for fields the runway config leaves out.
-    inherited: list[str] = []
-    fire_people = [p for p in (fire_config.get("people") or []) if isinstance(p, dict)]
-    fire_person = next((p for p in fire_people if p.get("id") == pid), None)
-    if fire_person:
-        candidates: list[tuple[tuple[str, ...], str, Any]] = []
-        if fire_person.get("name"):
-            candidates.append((("label",), "label", fire_person["name"]))
-        ws = fire_person.get("work_state")
-        if ws in FIRE_STATE:
-            candidates.append(
-                (("job", "withholding", "state"), "job.withholding.state", FIRE_STATE[ws])
-            )
-        by = fire_person.get("birth_year")
-        if isinstance(by, int) and not isinstance(by, bool):
-            candidates.append((("birth_year",), "birthYear", by))
-        gross = _fire_gross(fire_person, int(horizon["start"][:4]))
-        if gross is not None:
-            candidates.append((("job", "gross_annual"), "job.grossAnnual", gross))
-        spending = fire_person.get("spending")
-        if isinstance(spending, dict):
-            total = sum(v for v in spending.values() if isinstance(v, int | float))
-            candidates.append((("spending", "monthly"), "spendingMonthly", round(total / 12, 2)))
-        for path, label, value in candidates:
-            if not _has_path(merged, path):
-                _set_path(merged, path, value)
-                inherited.append(label)
 
-    label = merged.get("label") or merged.get("name") or pid
-    job = _norm_job(ctx, merged.get("job"), "job", "Current job")
+def _norm_returns(ctx: _Ctx, raw: Any, path: str) -> dict:
+    raw = _dict(ctx, raw, path)
+    return {k: _num(ctx, raw.get(k), f"{path}.{k}", d) for k, d in DEFAULT_RETURNS.items()}
 
-    k401_raw = _dict(ctx, merged.get("k401"), "k401")
-    limits_raw = k401_raw.get("limits", merged.get("k401_limits"))
-    fire_limit = (fire_config.get("assumptions") or {}).get("k401_limit")
-    limits, limits_inherited = _norm_limits(ctx, limits_raw, "k401.limits", years, fire_limit)
-    if limits_inherited:
-        inherited.append("k401.limits")
-    ytd = {
-        str(y): _num(ctx, v, f"k401.ytd.{y}", 0.0, 0)
-        for y, v in _dict(ctx, k401_raw.get("ytd"), "k401.ytd").items()
+
+def norm_shared(ctx: _Ctx, defaults: dict) -> dict:
+    """The shared `defaults:` settings, normalized like a person's."""
+    return {
+        "returns": _norm_returns(ctx, defaults.get("returns"), "defaults.returns"),
+        "limits": _norm_year_limits(ctx, defaults.get("limits"), "defaults.limits"),
+        "playCap": _num(ctx, defaults.get("play_cap"), "defaults.play_cap", DEFAULT_PLAY_CAP, 0),
+        "spreadThrough": _norm_spread(ctx, defaults.get("spread_through"), "defaults.spread_through"),
     }
-    elections = _norm_elections(ctx, k401_raw.get("elections"), "k401.elections")
 
-    contributions = _norm_contributions(ctx, merged.get("contributions"), "contributions")
-    year_limits = _norm_year_limits(ctx, merged.get("limits"), "limits")
-    hsa_coverage = _norm_hsa_coverage(ctx, merged.get("hsa_coverage"), "hsa_coverage")
+
+def person_overrides(raw: dict) -> list[str]:
+    """Dotted paths of the shared settings a person mapping sets itself."""
+    out: list[str] = []
+    if isinstance(raw.get("returns"), dict):
+        out += [f"returns.{k}" for k in raw["returns"] if k in DEFAULT_RETURNS]
+    if isinstance(raw.get("limits"), dict):
+        for y, row in raw["limits"].items():
+            if isinstance(row, dict):
+                out += [f"limits.{y}.{LIMIT_KEYS[k]}" for k in row if k in LIMIT_KEYS]
+    out += [k for k in ("play_cap", "spread_through") if raw.get(k) is not None]
+    return [{"play_cap": "playCap", "spread_through": "spreadThrough"}.get(p, p) for p in out]
+
+
+def _resolve_body(ctx: _Ctx, merged: dict, horizon: dict) -> dict:
+    """The editable plan of one person (or one scenario of a person):
+    everything except starting balances, scenarios and display text."""
     birth_year = merged.get("birth_year")
     if birth_year is not None and (isinstance(birth_year, bool) or not isinstance(birth_year, int)):
         ctx.err("birth_year", f"birth_year must be a year, got {birth_year!r}")
         birth_year = None
-    # The old keys still work, but one account may not be described both ways:
-    # the money would be counted twice.
-    streamed = {c["account"] for c in contributions}
-    if "k401" in streamed and elections:
-        ctx.err("k401.elections", "401k is set in both contributions and k401.elections; keep one")
-    if "ira" in streamed and merged.get("ira") is not None:
-        ctx.err("ira", "IRA is set in both contributions and ira; keep one")
+    pay = _norm_pay(ctx, merged.get("pay"), "pay")
+    jobs = _norm_jobs(ctx, merged.get("jobs"), "jobs", pay, horizon["start"])
+    contributions = _norm_contributions(ctx, merged.get("contributions"), "contributions")
+    if any(c["account"] == "hsa" for c in contributions):
+        lists = [("pay.deductions", pay["deductions"])] + [
+            (f"jobs[{i}].deductions", j["deductions"] or []) for i, j in enumerate(jobs)
+        ]
+        for path, deductions in lists:
+            for i, d in enumerate(deductions):
+                if d["sleeve"] == "hsa":
+                    ctx.err(f"{path}[{i}]", "HSA is set in both contributions and a paycheck deduction; keep one")
 
     spending = _dict(ctx, merged.get("spending"), "spending")
     spend_monthly = _num(ctx, spending.get("monthly"), "spending.monthly", None, 0)
     if spend_monthly is None:
         ctx.err("spending.monthly", "missing monthly spending")
-
-    ira = None
-    if merged.get("ira") is not None:
-        ira_raw = _dict(ctx, merged["ira"], "ira")
-        month = ira_raw.get("month", 1)
-        if isinstance(month, bool) or not isinstance(month, int) or not 1 <= month <= 12:
-            ctx.err("ira.month", f"IRA month must be 1..12, got {month!r}")
-        else:
-            ira = {"amount": _num(ctx, ira_raw.get("amount"), "ira.amount", 0.0, 0), "month": month}
 
     one_offs = []
     for i, o in enumerate(_list(ctx, merged.get("one_offs"), "one_offs")):
@@ -1014,98 +997,37 @@ def resolve_person(
             continue
         month = _month(ctx, o.get("month"), f"one_offs[{i}].month", required=True)
         if month:
-            one_offs.append(
-                {
-                    "month": month,
-                    "amount": _num(ctx, o.get("amount"), f"one_offs[{i}].amount", 0.0),
-                    "label": str(o.get("label") or "One-off"),
-                }
-            )
+            item = {
+                "month": month,
+                "amount": _num(ctx, o.get("amount"), f"one_offs[{i}].amount", 0.0),
+                "label": str(o.get("label") or "One-off"),
+            }
+            if o.get("id") is not None:
+                item = {"id": str(o["id"]), **item}
+            one_offs.append(item)
 
-    if "hsa" in streamed and job is not None:
-        for i, d in enumerate(job["deductions"]):
-            if d["sleeve"] == "hsa":
-                ctx.err(
-                    f"job.deductions[{i}]",
-                    "HSA is set in both contributions and a paycheck deduction; keep one",
-                )
-
-    cash = _norm_cash(ctx, merged.get("cash"), "cash")
-
-    returns_raw = _dict(ctx, merged.get("returns"), "returns")
-    returns = {
-        k: _num(ctx, returns_raw.get(k), f"returns.{k}", default)
-        for k, default in DEFAULT_RETURNS.items()
-    }
-
-    scenarios = _norm_scenarios(ctx, merged, job)
-    starting = _norm_starting(ctx, merged.get("starting"), "starting", asof, positions_fn)
-
-    if ctx.errors or job is None or starting is None:
-        return None, ctx.errors, ctx.warnings
-
-    earmark_total = sum(e["amount"] for e in cash["earmarks"])
-    if earmark_total > starting["sleeves"]["reserve"]:
-        ctx.warn("cash.earmarks", "earmarks are larger than the starting reserve")
-
-    person = {
-        "id": pid,
-        "label": str(label),
-        "name": str(label),
-        "status": "ok",
-        "job": job,
-        # Streams into the 401k, IRA and HSA. `k401` and `ira` below are the
-        # older shape; the page converts whatever is still written that way.
-        "contributions": contributions,
-        "limits": year_limits,
-        "hsaCoverage": hsa_coverage,
+    return {
+        "label": str(merged.get("label") or merged.get("name") or merged.get("id")),
         "birthYear": birth_year,
-        "k401": {"limits": limits, "ytd": ytd, "elections": elections},
+        "pay": pay,
+        "jobs": jobs,
+        "contributions": contributions,
+        "limits": _norm_year_limits(ctx, merged.get("limits"), "limits"),
+        "hsaCoverage": _norm_hsa_coverage(ctx, merged.get("hsa_coverage"), "hsa_coverage"),
         "spendingMonthly": spend_monthly,
-        "ira": ira,
         "oneOffs": sorted(one_offs, key=lambda o: o["month"]),
-        "cash": cash,
-        "returns": returns,
-        "scenarios": scenarios,
-        "starting": starting,
-        "inherited": inherited,
+        "cash": _norm_cash(ctx, merged.get("cash"), "cash"),
+        "returns": _norm_returns(ctx, merged.get("returns"), "returns"),
+        "playCap": _num(ctx, merged.get("play_cap"), "play_cap", DEFAULT_PLAY_CAP, 0),
+        "spreadThrough": _norm_spread(ctx, merged.get("spread_through"), "spread_through"),
     }
-    if isinstance(merged.get("sleeve_info"), list):
-        person["sleeveInfo"] = _jsonable(merged["sleeve_info"])
-    if isinstance(merged.get("not_modeled"), list):
-        person["notModeled"] = [str(s) for s in merged["not_modeled"]]
-    return person, ctx.errors, ctx.warnings
 
 
-def _fire_gross(fire_person: dict, start_year: int) -> float | None:
-    """First enabled job's latest enabled salary step with year <= start."""
-    for job in fire_person.get("jobs") or []:
-        if not isinstance(job, dict) or job.get("enabled") is False:
-            continue
-        steps = [
-            s
-            for s in job.get("salary") or []
-            if isinstance(s, dict)
-            and s.get("enabled") is not False
-            and isinstance(s.get("year"), int)
-            and s["year"] <= start_year
-            and isinstance(s.get("gross"), int | float)
-        ]
-        if steps:
-            return float(max(steps, key=lambda s: s["year"])["gross"])
-        return None
-    return None
-
-
-def _norm_scenarios(ctx: _Ctx, merged: dict, job: dict | None) -> list[dict]:
-    """`stay` first, then each job switch. A switch job inherits every field
-    of the current job except employer and vesting (a new employer's vesting
-    starts over)."""
-    current_raw = merged.get("job") if isinstance(merged.get("job"), dict) else {}
-    inherit_base = {k: v for k, v in current_raw.items() if k not in ("employer", "vesting")}
-    out: list[dict] = []
-    seen: set[str] = set()
-    for i, s in enumerate(_list(ctx, merged.get("scenarios"), "scenarios")):
+def _scenario_list(ctx: _Ctx, raw: Any) -> list[tuple[int, str, str, dict]]:
+    """(index, id, label, patch) per valid entry of `scenarios`."""
+    out = []
+    seen: set[str] = {"plan"}
+    for i, s in enumerate(_list(ctx, raw, "scenarios")):
         p = f"scenarios[{i}]"
         if not isinstance(s, dict):
             ctx.err(p, "expected a mapping")
@@ -1115,26 +1037,93 @@ def _norm_scenarios(ctx: _Ctx, merged: dict, job: dict | None) -> list[dict]:
             ctx.err(f"{p}.id", "missing scenario id")
             continue
         if sid in seen:
-            ctx.err(f"{p}.id", f"duplicate scenario id {sid!r}")
+            ctx.err(f"{p}.id", f"duplicate scenario id {sid!r} (`plan` is the base)")
             continue
         seen.add(sid)
-        if sid == "stay":
-            out.append({"id": "stay", "label": str(s.get("label") or "Stay"), "start": None, "job": None})
+        if "job" in s or "start" in s:
+            ctx.err(p, "scenario `job:`/`start:` became `patch: { jobs: [...] }`; see runway.example.yaml")
             continue
-        sjob = _dict(ctx, s.get("job"), f"{p}.job")
-        start = _month(ctx, sjob.get("start", s.get("start")), f"{p}.job.start", required=True)
-        merged_job = _deep_merge(inherit_base, {k: v for k, v in sjob.items() if k != "start"})
-        if "vesting" not in sjob:
-            merged_job["vesting"] = None
-        new_job = _norm_job(ctx, merged_job, f"{p}.job", "New job")
-        if new_job is None or start is None:
+        patch = s.get("patch") or {}
+        if not isinstance(patch, dict):
+            ctx.err(f"{p}.patch", "expected a mapping")
             continue
-        out.append({"id": sid, "label": str(s.get("label") or sid), "start": start, "job": new_job})
-    if not any(s["id"] == "stay" for s in out):
-        out.insert(0, {"id": "stay", "label": "Stay", "start": None, "job": None})
-    else:
-        out.sort(key=lambda s: s["id"] != "stay")
+        bad = [k for k in patch if k in _NOT_BODY or k == "id"]
+        if bad:
+            ctx.err(f"{p}.patch", f"a scenario cannot change {', '.join(map(str, bad))}")
+            continue
+        out.append((i, sid, str(s.get("label") or sid), patch))
     return out
+
+
+def resolve_person(
+    raw: dict,
+    *,
+    index: int,
+    defaults: dict,
+    horizon: dict,
+    positions_fn,
+) -> tuple[dict | None, list[dict], list[dict]]:
+    """Normalize one merged person mapping (include already applied).
+
+    Merge order: defaults < the person mapping; each scenario's patch is then
+    applied over that merge. Returns (person or None, errors, warnings). A
+    broken scenario reports errors but keeps the person.
+    """
+    pid = raw.get("id")
+    ctx = _Ctx(pid if isinstance(pid, str) else None, f"people[{index}]")
+    if not isinstance(pid, str) or not pid:
+        ctx.err("id", "missing person id")
+        return None, ctx.errors, ctx.warnings
+    for key, why in LEGACY_KEYS.items():
+        if key in raw:
+            ctx.err(key, why)
+    if ctx.errors:
+        return None, ctx.errors, ctx.warnings
+
+    asof = datetime.date.fromisoformat(horizon["asof"])
+    merged = _deep_merge(defaults, {k: v for k, v in raw.items() if k != "scenarios"})
+    body = _resolve_body(ctx, merged, horizon)
+    starting = _norm_starting(ctx, merged.get("starting"), "starting", asof, positions_fn)
+    if ctx.errors or starting is None:
+        return None, ctx.errors, ctx.warnings
+
+    earmark_total = sum(e["amount"] for e in body["cash"]["earmarks"])
+    if earmark_total > starting["sleeves"]["reserve"]:
+        ctx.warn("cash.earmarks", "earmarks are larger than the starting reserve")
+
+    plan_body = {k: v for k, v in merged.items() if k not in _NOT_BODY}
+    scenarios: list[dict] = []
+    errors = list(ctx.errors)
+    warnings = list(ctx.warnings)
+    for i, sid, label, patch in _scenario_list(ctx, raw.get("scenarios")):
+        sctx = _Ctx(pid, f"{ctx.base}.scenarios[{i}].patch")
+        sbody = _resolve_body(sctx, apply_patch(plan_body, patch), horizon)
+        errors += sctx.errors
+        # Skip warnings the base already reported for the same field.
+        base_known = {(w["path"], w["message"]) for w in ctx.warnings}
+        warnings += [
+            w
+            for w in sctx.warnings
+            if (w["path"].replace(sctx.base, ctx.base, 1), w["message"]) not in base_known
+        ]
+        if not sctx.errors:
+            scenarios.append({"id": sid, "label": label, "person": sbody})
+    errors += [e for e in ctx.errors if e not in errors]
+
+    person = {
+        "id": pid,
+        **body,
+        "name": body["label"],
+        "status": "ok",
+        "overrides": person_overrides(raw),
+        "scenarios": scenarios,
+        "starting": starting,
+    }
+    if isinstance(merged.get("sleeve_info"), list):
+        person["sleeveInfo"] = _jsonable(merged["sleeve_info"])
+    if isinstance(merged.get("not_modeled"), list):
+        person["notModeled"] = [str(s) for s in merged["not_modeled"]]
+    return person, errors, warnings
 
 
 # ---------- top level ----------
@@ -1178,7 +1167,37 @@ def _horizon(raw: dict, defaults: dict, ctx: _Ctx, today: datetime.date) -> dict
 
 
 #: Keys under `defaults` that are horizon settings, not person fields.
-_HORIZON_DEFAULT_KEYS = ("spread_through", "reserve_lookahead_months", "play_cap")
+_HORIZON_DEFAULT_KEYS = ("reserve_lookahead_months",)
+
+
+def include_paths(raw: dict) -> list[str]:
+    """The `include:` paths of a parsed runway.yaml, in people order."""
+    out = []
+    for entry in raw.get("people") or []:
+        if isinstance(entry, dict):
+            inc = entry.get("include") or entry.get("file")
+            if isinstance(inc, str):
+                out.append(inc)
+    return out
+
+
+def config_version(ledger_file_path: str) -> str:
+    """Fingerprint of runway.yaml and every file it includes. A save sends
+    the version it was edited against; a mismatch means the files changed
+    underneath."""
+    path = runway_config_path(ledger_file_path)
+    h = hashlib.sha256()
+    if path.is_file():
+        data = path.read_bytes()
+        h.update(data)
+        raw, _ = read_raw_config(path)
+        root = ledger_root(ledger_file_path).resolve()
+        for rel in include_paths(raw):
+            target = (root / rel).resolve()
+            h.update(b"\0" + rel.encode())
+            if target.is_relative_to(root) and target.is_file():
+                h.update(target.read_bytes())
+    return h.hexdigest()[:16]
 
 
 def build_runway_data(
@@ -1186,22 +1205,28 @@ def build_runway_data(
     ledger,
     entries,
     ledger_file_path: str,
-    fire_config: dict,
     today: datetime.date,
+    raw: dict | None = None,
+    includes: dict[str, dict] | None = None,
 ) -> dict:
     """Everything the /runway page loads.
 
     `people` holds only fully resolved people. `roster` lists every
     configured person with a status (ok | locked | missing | error) so the
     page can still show a locked partner file as an option.
+
+    `raw` and `includes` (include path -> mapping) stand in for the files on
+    disk, so a save can validate its result before writing it.
     """
     path = runway_config_path(ledger_file_path)
-    raw, top_errors = read_raw_config(path)
     top = _Ctx(None)
-    top.errors.extend(top_errors)
+    if raw is None:
+        raw, top_errors = read_raw_config(path)
+        top.errors.extend(top_errors)
     defaults_raw = raw.get("defaults") if isinstance(raw.get("defaults"), dict) else {}
     horizon = _horizon(raw, defaults_raw, top, today)
     person_defaults = {k: v for k, v in defaults_raw.items() if k not in _HORIZON_DEFAULT_KEYS}
+    shared = norm_shared(top, defaults_raw)
 
     root = ledger_root(ledger_file_path)
     positions_cache: list = []
@@ -1234,7 +1259,10 @@ def build_runway_data(
         hint_label = inline.get("label") or inline.get("name") or hint_id
         merged = inline
         if include is not None:
-            data, message, status = resolve_include(root, include)
+            if includes is not None and include in includes:
+                data, message, status = includes[include], None, "ok"
+            else:
+                data, message, status = resolve_include(root, include)
             if data is None:
                 pid = hint_id
                 errors.append({"personId": pid, "path": f"{base}.include", "message": message})
@@ -1257,7 +1285,6 @@ def build_runway_data(
             merged,
             index=i,
             defaults=person_defaults,
-            fire_config=fire_config or {},
             horizon=horizon,
             positions_fn=positions_fn,
         )
@@ -1277,6 +1304,8 @@ def build_runway_data(
             )
             continue
         seen_ids.add(person["id"])
+        files = [path] + ([root / include] if include else [])
+        person["readOnly"] = not all(os.access(f, os.W_OK) for f in files if f.exists())
         people.append(person)
         roster.append(
             {
@@ -1300,6 +1329,8 @@ def build_runway_data(
         "reserveLookahead": horizon["reserveLookahead"],
         "playCap": horizon["playCap"],
         "defaults": _jsonable(defaults_raw),
+        "shared": shared,
+        "version": config_version(ledger_file_path),
         "people": people,
         "roster": roster,
         "errors": errors,

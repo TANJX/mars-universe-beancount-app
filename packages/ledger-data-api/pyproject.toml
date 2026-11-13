@@ -12,6 +12,7 @@ dependencies = [
     "fava>=1.26.1",
     "beanquery>=0.1.dev0",
     "pyyaml>=6.0.3",
+    "ruamel-yaml>=0.18",
 ]
 
 [dependency-groups]

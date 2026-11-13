@@ -9,14 +9,12 @@ import {
   CheckCircle2,
   Flame,
   Lock,
-  RotateCcw,
 } from "lucide-react"
 import Link from "next/link"
 
-import { InfoTip, pct, Segmented, Stat, usd } from "@/components/fire/controls"
-import { Button, buttonVariants } from "@/components/ui/button"
+import { pct, Segmented, Stat, usd } from "@/components/fire/controls"
+import { buttonVariants } from "@/components/ui/button"
 import type {
-  JobScenario,
   PersonStatus,
   RunwayInputs,
   RunwayResult,
@@ -29,40 +27,23 @@ export interface PersonOption {
   id: string
   name: string
   status: PersonStatus
-}
-
-function scenarioHelp(s: JobScenario): string {
-  if (!s.job || !s.start) return "Current job, no change."
-  const m = s.job.match
-  const match =
-    m.type === "flat"
-      ? `, ${pct(m.pct, 0)} match`
-      : m.type === "none"
-        ? ", no match"
-        : ""
-  return `${s.job.employer}: ${usd(s.job.grossAnnual)}/yr from ${monthLabel(s.start)}${match}.`
+  /** Has unsaved edits. */
+  dirty?: boolean
 }
 
 export function RunwayHeader({
   people,
   personId,
   onPersonChange,
-  scenarios,
-  scenarioId,
-  onScenarioChange,
-  dirty,
-  onReset,
+  scenarioBar,
   periodLabel,
   children,
 }: {
   people: PersonOption[]
   personId: string
   onPersonChange: (id: string) => void
-  scenarios: JobScenario[]
-  scenarioId: string
-  onScenarioChange: (id: string) => void
-  dirty: boolean
-  onReset: () => void
+  /** The scenario switch and actions (scenario-bar.tsx). */
+  scenarioBar?: React.ReactNode
   periodLabel: string
   /** Headline numbers, laid out to the right on wide screens. */
   children?: React.ReactNode
@@ -70,6 +51,13 @@ export function RunwayHeader({
   const personLabel = (p: PersonOption) => (
     <span className="inline-flex items-center gap-1">
       {p.name}
+      {p.dirty ? (
+        <span
+          className="size-1.5 rounded-full bg-primary"
+          role="img"
+          aria-label="unsaved changes"
+        />
+      ) : null}
       {p.status === "locked" ? (
         <Lock size={11} className="text-muted-foreground" aria-label="locked" />
       ) : p.status !== "ok" ? (
@@ -81,7 +69,6 @@ export function RunwayHeader({
       ) : null}
     </span>
   )
-  const active = scenarios.find((s) => s.id === scenarioId)
   return (
     <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
       <div className="flex w-full min-w-0 flex-col gap-1.5 md:w-auto">
@@ -118,35 +105,10 @@ export function RunwayHeader({
               </select>
             )
           ) : null}
-          {scenarios.length > 1 ? (
-            <span className="inline-flex w-full items-center gap-1 md:w-auto">
-              <Segmented<string>
-                ariaLabel="Job scenario"
-                value={scenarioId}
-                onChange={onScenarioChange}
-                options={scenarios.map((s) => ({
-                  value: s.id,
-                  label: s.label,
-                }))}
-                className="h-9 w-full md:h-7 md:w-auto"
-                optionClassName="flex-1 md:flex-none"
-              />
-              {active ? (
-                <InfoTip label="Job scenario">{scenarioHelp(active)}</InfoTip>
-              ) : null}
-            </span>
-          ) : null}
+          {scenarioBar}
           {/* Phones: the buttons share the title's row (order) instead of
               taking a row of their own under the full-width switches. */}
           <span className="max-md:-mr-2 inline-flex items-center max-md:order-first max-md:ml-auto">
-            <Button
-              size="xs"
-              variant="ghost"
-              onClick={onReset}
-              disabled={!dirty}
-            >
-              <RotateCcw /> Reset to config
-            </Button>
             <Link
               href="/fire"
               className={buttonVariants({ variant: "ghost", size: "xs" })}

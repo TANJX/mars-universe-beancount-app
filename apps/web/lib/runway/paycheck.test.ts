@@ -2,12 +2,16 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 
 import { paycheck } from "./paycheck"
-import type { Job } from "./types"
+import type { ResolvedJob } from "./types"
 
-const job = (over: Partial<Job> = {}): Job => ({
+const job = (over: Partial<ResolvedJob> = {}): ResolvedJob => ({
+  id: "test",
   employer: "Test",
-  grossAnnual: 52_000,
-  raise: null,
+  start: null,
+  leave: null,
+  enabled: true,
+  note: null,
+  salary: [{ from: "2026-01", gross: 52_000, enabled: true, note: null }],
   schedule: { frequency: "biweekly", anchor: "2026-01-02", days: [] },
   deductions: [],
   withholding: {
@@ -21,7 +25,6 @@ const job = (over: Partial<Job> = {}): Job => ({
   match: { type: "none" },
   vesting: null,
   hsaEmployer: null,
-  hsaTier: null,
   ...over,
 })
 

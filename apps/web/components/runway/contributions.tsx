@@ -4,7 +4,7 @@
 // grouped by account, each group measured against its annual limit for the
 // selected year. A stream is a row that opens into its dated changes.
 
-import { AlertTriangle, Check, ChevronRight, Copy, Plus, X } from "lucide-react"
+import { AlertTriangle, ChevronRight, Plus, X } from "lucide-react"
 import * as React from "react"
 
 import {
@@ -21,9 +21,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { resolveLimits } from "@/lib/runway/config"
 import {
   ACCOUNT_LABEL,
-  contributionsYaml,
   limitsFor,
   newContribution,
   paceSummary,
@@ -38,7 +38,6 @@ import {
   type ContributionAccount,
   type HsaCoverage,
   type HsaTier,
-  type JobScenario,
   type Match,
   type Pace,
   type PaceKind,
@@ -848,13 +847,12 @@ function yearSummary<T extends { from: string }>(
 export function ContributionsSection({
   inputs,
   config,
-  scenario,
   result,
   onChange,
 }: {
   inputs: RunwayInputs
+  /** The saved version of the same plan (for the unsaved dots). */
   config: RunwayInputs
-  scenario: JobScenario
   result: RunwayResult
   onChange: (next: RunwayInputs) => void
 }) {
@@ -870,7 +868,6 @@ export function ContributionsSection({
   )
   const year = years.includes(picked) ? picked : years[0]
   const pools = result.pools[year]
-  const [copied, setCopied] = React.useState(false)
 
   const setP = (patch: Partial<RunwayPerson>) =>
     onChange({ ...inputs, person: { ...p, ...patch } })
@@ -879,11 +876,6 @@ export function ContributionsSection({
       contributions: p.contributions.map((x) => (x.id === id ? next : x)),
     })
 
-  const sc = p.scenarios.find((s) => s.id === scenario.id) ?? scenario
-  const scC = c.scenarios.find((s) => s.id === scenario.id)
-  const isSwitch = Boolean(sc.job && sc.start)
-
-  const edited = !same(p.contributions, c.contributions)
   const missing = KINDS.filter(
     (k) =>
       !p.contributions.some(
@@ -913,8 +905,20 @@ export function ContributionsSection({
 
   const limitNow = limitsFor(p.limits, Number(year))
   const limitCfg = limitsFor(c.limits, Number(year))
-  const setLimit = (key: "k401" | "ira", v: number) =>
-    setP({ limits: { ...p.limits, [year]: { ...limitNow, [key]: v } } })
+  // Only the edited key is written for that year; the rest stays as given
+  // (or from the IRS table).
+  const setLimit = (key: "k401" | "ira", v: number) => {
+    const limitsGiven = {
+      ...p.limitsGiven,
+      [year]: { ...(p.limitsGiven[year] ?? {}), [key]: v },
+    }
+    setP({
+      limitsGiven,
+      limits: resolveLimits(limitsGiven, first, p.birthYear),
+    })
+  }
+  const jobsWithMatch = p.jobs.filter((j) => j.enabled)
+  const hsaEmployers = p.jobs.filter((j) => j.enabled && j.hsaEmployer)
 
   const coverageNow: HsaCoverage[] = p.hsaCoverage.length
     ? p.hsaCoverage
@@ -983,15 +987,10 @@ export function ContributionsSection({
                 total={(pool.streams[x.id] ?? 0) + (x.ytd[year] ?? 0)}
                 edited={cfg ? !same(x, cfg) : false}
                 onReset={cfg ? () => setStream(x.id, cfg) : undefined}
-                onRemove={
-                  cfg
-                    ? undefined
-                    : () =>
-                        setP({
-                          contributions: p.contributions.filter(
-                            (y) => y.id !== x.id
-                          ),
-                        })
+                onRemove={() =>
+                  setP({
+                    contributions: p.contributions.filter((y) => y.id !== x.id),
+                  })
                 }
                 defaultOpen={!cfg}
               >
@@ -1031,8 +1030,14 @@ export function ContributionsSection({
             <StaticRow
               label="Employer"
               summary={
-                p.job.hsaEmployer
-                  ? `${usd(p.job.hsaEmployer.amount)} each ${MONTHS[p.job.hsaEmployer.month - 1]}`
+                hsaEmployers.length
+                  ? hsaEmployers
+                      .map((j) =>
+                        j.hsaEmployer
+                          ? `${j.employer} ${usd(j.hsaEmployer.amount)} each ${MONTHS[j.hsaEmployer.month - 1]}`
+                          : ""
+                      )
+                      .join(" · ")
                   : "From the job"
               }
               total={pool.employer}
@@ -1041,32 +1046,15 @@ export function ContributionsSection({
           {a === "hsa" ? (
             <ContributionRow
               label="Coverage"
-              summary={
-                yearSummary(
-                  coverageNow,
-                  year,
-                  first,
-                  (x) => TIER_LABEL[x.tier],
-                  TIER_LABEL.none
-                ) +
-                (isSwitch && sc.job?.hsaTier && sc.start
-                  ? ` → ${TIER_LABEL[sc.job.hsaTier]} at the new job`
-                  : "")
-              }
-              edited={
-                !same(p.hsaCoverage, c.hsaCoverage) ||
-                (scC?.job ? sc.job?.hsaTier !== scC.job.hsaTier : false)
-              }
-              onReset={() =>
-                setP({
-                  hsaCoverage: c.hsaCoverage,
-                  scenarios: p.scenarios.map((s) =>
-                    s.id === sc.id && s.job && scC?.job
-                      ? { ...s, job: { ...s.job, hsaTier: scC.job.hsaTier } }
-                      : s
-                  ),
-                })
-              }
+              summary={yearSummary(
+                coverageNow,
+                year,
+                first,
+                (x) => TIER_LABEL[x.tier],
+                TIER_LABEL.none
+              )}
+              edited={!same(p.hsaCoverage, c.hsaCoverage)}
+              onReset={() => setP({ hsaCoverage: c.hsaCoverage })}
             >
               <div className="flex flex-col gap-2.5">
                 <Schedule<HsaCoverage>
@@ -1093,39 +1081,6 @@ export function ContributionsSection({
                     />
                   )}
                 />
-                {isSwitch && sc.job && sc.start ? (
-                  <div className="flex flex-col gap-1.5 border-t pt-2.5 text-xs">
-                    <span className="text-muted-foreground">
-                      At the new job, from {monthLabel(sc.start)}
-                    </span>
-                    <Segmented<HsaTier | "same">
-                      ariaLabel="HDHP coverage at the new job"
-                      value={sc.job.hsaTier ?? "same"}
-                      className="h-9 self-start md:h-7"
-                      onChange={(v) =>
-                        setP({
-                          scenarios: p.scenarios.map((s) =>
-                            s.id === sc.id && s.job
-                              ? {
-                                  ...s,
-                                  job: {
-                                    ...s.job,
-                                    hsaTier: v === "same" ? null : v,
-                                  },
-                                }
-                              : s
-                          ),
-                        })
-                      }
-                      options={[
-                        { value: "same", label: "Same" },
-                        { value: "self", label: TIER_LABEL.self },
-                        { value: "family", label: TIER_LABEL.family },
-                        { value: "none", label: TIER_LABEL.none },
-                      ]}
-                    />
-                  </div>
-                ) : null}
                 <p className="text-pretty text-muted-foreground text-xs">
                   Covered means on an HDHP on the 1st of the month. Nothing goes
                   in during months without it.
@@ -1136,11 +1091,18 @@ export function ContributionsSection({
         </div>
         {a === "k401" ? (
           <p className="text-pretty text-muted-foreground text-xs">
-            {p.job.employer} match: {matchText(p.job.match)}
-            {p.job.vesting
-              ? `, vests ${monthLabel(p.job.vesting.date.slice(0, 7))}`
-              : ""}
-            .
+            {jobsWithMatch.length
+              ? jobsWithMatch
+                  .map(
+                    (j) =>
+                      `${j.employer} match: ${matchText(j.match)}${
+                        j.vesting
+                          ? `, vests ${monthLabel(j.vesting.date.slice(0, 7))}`
+                          : ""
+                      }.`
+                  )
+                  .join(" ")
+              : "No job, so no match."}
           </p>
         ) : null}
       </ContributionGroup>
@@ -1204,24 +1166,6 @@ export function ContributionsSection({
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
-          ) : null}
-          {edited ? (
-            <button
-              type="button"
-              onClick={() => {
-                void navigator.clipboard
-                  ?.writeText(contributionsYaml(p.contributions))
-                  .then(() => {
-                    setCopied(true)
-                    window.setTimeout(() => setCopied(false), 1500)
-                  })
-              }}
-              title="Page edits are not saved. Copy this block into config/runway.yaml to keep them."
-              className="ml-auto inline-flex h-9 items-center gap-1 rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 md:h-7"
-            >
-              {copied ? <Check size={12} /> : <Copy size={12} />}
-              {copied ? "Copied" : "Copy as YAML"}
-            </button>
           ) : null}
         </div>
       </div>

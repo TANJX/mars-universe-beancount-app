@@ -3,7 +3,8 @@
 # take-home pay per paycheck, monthly outflows, and the balance of each sleeve
 # (checking buffer, emergency fund, reserve, core index, IRA, 401k, HSA, gold,
 # play). /fire is the long run in real dollars; this page is the near term in
-# nominal dollars. Every value is a starting point the page lets you edit.
+# nominal dollars. The page edits and saves this file (and included files) in
+# place, keeping comments; a comment beside a changed value can go stale.
 #
 # Money is nominal USD. Rates are decimals (0.03 = 3%). Months are YYYY-MM.
 # Illustrative values only.
@@ -15,7 +16,7 @@ months: 24                       # horizon
 #                                # date and only pay dates after it are simulated
 # first_month_spend_fraction: 0.7  # default: share of the first month still ahead
 
-defaults:                        # deep-merged under every person; person keys win
+defaults:                        # shared by every person; a person's own key wins
   returns: { equity: 0.07, reserve: 0.039, ef: 0.0365, gold: 0.03 }   # per year
   # Annual limits by year. Leave a year (or a key) out to use the bundled IRS
   # table; a later year reuses the closest earlier one. Catch-up amounts are
@@ -30,12 +31,11 @@ defaults:                        # deep-merged under every person; person keys w
   play_cap: 0.10                 # play sleeve cap as a share of invested assets
 
 people:
-  - id: alex                     # matching a fire.yaml person id inherits label, work
-    label: Alex                  # state, gross salary and monthly spending when omitted
-    job:
-      employer: Current job
-      gross_annual: 90000
-      raise: { month: 2, pct: 0.03 }   # compounds each February; null = flat
+  - id: alex
+    label: Alex
+    # Pay settings every job uses; a job may override schedule, deductions or
+    # withholding with its own copy.
+    pay:
       schedule: { frequency: biweekly, anchor: 2026-11-13 }
       # schedule: { frequency: semimonthly, days: [15, -1] }   # -1 = last weekday
       deductions:
@@ -52,13 +52,23 @@ people:
         state_std: 8000
         state_payroll: { flat_per_paycheck: 12, rate: 0, annual_cap: null }
         ss_wage_base: 184500
-      # none | flat {pct} | threshold {min_pct, pct} | tiered {tiers: [{rate, up_to_pct}]}
-      match: { type: threshold, min_pct: 0.04, pct: 0.02 }
-      vesting: { date: 2027-09-01, unvested_start: 500 }   # unvested match is forfeited
-                                                           # on leaving before this date
-      hsa_employer: { amount: 500, month: 1 }   # employer HSA money, once a year;
-                                                # counts toward the HSA limit
-    # birth_year: 1990           # for catch-up limits; else inherited from fire.yaml
+    # Jobs. A job pays from `start` (omit when it began before the horizon) until
+    # `leave`, or until the next enabled job starts. A month with no job pays
+    # nothing. `enabled: false` keeps a job (or a salary step) listed but off.
+    jobs:
+      - id: current
+        employer: Current job
+        start: 2024-03
+        salary:                  # annual gross from each month on; no raise rule
+          - { from: 2026-01, gross: 90000 }
+          - { from: 2027-02, gross: 92700, note: "expected review" }
+        # none | flat {pct} | threshold {min_pct, pct} | tiered {tiers: [{rate, up_to_pct}]}
+        match: { type: threshold, min_pct: 0.04, pct: 0.02 }
+        vesting: { date: 2027-09-01, unvested_start: 500 }   # unvested match is forfeited
+                                                             # on leaving before this date
+        hsa_employer: { amount: 500, month: 1 }   # employer HSA money, once a year;
+                                                  # counts toward the HSA limit
+    # birth_year: 1990           # for catch-up limits
 
     # HDHP coverage on the first of each month. The HSA limit is one twelfth of
     # the tier's limit per covered month; nothing goes in while it is `none`.
@@ -122,15 +132,26 @@ people:
       earmarks: [ { label: Down payment, amount: 15000 } ]   # held in the reserve
       dca_months: 12             # move the reserve's starting excess to core over this long
       card_payoff: { checking: 1 }   # which cash sleeves pay today's card balances
-    scenarios:                   # `stay` (no change) is always first
+    # Per-person overrides of the shared defaults go here too, e.g.
+    # returns: { equity: 0.08 }, play_cap: 0.15, limits: { 2028: { k401: 26000 } }.
+    #
+    # Scenarios: named patches over this person's plan (the plan itself is
+    # "Plan" on the page). Any key above can change. Mappings merge key by key;
+    # lists whose items carry `id` (jobs, contributions) or `from` (salary
+    # steps, schedules, hsa_coverage) merge item by item, and
+    # `{ id: x, remove: true }` drops an item. Other lists replace.
+    scenarios:
       - id: new-job
         label: New job $110k
-        job: { start: 2027-07, gross_annual: 110000, match: { type: flat, pct: 0.04 } }
-        # omitted job fields (schedule, deductions, withholding, raise) carry over;
-        # vesting starts over unless given. Contribution streams carry over too.
-        # Add `hsa_coverage: none` (or self | family) when the new job changes
-        # the health plan: with `none`, HSA money stops and the year's limit is
-        # prorated, so anything front-loaded above it shows as an excess.
+        patch:
+          jobs:
+            - id: next
+              employer: Next job
+              start: 2027-07
+              salary: [ { from: 2027-07, gross: 110000 } ]
+              match: { type: flat, pct: 0.04 }
+          # With `none`, HSA money stops and the year's limit is prorated.
+          hsa_coverage: [ { from: 2027-07, tier: none } ]
     starting:
       source: ledger             # balances from the ledger at asof
       rules:                     # ordered; the first regex matching the account wins
@@ -151,7 +172,8 @@ people:
   #   label: Sam
   #
   # partner/runway.yaml holds a whole person mapping, for example:
-  #   job: { gross_annual: 70000, schedule: { frequency: semimonthly, days: [15, -1] } }
+  #   pay: { schedule: { frequency: semimonthly, days: [15, -1] } }
+  #   jobs: [ { id: work, employer: Work, salary: [ { from: 2026-01, gross: 70000 } ] } ]
   #   contributions:
   #     - { account: k401, tax: traditional, schedule: [ { from: 2026-11, pace: even } ] }
   #   spending: { monthly: 3500 }

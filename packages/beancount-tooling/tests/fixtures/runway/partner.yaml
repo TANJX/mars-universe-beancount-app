@@ -1,16 +1,18 @@
 # Synthetic partner person file for test_runway_api.py.
 id: sam
 label: Sam
-job:
-  employer: Current job
-  gross_annual: 60000
+pay:
   schedule: { frequency: biweekly, anchor: 2026-11-13 }
   deductions:
     - { label: Life, amount: 1.5, pretax: false }
   withholding: { state: ny, state_payroll: { flat_per_paycheck: 12 } }
-  match: { type: threshold, min_pct: 0.02, pct: 0.01 }
-  hsa_employer: { amount: 500, month: 1 }
-  vesting: { date: 2027-05-01, unvested_start: 300 }
+jobs:
+  - id: cur
+    employer: Current job
+    salary: [ { from: 2026-01, gross: 60000 } ]
+    match: { type: threshold, min_pct: 0.02, pct: 0.01 }
+    hsa_employer: { amount: 500, month: 1 }
+    vesting: { date: 2027-05-01, unvested_start: 300 }
 hsa_coverage:
   - { from: 2026-01, tier: self }
   - { from: 2027-06, tier: none }
@@ -46,7 +48,11 @@ cash:
 scenarios:
   - id: offer
     label: Offer A
-    job: { start: 2027-06, gross_annual: 80000, match: { type: flat, pct: 0.03 }, raise: null, hsa_coverage: none }
+    patch:
+      jobs:
+        - { id: offer, employer: Offer A, start: 2027-06, salary: [ { from: 2027-06, gross: 80000 } ], match: { type: flat, pct: 0.03 } }
+      hsa_coverage:
+        - { from: 2027-06, tier: family }
 starting:
   source: static
   asof: 2026-11-01

@@ -1,9 +1,10 @@
 // Runway engine: monthly take-home, outflows and sleeve balances for one
-// person and one job scenario. Pure and deterministic; no React.
+// runnable plan (a person's plan or one of its scenarios). Pure and
+// deterministic; no React.
 //
 // Two passes, in this order (the order matters, the numbers depend on it):
 //   1. Paychecks and deposits. Walk the calendar month by month. On every pay
-//      date pick the employer and gross, take each payroll contribution
+//      date pick the paying job (jobs.ts) and its gross, take each payroll contribution
 //      stream (401k, HSA) under its pool's annual limit, add the employer
 //      match and payroll withholding, and tally net pay per month. After the
 //      month's paychecks, make the direct deposits (IRA, direct HSA) from
@@ -27,6 +28,7 @@ import {
   tierAt,
   treatment,
 } from "./contributions"
+import { activeJobAt, grossAt, resolveJob } from "./jobs"
 import { type Deferral, paycheck } from "./paycheck"
 import {
   endOfMonth,
@@ -38,13 +40,11 @@ import {
 } from "./schedule"
 import type {
   ContributionAccount,
-  HsaCoverage,
-  Job,
-  JobScenario,
   Match,
   MonthRow,
   PaycheckRow,
   PoolYear,
+  ResolvedJob,
   RunwayInputs,
   RunwayResult,
   SleeveKey,
@@ -76,77 +76,38 @@ export function matchFor(match: Match, gross: number, contrib: number): number {
   }
 }
 
-/** Number of raise months strictly after `after` and on or before `month`. */
-function raisesBetween(raiseMonth: number, after: string, month: string) {
-  let n = 0
-  const y0 = Number(after.slice(0, 4))
-  const y1 = Number(month.slice(0, 4))
-  for (let y = y0; y <= y1; y++) {
-    const r = `${y}-${String(raiseMonth).padStart(2, "0")}`
-    if (r > after && r <= month) n++
-  }
-  return n
-}
-
-function scenarioOf(inputs: RunwayInputs, id: string): JobScenario {
-  const s = inputs.person.scenarios.find((x) => x.id === id)
-  return s ?? { id: "stay", label: "Stay", start: null, job: null }
-}
-
-function grossFor(job: Job, after: string, month: string): number {
-  const P = periodsPerYear(job.schedule.frequency)
-  const n = job.raise ? raisesBetween(job.raise.month, after, month) : 0
-  return (job.grossAnnual * (1 + (job.raise?.pct ?? 0)) ** n) / P
-}
-
-export function simulate(
-  inputs: RunwayInputs,
-  scenarioId: string
-): RunwayResult {
+export function simulate(inputs: RunwayInputs): RunwayResult {
   const { person: p, horizon: h } = inputs
-  const scen = scenarioOf(inputs, scenarioId)
   const months = monthSpan(h.start, h.months)
   const lastMonth = months.at(-1) ?? h.start
-  const newJob = scen.job && scen.start ? scen.job : null
-  const newStart = newJob ? (scen.start as string) : null
-  const isNew = (m: string) => newStart != null && m >= newStart
-  const jobAt = (m: string): Job => (isNew(m) && newJob ? newJob : p.job)
+  const jobs: ResolvedJob[] = p.jobs
+    .map((j) => resolveJob(j, p.pay))
+    .filter((j): j is ResolvedJob => j !== null)
+  const jobAt = (m: string): ResolvedJob | null => activeJobAt(jobs, m)
 
-  // Pay dates follow each job's own schedule; the switch happens at the start
-  // of the new job's first month.
+  // Pay dates follow each job's own schedule; a job pays the months it is
+  // the active one (a switch happens at the start of the new job's month).
   const through = isoDate(endOfMonth(lastMonth))
-  const curDates = paydates(p.job.schedule, h.asof, through).filter(
-    (d) => !isNew(ym(d))
-  )
-  const newDates =
-    newJob && newStart
-      ? paydates(newJob.schedule, h.asof, through).filter((d) => isNew(ym(d)))
-      : []
-  const dates = [...curDates, ...newDates].sort(
-    (a, b) => a.getTime() - b.getTime()
-  )
+  const dates = jobs
+    .flatMap((j) =>
+      paydates(j.schedule, h.asof, through).filter(
+        (d) => jobAt(ym(d))?.id === j.id
+      )
+    )
+    .sort((a, b) => a.getTime() - b.getTime())
   // For counting the checks left in a year (max_spread). "horizon" spreads
   // the limit over the checks inside the horizon only, as the prototype did.
   let countDates = dates
-  if (h.spreadThrough === "year_end") {
+  const lastJob = jobAt(lastMonth)
+  if (h.spreadThrough === "year_end" && lastJob) {
     const yearEnd = `${lastMonth.slice(0, 4)}-12-31`
-    const job = jobAt(lastMonth)
-    const extra = paydates(job.schedule, through, yearEnd)
-    countDates = [...dates, ...extra]
+    countDates = [...dates, ...paydates(lastJob.schedule, through, yearEnd)]
   }
 
-  const vestMonth = p.job.vesting ? p.job.vesting.date.slice(0, 7) : null
+  const vestMonthOf = (j: ResolvedJob | null) =>
+    j?.vesting ? j.vesting.date.slice(0, 7) : null
 
-  // HDHP coverage for this scenario: a new job can change it from its start.
-  const coverage: HsaCoverage[] =
-    newJob?.hsaTier && newStart
-      ? [
-          ...(p.hsaCoverage.length
-            ? p.hsaCoverage.filter((c) => c.from < newStart)
-            : [{ from: "0000-01", tier: "self" as const }]),
-          { from: newStart, tier: newJob.hsaTier },
-        ]
-      : p.hsaCoverage
+  const coverage = p.hsaCoverage
 
   // ---- pass 1: paychecks and deposits
   const pay: Record<string, number> = {}
@@ -167,8 +128,6 @@ export function simulate(
     o[m] = (o[m] ?? 0) + v
   }
   const paychecks: PaycheckRow[] = []
-  let forfeitMonth: string | null = null
-  let prevEmployer: "current" | "new" | null = null
   let year = 0
   let ytdSs = 0
   let ytdSp = 0
@@ -266,7 +225,7 @@ export function simulate(
       addEvent(m, "HSA over its limit")
     }
 
-    const employerHsa = jobAt(m).hsaEmployer
+    const employerHsa = jobAt(m)?.hsaEmployer
     if (
       inHorizon &&
       covered &&
@@ -280,27 +239,10 @@ export function simulate(
       noteHit("hsa", y, m, m, false)
     }
 
-    for (const d of byMonth[m] ?? []) {
-      const employer = isNew(m) ? "new" : "current"
-      const job = jobAt(m)
-      if (
-        prevEmployer === "current" &&
-        employer === "new" &&
-        vestMonth &&
-        m < vestMonth
-      )
-        forfeitMonth = m
-      if (prevEmployer === "current" && employer === "new")
-        addEvent(m, "New job starts")
-      prevEmployer = employer
-
-      const gross = grossFor(
-        job,
-        employer === "new" && newStart && newStart > h.start
-          ? newStart
-          : h.start,
-        m
-      )
+    const job = jobAt(m)
+    for (const d of job ? (byMonth[m] ?? []) : []) {
+      if (!job) break
+      const gross = grossAt(job, m) / periodsPerYear(job.schedule.frequency)
       const nth = (nChecks[m] ?? 0) + 1
       nChecks[m] = nth
       const t = d.getTime()
@@ -375,7 +317,8 @@ export function simulate(
       paychecks.push({
         date: isoDate(d),
         month: m,
-        employer,
+        jobId: job.id,
+        employer: job.employer,
         gross,
         pre,
         roth,
@@ -433,18 +376,35 @@ export function simulate(
     noteHit("ira", y, m, m, false)
     noteHit("hsa", y, m, m, false)
   }
-  if (forfeitMonth) addEvent(forfeitMonth, "Match forfeited")
-
-  // Raise markers (current job only; the new job's raise is its own).
-  if (p.job.raise)
-    for (const m of months)
-      if (
-        !isNew(m) &&
-        m > h.start &&
-        Number(m.slice(5)) === p.job.raise.month &&
-        p.job.raise.pct !== 0
+  // Job changes, raises and forfeited match, month by month. Unvested match
+  // is tracked per job; leaving a job before its vesting date forfeits it.
+  const activeIn = months.map((m) => jobAt(m))
+  let forfeitMonth: string | null = null
+  const forfeitAt: Record<string, string> = {}
+  months.forEach((m, i) => {
+    const prev = i === 0 ? null : activeIn[i - 1]
+    const cur = activeIn[i]
+    if (i === 0) return
+    if (prev?.id !== cur?.id) {
+      if (cur && prev) addEvent(m, "New job starts")
+      else if (cur) addEvent(m, `${cur.employer} starts`)
+      else if (prev) addEvent(m, `${prev.employer} ends`)
+      const vm = vestMonthOf(prev)
+      if (prev && vm && m < vm) {
+        forfeitAt[m] = prev.id
+        forfeitMonth ??= m
+      }
+    } else if (
+      cur &&
+      grossAt(cur, m) !== grossAt(cur, months[i - 1]) &&
+      grossAt(cur, months[i - 1]) > 0
+    )
+      addEvent(
+        m,
+        grossAt(cur, m) > grossAt(cur, months[i - 1]) ? "Raise" : "Pay cut"
       )
-        addEvent(m, "Raise")
+  })
+  for (const m of Object.keys(forfeitAt)) addEvent(m, "Match forfeited")
 
   // ---- outflows
   const spending = Math.max(0, p.spendingMonthly)
@@ -471,7 +431,13 @@ export function simulate(
   const b: Record<SleeveKey, number> = { ...s.sleeves }
   for (const k of ["checking", "ef", "reserve"] as const)
     b[k] -= s.cards * (p.cash.cardPayoff[k] ?? 0)
-  let unvested = p.job.vesting ? s.unvested : 0
+  // Unvested match by job; today's balance belongs to the job paying at the
+  // start, when it vests at all.
+  const unvestedBy: Record<string, number> = {}
+  const firstJob = activeIn[0]
+  if (firstJob?.vesting) unvestedBy[firstJob.id] = s.unvested
+  const unvestedTotal = () =>
+    Object.values(unvestedBy).reduce((a, v) => a + v, 0)
   const loans = s.loans
   const startNetWorth =
     Object.values(s.sleeves).reduce((a, v) => a + v, 0) - s.cards - loans
@@ -514,14 +480,21 @@ export function simulate(
     b.ef *= 1 + r.ef
 
     b.k401 += (k4[m] ?? 0) + (mt[m] ?? 0)
-    if (!isNew(m)) unvested += mt[m] ?? 0
-    if (forfeitMonth === m) {
-      b.k401 -= unvested
-      forfeited = unvested
-      unvested = 0
+    const left = forfeitAt[m]
+    if (left) {
+      b.k401 -= unvestedBy[left] ?? 0
+      forfeited += unvestedBy[left] ?? 0
+      unvestedBy[left] = 0
     }
-    if (vestMonth && m >= vestMonth && forfeitMonth === null) unvested = 0
-    if (!p.job.vesting) unvested = 0
+    const cur = activeIn[i]
+    const vm = vestMonthOf(cur)
+    if (cur && vm && m < vm)
+      unvestedBy[cur.id] = (unvestedBy[cur.id] ?? 0) + (mt[m] ?? 0)
+    for (const j of jobs) {
+      const v = vestMonthOf(j)
+      if (v && m >= v) unvestedBy[j.id] = 0
+    }
+    const unvested = unvestedTotal()
 
     for (const [k, v] of Object.entries(toSleeve[m] ?? {}))
       if (k in b) b[k as SleeveKey] += v ?? 0
@@ -670,10 +643,10 @@ export function simulate(
 }
 
 export function compareScenarios(
-  inputs: RunwayInputs
+  runs: { id: string; inputs: RunwayInputs }[]
 ): Record<string, RunwayResult> {
   const out: Record<string, RunwayResult> = {}
-  for (const s of inputs.person.scenarios) out[s.id] = simulate(inputs, s.id)
+  for (const r of runs) out[r.id] = simulate(r.inputs)
   return out
 }
 

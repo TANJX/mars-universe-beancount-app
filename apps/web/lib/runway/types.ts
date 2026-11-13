@@ -54,11 +54,6 @@ export interface Deduction {
   sleeve: SleeveKey | null
 }
 
-export interface Raise {
-  month: number
-  pct: number
-}
-
 export type ContributionAccount = "k401" | "ira" | "hsa"
 
 /** Display order: payroll accounts first. Also the pool keys: every stream
@@ -132,6 +127,8 @@ export interface StatePayroll {
   flatPerPaycheck: number
   rate: number
   annualCap: number | null
+  /** Already withheld this year before `asof`, by year (kept for saving). */
+  ytd?: Record<string, number>
 }
 
 export interface Withholding {
@@ -154,29 +151,111 @@ export interface Vesting {
   unvestedStart: number
 }
 
-export interface Job {
-  employer: string
-  grossAnnual: number
-  raise: Raise | null
-  schedule: PaySchedule
+/** Pay settings every job uses unless the job overrides them. */
+export interface Pay {
+  /** Null only when no job needs it (every job has its own). */
+  schedule: PaySchedule | null
   deductions: Deduction[]
   withholding: Withholding
+}
+
+/** Annual gross from `from` on. */
+export interface SalaryStep {
+  from: string
+  gross: number
+  enabled: boolean
+  note: string | null
+}
+
+/** One job. It pays from `start` (null: before the horizon) until `leave`,
+ * or until the next enabled job starts. Pay settings are null unless this
+ * job overrides the person's `pay`. */
+export interface Job {
+  id: string
+  employer: string
+  start: string | null
+  leave: string | null
+  enabled: boolean
+  note: string | null
+  salary: SalaryStep[]
   match: Match
   vesting: Vesting | null
   /** Employer money into the HSA once a year; counts toward the HSA limit. */
   hsaEmployer: { amount: number; month: number } | null
-  /** A scenario job's HDHP coverage from its start month; null keeps the
-   * person's coverage schedule. */
-  hsaTier: HsaTier | null
+  schedule: PaySchedule | null
+  deductions: Deduction[] | null
+  withholding: Withholding | null
 }
 
-export interface JobScenario {
+/** A job with every pay setting filled in (its own or the person's). */
+export interface ResolvedJob extends Job {
+  schedule: PaySchedule
+  deductions: Deduction[]
+  withholding: Withholding
+}
+
+/** Configured limits only: by year, any subset of the four. */
+export type LimitsGiven = Record<string, Partial<YearLimits>>
+
+export interface OneOff {
+  id?: string
+  month: string
+  amount: number
+  label: string
+}
+
+export interface Cash {
+  buffer: number
+  efMonths: number
+  earmarks: { label: string; amount: number }[]
+  dcaMonths: number
+  cardPayoff: Partial<Record<"checking" | "ef" | "reserve", number>>
+}
+
+export interface Returns {
+  equity: number
+  reserve: number
+  ef: number
+  gold: number
+}
+
+export type SpreadThrough = "horizon" | "year_end"
+
+/** The editable plan of one person, or of one scenario: exactly the shape
+ * `/api/ext/runway_data` serves and `runway_save` takes. */
+export interface PlanBody {
+  label: string
+  birthYear: number | null
+  pay: Pay
+  jobs: Job[]
+  contributions: Contribution[]
+  limits: LimitsGiven
+  hsaCoverage: HsaCoverage[]
+  spendingMonthly: number
+  oneOffs: OneOff[]
+  cash: Cash
+  returns: Returns
+  playCap: number
+  spreadThrough: SpreadThrough
+}
+
+/** The settings `defaults:` shares with every person. */
+export interface SharedSettings {
+  returns: Returns
+  limits: LimitsGiven
+  playCap: number
+  spreadThrough: SpreadThrough
+}
+
+/** A named patch over the person's plan (runway_patch / patch.ts). */
+export interface ScenarioDef {
   id: string
   label: string
-  /** null for "stay". */
-  start: string | null
-  job: Job | null
+  patch: Record<string, unknown>
 }
+
+/** The id of the base plan in the scenario switch and the URL. */
+export const PLAN_ID = "plan"
 
 export interface StartingAccount {
   account: string
@@ -204,34 +283,35 @@ export interface SleeveText {
   body?: string
 }
 
-export interface RunwayPerson {
+/** One configured person as loaded: the saved plan, its scenarios and the
+ * read-only extras. */
+export interface PersonRecord {
   id: string
-  label: string
-  job: Job
-  contributions: Contribution[]
-  /** By year; a missing year reuses the closest earlier one. */
-  limits: Record<string, YearLimits>
-  /** Empty means self-only coverage throughout. */
-  hsaCoverage: HsaCoverage[]
-  spendingMonthly: number
-  oneOffs: { month: string; amount: number; label: string }[]
-  cash: {
-    buffer: number
-    efMonths: number
-    earmarks: { label: string; amount: number }[]
-    dcaMonths: number
-    cardPayoff: Partial<Record<"checking" | "ef" | "reserve", number>>
-  }
-  returns: { equity: number; reserve: number; ef: number; gold: number }
-  /** [0] is always the "stay" scenario. */
-  scenarios: JobScenario[]
+  plan: PlanBody
+  scenarios: ScenarioDef[]
+  /** Dotted shared-setting paths this person sets itself
+   * (`returns.equity`, `limits.2028.k401`, `playCap`, `spreadThrough`). */
+  overrides: string[]
+  readOnly: boolean
+  /** The file this person's plan lives in (config/runway.yaml or an include). */
+  file: string
   starting: Starting
-  inherited: string[]
   /** Optional private wording for the "where the money goes" blocks. */
   sleeveText: Partial<Record<SleeveKey, SleeveText>>
   notModeled: string[] | null
-  /** Play-sleeve cap as a share of invested assets. */
-  playCap: number
+}
+
+/** What the engine and the input cards work on: one plan (the base or a
+ * scenario) with limits resolved for every year and the person's balances. */
+export interface RunwayPerson extends Omit<PlanBody, "limits"> {
+  id: string
+  /** By year, every year the horizon can reach (config, else IRS table). */
+  limits: Record<string, YearLimits>
+  /** What the config sets; edits go here and `limits` is re-derived. */
+  limitsGiven: LimitsGiven
+  starting: Starting
+  sleeveText: Partial<Record<SleeveKey, SleeveText>>
+  notModeled: string[] | null
 }
 
 export interface RunwayIssue {
@@ -258,13 +338,17 @@ export interface Horizon {
   start: string
   months: number
   firstMonthSpendFraction: number
-  spreadThrough: "horizon" | "year_end"
+  /** The person's (or scenario's) setting; see PlanBody.spreadThrough. */
+  spreadThrough: SpreadThrough
   reserveLookahead: number
 }
 
-export interface RunwayData extends Horizon {
+export interface RunwayData extends Omit<Horizon, "spreadThrough"> {
   fromConfig: boolean
-  people: RunwayPerson[]
+  /** Fingerprint of the YAML files; a save sends it back. */
+  version: string
+  shared: SharedSettings
+  people: PersonRecord[]
   unavailable: UnavailablePerson[]
   /** Person ids in config order (resolved and unavailable together). */
   order: string[]
@@ -284,7 +368,9 @@ export interface RunwayInputs {
 export interface PaycheckRow {
   date: string
   month: string
-  employer: "current" | "new"
+  /** Id of the job that paid this check. */
+  jobId: string
+  employer: string
   gross: number
   /** Pre-tax 401k. */
   pre: number

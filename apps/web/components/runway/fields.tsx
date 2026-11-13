@@ -1,12 +1,20 @@
 "use client"
 
 // Building blocks shared by the inputs pane's cards: the folding card, a
-// labelled field with its edited dot, and the month input.
+// labelled field with its markers, and the month input.
+//
+// Two markers, answering different questions:
+//   EditedDot       the value differs from what is saved (Save writes it);
+//                   clicking resets it to the saved value.
+//   FallbackReset   "Plan: $5,792" or "Shared: 7.0%": the active scenario (or
+//                   this person) overrides the next level down; clicking
+//                   removes the override.
 
-import { ChevronDown } from "lucide-react"
+import { ChevronDown, RotateCcw } from "lucide-react"
 import * as React from "react"
 
 import { InfoTip } from "@/components/fire/controls"
+import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 
@@ -36,11 +44,21 @@ export function InputsSection({
   title,
   hint,
   summary,
+  badge,
+  icon,
+  id,
+  forceOpen,
   children,
 }: {
   title: string
   hint: string
   summary: string
+  /** Shown beside the title, open or closed ("2 from Plan", "Error"). */
+  badge?: React.ReactNode
+  icon?: React.ReactNode
+  id?: string
+  /** Opens the card when it becomes true (errors inside, say). */
+  forceOpen?: boolean
   children: React.ReactNode
 }) {
   // The page only renders after the client fetch, so the media query is
@@ -49,8 +67,11 @@ export function InputsSection({
     () =>
       typeof window === "undefined" || !window.matchMedia(MOBILE_QUERY).matches
   )
+  React.useEffect(() => {
+    if (forceOpen) setOpen(true)
+  }, [forceOpen])
   return (
-    <Card className="gap-0 p-0">
+    <Card id={id} className="scroll-mt-14 gap-0 p-0">
       <details
         open={open}
         onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
@@ -58,8 +79,10 @@ export function InputsSection({
       >
         <summary className="flex cursor-pointer list-none items-start justify-between gap-4 px-4 py-3 [&::-webkit-details-marker]:hidden">
           <span className="flex min-w-0 flex-col gap-0.5">
-            <span className="font-medium text-muted-foreground text-xs tracking-wide">
+            <span className="flex items-center gap-1.5 font-medium text-muted-foreground text-xs tracking-wide">
+              {icon}
               {title}
+              {badge}
             </span>
             <span className="text-muted-foreground text-xs group-open:hidden">
               <span className="font-mono tabular-nums">{summary}</span>
@@ -85,7 +108,7 @@ export function InputsSection({
  * The dot is 6px, so its hit area is padded out (further on touch). */
 export function EditedDot({
   onReset,
-  label = "Edited; reset to config",
+  label = "Unsaved change. Reset to saved value.",
 }: {
   onReset: () => void
   label?: string
@@ -94,10 +117,58 @@ export function EditedDot({
     <button
       type="button"
       aria-label={label}
-      title="Edited. Click to reset to config."
+      title="Unsaved change. Click to reset to the saved value."
       onClick={onReset}
       className="relative size-1.5 shrink-0 rounded-full bg-primary outline-none before:absolute before:-inset-2 focus-visible:ring-3 focus-visible:ring-ring/50 pointer-coarse:before:-inset-4"
     />
+  )
+}
+
+/** What a field falls back to when its override is removed. */
+export interface Fallback {
+  source: "Plan" | "Shared"
+  /** The fallback value, formatted. */
+  text: string
+  onReset: () => void
+}
+
+/** "Plan: $5,792 ↺": the field overrides the next level down; click to
+ * follow it again. Always visible (no hover reveal). */
+export function FallbackReset({ source, text, onReset }: Fallback) {
+  return (
+    <button
+      type="button"
+      onClick={onReset}
+      aria-label={`Reset to ${source} value, ${text}`}
+      title={`Differs from ${source}. Click to use ${text}.`}
+      className="relative inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-muted-foreground text-xs outline-none before:absolute before:-inset-y-2 hover:text-foreground focus-visible:text-foreground focus-visible:underline pointer-coarse:before:-inset-y-3"
+    >
+      {source}: <span className="font-mono tabular-nums">{text}</span>
+      <RotateCcw size={11} aria-hidden="true" />
+    </button>
+  )
+}
+
+/** A small tag on a list row: "Added in scenario", "Off". */
+export function RowTag({
+  children,
+  tone = "muted",
+}: {
+  children: React.ReactNode
+  tone?: "muted" | "error"
+}) {
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        "h-4 shrink-0 px-1.5 font-normal text-[11px]",
+        tone === "error"
+          ? "border-rose-300 text-rose-600 dark:border-rose-800 dark:text-rose-400"
+          : "text-muted-foreground"
+      )}
+    >
+      {children}
+    </Badge>
   )
 }
 
@@ -106,6 +177,7 @@ export function Field({
   label,
   edited,
   onReset,
+  fallback,
   info,
   aside,
   error,
@@ -114,8 +186,11 @@ export function Field({
 }: {
   id?: string
   label: string
+  /** Differs from the saved value. */
   edited?: boolean
   onReset?: () => void
+  /** Overrides the plan (in a scenario) or the shared default. */
+  fallback?: Fallback | null
   info?: React.ReactNode
   aside?: React.ReactNode
   error?: string | null
@@ -128,17 +203,46 @@ export function Field({
         <label htmlFor={id}>{label}</label>
         {info ? <InfoTip label={label}>{info}</InfoTip> : null}
         {edited && onReset ? <EditedDot onReset={onReset} /> : null}
-        {aside ? (
+        {fallback ? (
+          <span className="ml-auto">
+            <FallbackReset {...fallback} />
+          </span>
+        ) : aside ? (
           <span className="ml-auto text-muted-foreground">{aside}</span>
         ) : null}
       </div>
       {children}
+      {fallback && aside ? (
+        <span className="text-muted-foreground text-xs">{aside}</span>
+      ) : null}
       {error ? (
-        <span className="text-rose-600 text-xs dark:text-rose-400">
+        <span
+          className="text-rose-600 text-xs dark:text-rose-400"
+          data-field-error=""
+        >
           {error}
         </span>
       ) : null}
     </div>
+  )
+}
+
+/** The dot and fallback pair for slider rows, which have no Field wrapper. */
+export function Markers({
+  edited,
+  onReset,
+  fallback,
+}: {
+  edited?: boolean
+  onReset?: () => void
+  fallback?: Fallback | null
+}) {
+  if (!edited && !fallback) return null
+  return (
+    <span className="inline-flex items-center gap-2">
+      {edited && onReset ? <EditedDot onReset={onReset} /> : null}
+      {fallback ? <FallbackReset {...fallback} /> : null}
+    </span>
   )
 }
 

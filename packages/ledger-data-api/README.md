@@ -7,7 +7,7 @@ Fava extension that exposes HTTP endpoints for account balances, planner data (p
 
 Loaded by Fava via `custom "fava-extension" "ledger_data_api"` in `data/journal/journal.beancount`. Endpoints-only — no Fava report page (the SPA that previously rendered inline was retired; see `docs/plans/2026-04-27-cash-planner.md`).
 
-## Runway endpoint
+## Runway endpoints
 
 `GET /api/ext/runway_data` feeds the web app's `/runway` page (a monthly cash and sleeve
 simulator per person; the engine runs in the browser). It reads
@@ -15,21 +15,33 @@ simulator per person; the engine runs in the browser). It reads
 returns one camelCase payload:
 
 - `asof`, `fromConfig`, `start` (YYYY-MM), `months`, `firstMonthSpendFraction`,
-  `spreadThrough` (`horizon` | `year_end`), `reserveLookahead`, `playCap`, `defaults`
-- `people`: fully resolved people (job, `contributions` streams into the 401k, IRA and HSA,
-  per-year `limits`, `hsaCoverage`, spending, one-offs, cash rules, returns, scenarios with
-  `stay` first, starting balances per sleeve, and an `inherited` list of fields filled from
-  `config/fire.yaml`). The older `k401` (limits, elections) and `ira` keys are still passed
-  through; the page converts them to streams.
+  `reserveLookahead`, `defaults` (raw), `shared` (the normalized shared settings: returns,
+  limits, play cap, spread) and `version` (a fingerprint of the YAML files)
+- `people`: fully resolved people. Each is a plan body (`pay` defaults, `jobs` with dated
+  salary steps, `contributions` streams into the 401k, IRA and HSA, configured `limits`,
+  `hsaCoverage`, spending, one-offs, cash rules, returns, play cap, spread) plus `overrides`
+  (the shared settings the person sets itself), `readOnly`, starting balances per sleeve, and
+  `scenarios`: `{id, label, person}` where `person` is the scenario's whole plan body (its
+  patch applied over the plan).
 - `roster`: every configured person with `status` `ok` | `locked` | `missing` | `error`, so a
   person whose file is git-crypt encrypted still shows up
-- `errors` / `warnings`: `{personId, path, message}`. Errors drop a person; warnings keep it.
+- `errors` / `warnings`: `{personId, path, message}`. Errors in the plan drop a person;
+  errors in a scenario drop that scenario. Warnings keep both.
+
+`POST /api/ext/runway_save` writes page edits back: `{version, person?: {id, plan, overrides,
+scenarios: [{id, label, person}]}, shared?}`. The edited bodies are turned back into YAML and
+diffed against what is on disk; only the changed values are rewritten (ruamel round trip, so
+comments stay), scenario patches are recomputed against the plan, and the result is resolved
+in memory first. 409 when `version` is stale, 422 with `issues` when the result would not
+validate; nothing is written in either case.
 
 A person entry may `include:` a `.yaml` file relative to the ledger folder (one level deep).
 Absolute paths, `..` and symlinks that leave the folder are rejected; a file starting with the
 git-crypt header is reported as `locked`. `starting.source: ledger` maps ledger positions at
 `asof` to sleeves with ordered regex rules (first match wins). Balances are never logged.
-Logic lives in `runway.py`; tests in `packages/beancount-tooling/tests/test_runway_api.py`.
+Logic lives in `runway.py` (resolve), `runway_patch.py` (patches, edit ops) and
+`runway_write.py` (save); tests in `packages/beancount-tooling/tests/test_runway_api.py` and
+`test_runway_save.py`.
 
 ## Card statements (planner)
 

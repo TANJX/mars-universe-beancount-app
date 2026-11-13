@@ -1,23 +1,50 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { normalizePerson } from "./config"
+import { horizonOf, runnable, scenarioBody } from "./config"
 import { phaseAt } from "./contributions"
 import { demoRunway } from "./demo"
 import { matchFor, simulate } from "./engine"
-import type { Contribution, Phase, RunwayInputs, RunwayPerson } from "./types"
+import { applyPatch } from "./patch"
+import type {
+  Contribution,
+  Job,
+  Phase,
+  PlanBody,
+  RunwayPerson,
+  RunwayResult,
+} from "./types"
+import { PLAN_ID } from "./types"
 
 const data = demoRunway("2026-11-08")
-const horizon = {
-  asof: data.asof,
-  start: data.start,
-  months: data.months,
-  firstMonthSpendFraction: data.firstMonthSpendFraction,
-  spreadThrough: data.spreadThrough,
-  reserveLookahead: data.reserveLookahead,
+const horizon = horizonOf(data, "year_end")
+const [alexRec, samRec] = data.people
+const run = (rec = alexRec, body: PlanBody = rec.plan): RunwayPerson =>
+  runnable(rec, body, data.start)
+const alex = run(alexRec)
+const sam = run(samRec)
+const sim = (p: RunwayPerson): RunwayResult => simulate({ person: p, horizon })
+
+/** Alex taking Offer A from `start` (the demo scenario, moved), with the
+ * scenario body optionally edited further. */
+function offerA(start: string, edit?: (b: PlanBody) => PlanBody): RunwayPerson {
+  const b = scenarioBody(alexRec, "offer-a")
+  const moved: PlanBody = {
+    ...b,
+    jobs: b.jobs.map((j) =>
+      j.id === "offer-a"
+        ? { ...j, start, salary: j.salary.map((s) => ({ ...s, from: start })) }
+        : j
+    ),
+  }
+  return run(alexRec, edit ? edit(moved) : moved)
 }
-const alex = data.people[0]
-const sam = data.people[1]
+
+/** Every job edited the same way. */
+const eachJob = (p: RunwayPerson, f: (j: Job) => Job): RunwayPerson => ({
+  ...p,
+  jobs: p.jobs.map(f),
+})
 
 function flat(p: RunwayPerson): RunwayPerson {
   return {
@@ -63,10 +90,10 @@ const SLEEVES = [
 ] as const
 
 test("with zero returns, sleeves change by pay - out + 401k + match", () => {
-  for (const p of [alex, sam]) {
-    const inputs: RunwayInputs = { person: flat(p), horizon }
-    for (const sc of p.scenarios) {
-      const r = simulate(inputs, sc.id)
+  for (const rec of [alexRec, samRec]) {
+    for (const id of [PLAN_ID, ...rec.scenarios.map((x) => x.id)]) {
+      const p = flat(run(rec, scenarioBody(rec, id)))
+      const r = sim(p)
       const s = p.starting
       let prev = SLEEVES.reduce((a, k) => a + s.sleeves[k], 0) - s.cards
       r.rows.forEach((row, i) => {
@@ -83,7 +110,7 @@ test("with zero returns, sleeves change by pay - out + 401k + match", () => {
           (r.forfeitMonth === row.month ? r.forfeited : 0)
         assert.ok(
           Math.abs(total - prev - expected) < 1e-6,
-          `${p.id} ${sc.id} ${row.month}`
+          `${p.id} ${id} ${row.month}`
         )
         prev = total
       })
@@ -92,7 +119,7 @@ test("with zero returns, sleeves change by pay - out + 401k + match", () => {
 })
 
 test("checking never ends below the buffer while the reserve has money", () => {
-  const r = simulate({ person: alex, horizon }, "stay")
+  const r = sim(alex)
   for (const row of r.rows)
     if (row.reserve > 0.01) assert.ok(row.checking >= alex.cash.buffer - 1e-6)
 })
@@ -102,7 +129,7 @@ test("a fixed election clips at the annual limit and records when", () => {
     ...stream(sam, "k401-pretax"),
     ytd: { 2026: 23_000 },
   })
-  const r = simulate({ person: p, horizon }, "stay")
+  const r = sim(p)
   const y2026 = r.paychecks.filter((c) => c.date.startsWith("2026"))
   const total = y2026.reduce((a, c) => a + c.pre + c.roth, 0)
   assert.ok(Math.abs(total - 1_500) < 1e-6)
@@ -115,17 +142,20 @@ test("a fixed election clips at the annual limit and records when", () => {
 })
 
 test("leaving before the vesting date forfeits the unvested match", () => {
-  const p: RunwayPerson = {
-    ...alex,
-    scenarios: alex.scenarios.map((s) =>
-      s.id === "offer-a" ? { ...s, start: "2027-03" } : s
-    ),
-  }
-  const r = simulate({ person: p, horizon }, "offer-a")
+  // Offer A starts in March; the current job vests in September.
+  const r = sim(offerA("2027-03"))
   assert.equal(r.forfeitMonth, "2027-03")
   assert.ok(r.forfeited >= alex.starting.unvested)
-  const stay = simulate({ person: p, horizon }, "stay")
+  const mar = r.rows.find((x) => x.month === "2027-03")
+  assert.ok(mar?.events.includes("Match forfeited"))
+  assert.ok(mar?.events.includes("New job starts"))
+  // The new job has no vesting, so nothing is unvested after the switch.
+  assert.equal(mar?.unvested, 0)
+  const stay = sim(alex)
   assert.equal(stay.forfeitMonth, null)
+  assert.equal(stay.forfeited, 0)
+  // Leaving after the vesting month forfeits nothing.
+  assert.equal(sim(offerA("2027-10")).forfeitMonth, null)
 })
 
 test("elections and matches", () => {
@@ -157,8 +187,9 @@ test("elections and matches", () => {
 test("zero invested gives a zero play share, not NaN", () => {
   const p: RunwayPerson = {
     ...sam,
+    ...eachJob(sam, (j) => ({ ...j, deductions: [], hsaEmployer: null })),
+    pay: { ...sam.pay, deductions: [] },
     contributions: [],
-    job: { ...sam.job, deductions: [], hsaEmployer: null },
     cash: { ...sam.cash, dcaMonths: 1, buffer: 1e9 },
     starting: {
       ...sam.starting,
@@ -173,7 +204,7 @@ test("zero invested gives a zero play share, not NaN", () => {
       },
     },
   }
-  const r = simulate({ person: p, horizon }, "stay")
+  const r = sim(p)
   for (const row of r.rows) assert.ok(Number.isFinite(row.playShare))
 })
 
@@ -195,7 +226,7 @@ test("an unfunded deficit is reported when every source runs dry", () => {
       cards: 0,
     },
   }
-  const r = simulate({ person: p, horizon }, "stay")
+  const r = sim(p)
   assert.ok(r.unfundedMonths.length > 0)
   assert.ok(r.unfundedPeak > 0)
   assert.ok(Math.abs(r.minChecking + r.unfundedPeak) < 1e-6)
@@ -216,14 +247,14 @@ test("an unfunded deficit is reported when every source runs dry", () => {
 })
 
 test("a funded plan reports no unfunded months", () => {
-  const r = simulate({ person: alex, horizon }, "stay")
+  const r = sim(alex)
   assert.deepEqual(r.unfundedMonths, [])
   assert.equal(r.unfundedPeak, 0)
   assert.equal(r.unfundedPeakMonth, null)
 })
 
 test("pre-tax and Roth 401k share one limit, split by share", () => {
-  const r = simulate({ person: alex, horizon }, "stay")
+  const r = sim(alex)
   const pool = r.pools["2027"].k401
   near(pool.contributed, 24_500, 0.01)
   near(pool.streams["k401-pretax"], 24_500 * 0.6, 0.01)
@@ -233,13 +264,14 @@ test("pre-tax and Roth 401k share one limit, split by share", () => {
 })
 
 test("a job switch mid-year does not reset the year's running total", () => {
-  const p: RunwayPerson = {
-    ...alex,
-    scenarios: alex.scenarios.map((s) =>
-      s.id === "offer-a" ? { ...s, start: "2027-07" } : s
-    ),
-  }
-  const r = simulate({ person: p, horizon }, "offer-a")
+  const p = offerA("2027-07")
+  assert.equal(p.jobs.length, 2)
+  const r = sim(p)
+  // Both jobs paid in 2027.
+  const paid = new Set(
+    r.paychecks.filter((c) => c.date.startsWith("2027")).map((c) => c.jobId)
+  )
+  assert.deepEqual([...paid].sort(), ["current", "offer-a"])
   near(r.pools["2027"].k401.contributed, 24_500, 0.01)
   const y2027 = r.paychecks.filter((c) => c.date.startsWith("2027"))
   near(
@@ -252,16 +284,15 @@ test("a job switch mid-year does not reset the year's running total", () => {
 test("the HSA limit is prorated by covered months", () => {
   const p: RunwayPerson = {
     ...withStream(
-      sam,
+      eachJob(sam, (j) => ({ ...j, hsaEmployer: null })),
       hsaStream([{ from: "2026-11", pace: "even", share: 1, capPct: 1 }])
     ),
-    job: { ...sam.job, hsaEmployer: null },
     hsaCoverage: [
       { from: "2026-01", tier: "self" },
       { from: "2027-07", tier: "none" },
     ],
   }
-  const r = simulate({ person: p, horizon }, "stay")
+  const r = sim(p)
   const pool = r.pools["2027"].hsa
   near(pool.limit, 2_200)
   // Spread over the whole year as known in January, so half of it is in by
@@ -276,18 +307,17 @@ test("the HSA limit is prorated by covered months", () => {
 test("front-loading an HSA and then losing coverage leaves an excess", () => {
   const p: RunwayPerson = {
     ...withStream(
-      sam,
+      eachJob(sam, (j) => ({ ...j, hsaEmployer: null })),
       hsaStream([
         { from: "2026-11", pace: "front_load", share: 1, capPct: 0.5 },
       ])
     ),
-    job: { ...sam.job, hsaEmployer: null },
     hsaCoverage: [
       { from: "2026-01", tier: "self" },
       { from: "2027-07", tier: "none" },
     ],
   }
-  const r = simulate({ person: p, horizon }, "stay")
+  const r = sim(p)
   const pool = r.pools["2027"].hsa
   near(pool.limit, 2_200)
   near(pool.contributed, 4_400, 0.01)
@@ -297,22 +327,24 @@ test("front-loading an HSA and then losing coverage leaves an excess", () => {
 })
 
 test("a new job without an HDHP ends HSA coverage from its start", () => {
-  const p: RunwayPerson = {
-    ...withStream(
-      alex,
-      hsaStream([
-        { from: "2026-11", pace: "front_load", share: 1, capPct: 0.5 },
-      ])
-    ),
-    scenarios: alex.scenarios.map((s) =>
-      s.id === "offer-a" && s.job
-        ? { ...s, start: "2027-04", job: { ...s.job, hsaTier: "none" } }
-        : s
-    ),
-  }
-  const stay = simulate({ person: p, horizon }, "stay")
+  const hsa = hsaStream([
+    { from: "2026-11", pace: "front_load", share: 1, capPct: 0.5 },
+  ])
+  const covered = (b: PlanBody): PlanBody => ({
+    ...b,
+    contributions: [...b.contributions, hsa],
+    hsaCoverage: [{ from: "2026-01", tier: "self" }],
+  })
+  const stay = sim(run(alexRec, covered(alexRec.plan)))
   assert.equal(stay.pools["2027"].hsa.excess, 0)
-  const moved = simulate({ person: p, horizon }, "offer-a")
+  // The scenario changes coverage, not the job.
+  const moved = sim(
+    offerA("2027-04", (b) =>
+      applyPatch(covered(b), {
+        hsaCoverage: [{ from: "2027-04", tier: "none" }],
+      })
+    )
+  )
   near(moved.pools["2027"].hsa.limit, 1_100)
   near(moved.pools["2027"].hsa.excess, 3_300, 0.01)
 })
@@ -320,7 +352,7 @@ test("a new job without an HDHP ends HSA coverage from its start", () => {
 test("employer HSA money counts toward the limit; a fixed stream clips", () => {
   const p: RunwayPerson = {
     ...withStream(
-      sam,
+      eachJob(sam, (j) => ({ ...j, hsaEmployer: { amount: 500, month: 1 } })),
       hsaStream([
         {
           from: "2026-11",
@@ -331,9 +363,8 @@ test("employer HSA money counts toward the limit; a fixed stream clips", () => {
         },
       ])
     ),
-    job: { ...sam.job, hsaEmployer: { amount: 500, month: 1 } },
   }
-  const r = simulate({ person: p, horizon }, "stay")
+  const r = sim(p)
   const pool = r.pools["2027"].hsa
   near(pool.employer, 500)
   near(pool.contributed, 4_400, 0.01)
@@ -349,7 +380,7 @@ test("a direct IRA deposit is paid from cash and clips at the limit", () => {
     ...stream(alex, "ira-roth"),
     schedule: [{ from: "2026-11", pace: "lump", month: 1, amount: 9_000 }],
   })
-  const r = simulate({ person: p, horizon }, "stay")
+  const r = sim(p)
   const jan = r.rows.find((x) => x.month === "2027-01")
   assert.ok(jan)
   near(jan.iraOut, 7_500)
@@ -359,68 +390,68 @@ test("a direct IRA deposit is paid from cash and clips at the limit", () => {
   assert.equal(feb?.iraOut, 0)
 })
 
-test("the old election, IRA and HSA-deduction shape converts to streams", () => {
-  const legacy = {
-    id: "pat",
-    job: {
-      grossAnnual: 120_000,
-      schedule: { frequency: "semimonthly", days: [15, -1] },
-      deductions: [
-        {
-          label: "HSA",
-          amount: 300,
-          per: "month",
-          paycheckOfMonth: 2,
-          pretax: true,
-          ficaExempt: true,
-          sleeve: "hsa",
-        },
-        { label: "Commuter", amount: 50, per: "paycheck", pretax: true },
-      ],
-    },
-    k401: {
-      limits: { 2026: 24_500, 2027: 25_000 },
-      ytd: { 2026: 1_000 },
-      elections: [
-        { from: "2026-11", mode: "fixed", pretax: 500, roth: 100 },
-        { from: "2027-01", mode: "max_spread", capPct: 0.5, rothShare: 0.25 },
-        { from: "2027-07", mode: "percent", pretaxPct: 0.1, rothPct: 0 },
-      ],
-    },
-    ira: { amount: 7_000, month: 2 },
+test("paycheck rows name the paying job; salary steps mark raises and cuts", () => {
+  const r = sim(offerA("2027-07"))
+  for (const c of r.paychecks) {
+    const id = c.month < "2027-07" ? "current" : "offer-a"
+    assert.equal(c.jobId, id, c.date)
+    assert.equal(c.employer, id === "current" ? "Current job" : "Offer A")
   }
-  const p = normalizePerson(legacy, 0, "2026-11", "2026-11-08")
-  assert.deepEqual(
-    p.contributions.map((c) => c.id),
-    ["k401-pretax", "k401-roth", "hsa", "ira-roth"]
+  const ev = (res: RunwayResult, m: string) =>
+    res.rows.find((x) => x.month === m)?.events ?? []
+  // The demo's February review step.
+  assert.ok(ev(r, "2027-02").includes("Raise"))
+  assert.ok(ev(r, "2027-07").includes("New job starts"))
+  // Gross per check follows the step.
+  const jan = r.paychecks.find((c) => c.month === "2027-01")
+  const feb = r.paychecks.find((c) => c.month === "2027-02")
+  near(jan?.gross ?? 0, 90_000 / 26)
+  near(feb?.gross ?? 0, 92_700 / 26)
+
+  // A lower step is a pay cut; a disabled step changes nothing.
+  const cut = sim(
+    eachJob(alex, (j) => ({
+      ...j,
+      salary: [
+        ...j.salary.map((s) =>
+          s.from === "2027-02" ? { ...s, enabled: false } : s
+        ),
+        { from: "2027-05", gross: 80_000, enabled: true, note: null },
+      ],
+    }))
   )
-  assert.deepEqual(stream(p, "k401-pretax").ytd, { 2026: 1_000 })
-  assert.deepEqual(stream(p, "k401-roth").schedule, [
-    {
-      from: "2026-11",
-      pace: "fixed",
-      amount: 100,
-      per: "paycheck",
-      paycheckOfMonth: null,
-    },
-    { from: "2027-01", pace: "even", share: 0.25, capPct: 0.125 },
-    { from: "2027-07", pace: "off" },
-  ])
-  assert.deepEqual(stream(p, "hsa").schedule, [
-    {
-      from: "2026-11",
-      pace: "fixed",
-      amount: 300,
-      per: "month",
-      paycheckOfMonth: 2,
-    },
-  ])
-  // The HSA deduction became a stream; the commuter one stays a deduction.
-  assert.deepEqual(
-    p.job.deductions.map((d) => d.label),
-    ["Commuter"]
+  assert.ok(!ev(cut, "2027-02").includes("Raise"))
+  assert.ok(ev(cut, "2027-05").includes("Pay cut"))
+})
+
+test("a gap between jobs pays nothing and marks both ends", () => {
+  const p = offerA("2027-05", (b) => ({
+    ...b,
+    jobs: b.jobs.map((j) =>
+      j.id === "current" ? { ...j, leave: "2027-02" } : j
+    ),
+  }))
+  const r = sim(p)
+  const months = new Set(r.paychecks.map((c) => c.month))
+  assert.ok(!months.has("2027-03") && !months.has("2027-04"))
+  assert.ok(months.has("2027-02") && months.has("2027-05"))
+  const row = (m: string) => r.rows.find((x) => x.month === m)
+  assert.equal(row("2027-03")?.takeHome, 0)
+  assert.ok(row("2027-03")?.events.includes("Current job ends"))
+  assert.ok(row("2027-05")?.events.includes("Offer A starts"))
+  // Leaving into a gap before vesting forfeits too.
+  assert.equal(r.forfeitMonth, "2027-03")
+  // A disabled job is ignored entirely.
+  const off = sim(
+    offerA("2027-05", (b) => ({
+      ...b,
+      jobs: b.jobs.map((j) =>
+        j.id === "offer-a" ? { ...j, enabled: false } : j
+      ),
+    }))
   )
-  assert.equal(p.limits["2027"].k401, 25_000)
-  assert.equal(p.limits["2028"].k401, 25_000)
-  assert.equal(p.limits["2027"].ira, 7_500)
+  assert.deepEqual(
+    off.rows.map((x) => x.takeHome),
+    sim(alex).rows.map((x) => x.takeHome)
+  )
 })

@@ -279,55 +279,6 @@ export function paceSummary(p: Pace, channel: Channel): string {
   }
 }
 
-// --------------------------------------------------------------------- YAML
-
-const yamlNum = (v: number) => String(Number(v.toFixed(4)))
-
-function phaseYaml(p: Phase, channel: Channel): string {
-  const parts = [`from: ${p.from}`, `pace: ${p.pace}`]
-  switch (p.pace) {
-    case "fixed":
-      parts.push(`amount: ${yamlNum(p.amount)}`)
-      if (channel === "payroll" && p.per === "month")
-        parts.push("per: month", `paycheck: ${p.paycheckOfMonth ?? 1}`)
-      break
-    case "percent":
-      parts.push(`pct: ${yamlNum(p.pct)}`)
-      break
-    case "even":
-    case "front_load":
-      if (p.share !== 1) parts.push(`share: ${yamlNum(p.share)}`)
-      if (channel === "payroll") parts.push(`cap_pct: ${yamlNum(p.capPct)}`)
-      break
-    case "lump":
-      parts.push(
-        `month: ${p.month}`,
-        `amount: ${p.amount == null ? "max" : yamlNum(p.amount)}`
-      )
-      break
-  }
-  return `{ ${parts.join(", ")} }`
-}
-
-/** The `contributions:` block for config/runway.yaml, so a setup tried on the
- * page can be pasted back into the config. */
-export function contributionsYaml(list: Contribution[]): string {
-  const lines = ["contributions:"]
-  for (const c of list) {
-    lines.push(`  - id: ${c.id}`, `    account: ${c.account}`)
-    if (c.account !== "hsa") lines.push(`    tax: ${c.tax}`)
-    if (CHANNELS[c.account].length > 1) lines.push(`    channel: ${c.channel}`)
-    const ytd = Object.entries(c.ytd).filter(([, v]) => v !== 0)
-    if (ytd.length)
-      lines.push(
-        `    ytd: { ${ytd.map(([y, v]) => `${y}: ${yamlNum(v)}`).join(", ")} }`
-      )
-    lines.push("    schedule:")
-    for (const p of c.schedule) lines.push(`      - ${phaseYaml(p, c.channel)}`)
-  }
-  return `${lines.join("\n")}\n`
-}
-
 /** A new stream of the given kind, starting in `from`. */
 export function newContribution(
   account: ContributionAccount,
