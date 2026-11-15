@@ -7,6 +7,7 @@ Usage (from the app repo, ``LEDGER_DIR`` set)::
 Reads ``journal/journal.beancount``, ``config/mobile.yaml`` (personal inputs,
 optional), ``journal/plan/cc-cards.json`` (card due days, optional),
 ``journal/plan/cc-expected.json`` (statements that have not closed, optional),
+``journal/plan/plans.jsonl`` (card payment overrides: which bank pays, optional),
 ``statements/billing/`` (closed card statements, optional),
 ``statements/leave/`` and ``journal/leave/taken.jsonl`` (PTO and sick
 balances, optional, used only with a ``leave`` section in the config) and
@@ -51,6 +52,7 @@ from beancount_tooling.paths import get_config_dir, get_journal_file, get_ledger
 OUT_RELATIVE = Path("mobile") / "snapshot.json"
 CC_CARDS_RELATIVE = Path("journal") / "plan" / "cc-cards.json"
 CC_EXPECTED_RELATIVE = Path("journal") / "plan" / "cc-expected.json"
+PLANS_RELATIVE = Path("journal") / "plan" / "plans.jsonl"
 LOGO_TOKEN_VAR = "NEXT_PUBLIC_LOGO_DEV_TOKEN"
 STATEMENTS_RELATIVE = Path("statements")
 
@@ -95,6 +97,33 @@ def _load_cc_cards(path: Path) -> dict:
         print(f"warning: ignoring {path}: {e}", file=sys.stderr)
         return {}
     return doc if isinstance(doc, dict) else {}
+
+
+def _load_card_plans(path: Path) -> list[dict]:
+    """The planner's live card-payment plans (those tagged with a card).
+
+    ``plans.jsonl`` is an event log: the last ``save`` of an id wins and a
+    ``delete`` removes it."""
+    if not path.is_file():
+        return []
+    live: dict[str, dict] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as e:
+        print(f"warning: ignoring {path}: {e}", file=sys.stderr)
+        return []
+    for line in lines:
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(ev, dict) or not isinstance(ev.get("id"), str):
+            continue
+        if ev.get("op") == "delete":
+            live.pop(ev["id"], None)
+        elif ev.get("op") == "save":
+            live[ev["id"]] = ev
+    return [p for p in live.values() if p.get("ccCardRef")]
 
 
 def _logo_token(env_file: Path | None) -> str | None:
@@ -195,6 +224,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         statements=_load_statements(ledger_dir),
         meta=meta,
         expected=_load_cc_cards(ledger_dir / CC_EXPECTED_RELATIVE),
+        card_plans=_load_card_plans(ledger_dir / PLANS_RELATIVE),
         logos=load_resolver(get_config_dir() / UI_CONFIG_FILENAME),
         logo_token=_logo_token(args.web_env),
         leave=read_leave(ledger_dir),

@@ -375,14 +375,105 @@ def _credited_since(led: _Ledger, card: str, closed: str) -> Decimal:
     )
 
 
+# A planner card-payment plan counts as paid once a bank row moves its money:
+# same account, within this many days of the plan date, amount within the
+# tolerance. Mirrors the web planner's matching (`merge.annotate_past_state`).
+PLAN_GRACE_DAYS = 3
+PLAN_TOLERANCE = Decimal("0.50")
+
+
+def _plan_amount(plan: dict) -> Decimal | None:
+    try:
+        return abs(Decimal(str(plan.get("amount")).strip()))
+    except ArithmeticError:
+        return None
+
+
+def _index_card_plans(led: _Ledger, plans: list[dict] | None) -> dict[str, list[dict]]:
+    """The planner's card-payment plans by card, each copied with ``paid``.
+
+    A plan is paid when a bank row on its account (posted, or bank-pending:
+    ``!`` with ``pending:`` metadata) matches it; each row pays one plan.
+    Plans without a usable date, account or amount are dropped."""
+    rows: dict[str, list[list]] = collections.defaultdict(list)
+    for t in led.past:
+        if not (t.flag == "*" or (t.flag == "!" and (t.meta or {}).get("pending"))):
+            continue
+        for p in t.postings:
+            if p.account.startswith("Assets:") and p.units.currency == "USD":
+                rows[p.account].append([t.date, p.units.number, False])
+    horizon = led.asof + dt.timedelta(days=PLAN_GRACE_DAYS)
+    out: dict[str, list[dict]] = collections.defaultdict(list)
+    for plan in sorted(plans or [], key=lambda p: str(p.get("date"))):
+        amount = _plan_amount(plan)
+        try:
+            day = dt.date.fromisoformat(str(plan.get("date")))
+        except ValueError:
+            continue
+        if amount is None or not plan.get("account") or not plan.get("ccCardRef"):
+            continue
+        best = None
+        if day <= horizon:
+            for row in rows.get(plan["account"], ()):
+                diff = abs(abs(row[1]) - amount)
+                if (
+                    not row[2]
+                    and row[1] < 0
+                    and abs((row[0] - day).days) <= PLAN_GRACE_DAYS
+                    and diff <= PLAN_TOLERANCE
+                    and (best is None or diff < best[0])
+                ):
+                    best = (diff, row)
+        if best is not None:
+            best[1][2] = True
+        out[plan["ccCardRef"]].append({**plan, "paid": best is not None})
+    return out
+
+
+def _plans_for(
+    card_plans: dict[str, list[dict]],
+    card: str,
+    statement_id: str | None,
+    due: str | None,
+) -> list[dict]:
+    """The override plans for one statement of a card, by date: tagged with
+    the statement's id, or (legacy plans with no id) with its due month."""
+    out = []
+    for plan in card_plans.get(card, ()):
+        sid = plan.get("ccStatementId")
+        if sid:
+            hit = statement_id is not None and sid == statement_id
+        else:
+            hit = due is not None and plan.get("ccCycleMonth") == due[:7]
+        if hit:
+            out.append(plan)
+    return out
+
+
+def _paid_total(plans: list[dict]) -> Decimal:
+    return sum((_plan_amount(p) for p in plans if p["paid"]), ZERO)
+
+
+def _main_funder(plans: list[dict]) -> str | None:
+    """The account paying most of what the plans have yet to pay, or once
+    they are all paid, the one that paid most."""
+    open_ = [p for p in plans if not p["paid"]] or plans
+    return max(open_, key=_plan_amount)["account"] if open_ else None
+
+
 def _build_accounts(
     led: _Ledger,
     cfg: MobileConfig,
     names: _Names,
     cc_cards: dict,
     statements: dict | None = None,
+    card_plans: dict[str, list[dict]] | None = None,
 ) -> dict[str, dict]:
-    """Every balance-sheet account rolled up into its group, keyed by group id."""
+    """Every balance-sheet account rolled up into its group, keyed by group id.
+
+    A card's open statement is reduced by planner plans already paid from the
+    bank (a payment can leave the bank before the card is credited), and its
+    ``fundedBy`` follows those plans: the account paying most of the rest."""
     d30_date = led.asof - dt.timedelta(days=30)
     then = led.snaps[d30_date]
     rolled: dict[str, dict[str, dict]] = {gid: {} for gid, *_ in GROUPS}
@@ -426,12 +517,23 @@ def _build_accounts(
                 fact = _card_billing((statements or {}).get(path, ()), day, led.asof)
                 # The open statement, when one is on record: its closing date
                 # and what is left of it after payments and credits since.
+                # A plan paid from the bank but not yet credited to the card
+                # counts as paid too (the larger of the two, never both).
                 row["statementId"] = fact[2] if fact else None
+                plans = _plans_for(
+                    card_plans or {},
+                    path,
+                    fact[2] if fact else None,
+                    fact[0].isoformat() if fact and fact[0] else None,
+                )
                 row["statementRemaining"] = (
                     _r2(
                         max(
                             Decimal(str(fact[1]))
-                            - _credited_since(led, path, fact[2]),
+                            - max(
+                                _credited_since(led, path, fact[2]),
+                                _paid_total(plans),
+                            ),
                             ZERO,
                         )
                     )
@@ -453,6 +555,11 @@ def _build_accounts(
                     row["fundedByName"] = (
                         names.display(funding) if day and funding else None
                     )
+                    plans = _plans_for(card_plans or {}, path, None, row["due"])
+                funder = _main_funder(plans)
+                if funder and row["due"]:
+                    row["fundedBy"] = funder.split(":")[-1]
+                    row["fundedByName"] = names.display(funder)
             elif gid == "loans":
                 loan = loans.get(path)
                 fallback = loan.name if loan else fallback
@@ -1099,7 +1206,13 @@ def _build_goals(led: _Ledger, cfg: MobileConfig) -> list[dict]:
 
 
 def _card_events(
-    c: dict, asof: dt.date, limit: str, expected: dict | None
+    c: dict,
+    asof: dt.date,
+    limit: str,
+    expected: dict | None,
+    card_plans: dict[str, list[dict]] | None = None,
+    names: _Names | None = None,
+    default_funder: str | None = None,
 ) -> list[dict]:
     """The dated payments one card row implies, through ``limit``.
 
@@ -1110,25 +1223,75 @@ def _card_events(
     expected statement for the card (then that record's due date and, when
     given, its estimated balance). Without an open statement the event is the
     current balance on the next due day.
+
+    When the planner holds override plans for a statement (``card_plans``),
+    the payment follows them: one event per plan not yet paid, on its date
+    (never before ``asof``) and from its bank, so a card paid from two banks
+    gets two events. As in the web planner, the plans replace the statement
+    payment: what they leave uncovered is not paid. Plans already paid
+    reduce what is still owed, and no plan pays more than that.
     """
     if c["value"] <= 1:
         return []
-    funded = c.get("fundedByName")
-    base = {
-        "label": c["displayName"],
-        "note": f"Card payment from {funded}" if funded else "Card payment",
-        "kind": "card",
-        "_paycheck": False,
-        "account": c["account"],
-        "fundedBy": c.get("fundedBy") or None,
-        "fundedByName": funded or None,
-    }
+    asof_iso = asof.isoformat()
 
-    def event(date: str | None, amount: float, basis: str, **extra: Any) -> list[dict]:
+    def event(
+        date: str | None,
+        amount: float,
+        basis: str,
+        funder: str | None = None,
+        **extra: Any,
+    ) -> list[dict]:
         if not date or amount <= 1 or date > limit:
             return []
-        row = {"date": date, **base, "amount": -_r2(amount), "basis": basis}
+        # The row's own fundedBy may follow this statement's plans; an event
+        # the plans do not cover is paid from the card's default account.
+        funder = funder or default_funder
+        if funder:
+            short = funder.split(":")[-1]
+            funded = names.display(funder) if names else short
+        else:
+            short, funded = c.get("fundedBy"), c.get("fundedByName")
+        row = {
+            "date": date,
+            "label": c["displayName"],
+            "note": f"Card payment from {funded}" if funded else "Card payment",
+            "kind": "card",
+            "_paycheck": False,
+            "account": c["account"],
+            "fundedBy": short or None,
+            "fundedByName": funded or None,
+            "amount": -_r2(amount),
+            "basis": basis,
+        }
         return [{**row, **extra}]
+
+    def payment(
+        date: str | None,
+        amount: float,
+        basis: str,
+        statement_id: str | None,
+        net_paid: bool = True,
+        **extra: Any,
+    ) -> list[dict]:
+        """``amount`` due on ``date``, split across the statement's plans.
+        ``net_paid`` takes plans already paid off it (an open statement's
+        remaining amount has had them taken off already)."""
+        plans = _plans_for(card_plans or {}, c["account"], statement_id, date)
+        left = Decimal(str(amount))
+        if net_paid:
+            left -= _paid_total(plans)
+        if not plans:
+            return event(date, float(left), basis, **extra)
+        out: list[dict] = []
+        for plan in plans:
+            if plan["paid"] or left <= 1:
+                continue
+            part = min(_plan_amount(plan), left)
+            when = max(str(plan["date"]), asof_iso)
+            out += event(when, float(part), basis, plan["account"], **extra)
+            left -= part
+        return out
 
     plan = (expected or {}).get(c["account"])
     plan = plan if isinstance(plan, dict) else {}
@@ -1147,22 +1310,31 @@ def _card_events(
     remaining = c.get("statementRemaining")
     if remaining is None:
         if usable:
-            return event(
+            return payment(
                 plan_due,
                 estimate if estimate is not None else c["value"],
                 "expected",
+                plan_id,
                 statementId=plan_id,
             )
-        return event(c["due"], c["value"], "balance")
+        return payment(c["due"], c["value"], "balance", None)
 
     billed = min(remaining, c["value"])
-    out = event(c["due"], billed, "statement", statementId=c["statementId"])
+    out = payment(
+        c["due"],
+        billed,
+        "statement",
+        c["statementId"],
+        net_paid=False,
+        statementId=c["statementId"],
+    )
     rest = c["value"] - max(billed, 0.0)
     if usable:
-        out += event(
+        out += payment(
             plan_due,
             estimate if estimate is not None else rest,
             "expected",
+            plan_id,
             statementId=plan_id,
         )
     elif c["due"]:
@@ -1184,6 +1356,8 @@ def _build_events(
     asof: dt.date,
     contributions: list[dict] | None = None,
     expected: dict | None = None,
+    card_plans: dict[str, list[dict]] | None = None,
+    cc_cards: dict | None = None,
 ) -> tuple[list[dict], dict | None]:
     """Dated cash events through the horizon, with the running cash balance."""
     out: list[dict] = []
@@ -1240,7 +1414,8 @@ def _build_events(
         out.append(e)
     limit = horizon.isoformat()
     for c in cards:
-        out += _card_events(c, asof, limit, expected)
+        default = (cc_cards or {}).get(c["account"], {}).get("fundingAccount")
+        out += _card_events(c, asof, limit, expected, card_plans, names, default)
     for k in key_dates:
         if k["date"] <= limit:
             out.append({**k, "amount": 0.0, "kind": "info", "_paycheck": False})
@@ -1296,6 +1471,7 @@ def build_snapshot(
     statements: dict | None = None,
     meta: dict | None = None,
     expected: dict | None = None,
+    card_plans: list[dict] | None = None,
     logos: LogoResolver | None = None,
     logo_token: str | None = None,
     clean_payees: bool = True,
@@ -1313,6 +1489,9 @@ def build_snapshot(
     ``expected`` is the planner's not-yet-closed statements
     (``journal/plan/cc-expected.json``, keyed by account): a card's charges
     since its last statement fall due on that record's date.
+    ``card_plans`` is the planner's live card-payment plans
+    (``journal/plan/plans.jsonl`` saves tagged ``ccCardRef``): a statement
+    with plans is paid on their dates from their banks.
     ``logos`` resolves a transaction to a merchant logo domain; without it no
     row carries ``logoDomain``. ``logo_token`` is the logo service's
     publishable token: with it the snapshot's ``logos.urlTemplate`` is set.
@@ -1326,7 +1505,10 @@ def build_snapshot(
     names = _Names(cfg)
     labels = cfg.payees if clean_payees else None
     a = cfg.accounts
-    groups = _build_accounts(led, cfg, names, cc_cards or {}, statements)
+    plans_by_card = _index_card_plans(led, card_plans)
+    groups = _build_accounts(
+        led, cfg, names, cc_cards or {}, statements, plans_by_card
+    )
     horizon = cfg.horizon(asof)
 
     series = [
@@ -1410,6 +1592,8 @@ def build_snapshot(
         asof,
         _salary_contributions(led, cfg, names, horizon),
         expected,
+        plans_by_card,
+        cc_cards,
     )
     low = min(events, key=lambda e: e["balance"], default=None)
     if low is None or low["balance"] >= cash_total:
