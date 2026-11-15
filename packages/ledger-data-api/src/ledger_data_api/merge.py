@@ -486,15 +486,20 @@ def annotate_past_state(
     because nothing else is within the window).
 
     Today's plans are included so the row-build step can hide ones
-    already realized by a same-day cleared bean txn.
+    already realized by a same-day cleared bean txn. So are plans up to
+    `day_tolerance` days in the future: a payment that posts (or shows as
+    bank-pending) a day before its planned date realizes the plan early.
+    Such a future plan is only ever marked `realized`; with no match it
+    gets no status, since it isn't due yet.
     """
     status: dict[str, str] = {}
     claim: dict[str, tuple[tuple[str, str], Decimal]] = {}
     # Make a mutable copy so we can pop matched cleared amounts
     available = {k: list(v) for k, v in cleared_amounts_by_date_account.items()}
     today_iso = today.isoformat()
+    horizon_iso = (today + datetime.timedelta(days=day_tolerance)).isoformat()
     past_plans = sorted(
-        [p for p in plans_for_account if p.date <= today_iso], key=lambda p: p.date
+        [p for p in plans_for_account if p.date <= horizon_iso], key=lambda p: p.date
     )
 
     for p in past_plans:
@@ -515,7 +520,8 @@ def annotate_past_state(
                     best_key = (key, amt)
 
         if best_key is None:
-            status[p.id] = "unrealized"
+            if p.date <= today_iso:
+                status[p.id] = "unrealized"
             continue
 
         (matched_key, matched_amt) = best_key
@@ -914,14 +920,14 @@ def build_grid_response(
             # plan is confusing — feels like the math has already happened.
             balances[account] = _decimal_str(bean_balance + plan_running[account])
 
-            # A plan that matched a cleared bean txn (same account, ±1 day, ±$0.50)
-            # is hidden entirely — the cleared txn already represents it. Skipping
+            # A plan that matched a cleared bean txn (same account, within the
+            # grace window, ±$0.50) is hidden entirely, even when the plan is
+            # dated after today: the cleared txn already represents it. Skipping
             # it here also keeps `plan_running` from double-counting the amount on
             # top of the bean balance.
             def _is_realized(ent: GridEntry) -> bool:
                 return (
-                    cur <= today
-                    and ent.get("kind") == "plan"
+                    ent.get("kind") == "plan"
                     and past_status.get(ent.get("id")) == "realized"
                 )
 
