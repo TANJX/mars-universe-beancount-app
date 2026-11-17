@@ -8,9 +8,13 @@
 #
 # Default output: deploy/dist/mars-universe-beancount-images.tar.gz
 #
-# After upload, on the NAS run:
+# After upload, log in to the NAS with ssh and run these one at a time
+# (not as a single `ssh -t` command: the sudo prompt fails inside the pipe):
+#   cd /volume1/docker
+#   sudo -v
 #   gunzip < mars-universe-beancount-images.tar.gz | sudo docker load
-#   cd /volume1/docker/mars-universe-beancount-app/deploy && sudo docker-compose up -d
+#   cd mars-universe-beancount-app/deploy
+#   sudo docker-compose up -d
 
 set -euo pipefail
 
@@ -33,6 +37,10 @@ docker save "${IMAGES[@]}" | gzip > "$OUTPUT"
 
 SIZE=$(du -h "$OUTPUT" | cut -f1)
 echo "==> Done. Wrote ${OUTPUT} (${SIZE})."
-echo "    Upload to the NAS, then run:"
+echo "    Upload:  scp -O deploy/${OUTPUT} <nas-user>@<nas-host>:/volume1/docker/"
+echo "    Then ssh in to the NAS and run, one at a time:"
+echo "      cd /volume1/docker"
+echo "      sudo -v"
 echo "      gunzip < $(basename "$OUTPUT") | sudo docker load"
-echo "      cd /volume1/docker/mars-universe-beancount-app/deploy && sudo docker-compose up -d"
+echo "      cd mars-universe-beancount-app/deploy"
+echo "      sudo docker-compose up -d"

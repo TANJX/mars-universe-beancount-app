@@ -89,37 +89,45 @@ Specific instructions for the production target — Synology DSM 7.2, Intel J402
 
 ### Per-deploy: build on laptop, ship to NAS
 
-From the monorepo on the laptop:
+From the monorepo on the laptop (Docker must be running):
 
 ```sh
-NAS_USER=<your-synology-user> NAS_HOST=172.30.40.192 \
-  deploy/scripts/ship.sh
+deploy/scripts/ship.sh
+scp -O deploy/dist/mars-universe-beancount-images.tar.gz <nas-user>@172.30.40.192:/volume1/docker/
 ```
 
-That script:
-1. Cross-builds `web`/`fava`/`gitsync` for `linux/amd64` on the laptop.
-2. `docker save` the three images, gzipped and streamed straight into `docker load` on the NAS over SSH. No intermediate file.
+`ship.sh` cross-builds `web`/`fava`/`gitsync` for `linux/amd64` and writes them to a gzipped tarball. `scp` copies it to the NAS.
 
 ### Bringing it up on the NAS
 
+Log in first, then run the steps one at a time. Don't chain them into a single `ssh -t '...'` command: the `sudo` password prompt inside the `gunzip | sudo docker load` pipe fails that way.
+
 ```sh
-cd /volume1/docker/mars-universe-beancount-app/deploy
-sudo docker-compose up -d
-sudo docker-compose logs -f
+ssh <nas-user>@172.30.40.192
 ```
+
+```sh
+cd /volume1/docker
+sudo -v
+gunzip < mars-universe-beancount-images.tar.gz | sudo docker load
+cd mars-universe-beancount-app/deploy
+sudo docker-compose up -d
+```
+
+`sudo -v` caches the password up front so it isn't prompted mid-pipe. `sudo docker-compose logs -f` follows startup.
 
 You should see `gitsync` clone → `fava` start (after healthcheck passes) → `web` start. Then from any ZeroTier-connected device:
 
-- `http://172.30.40.192:3000/` — the planner
+- `http://172.30.40.192:8888/`: the planner
 
 ### Updates
 
 | What changed | Where to do it |
 | --- | --- |
 | Ledger commit pushed to GitHub | Nothing — `gitsync` picks it up within `GIT_PULL_INTERVAL` |
-| `apps/web/`, `packages/ledger-data-api/`, fava SHA bump | Re-run `ship.sh` on laptop, then `sudo docker-compose up -d` on NAS |
+| `apps/web/`, `packages/ledger-data-api/`, fava SHA bump | Re-run `ship.sh` and `scp` on laptop, then the NAS steps above |
 | `deploy/.env` | Edit on NAS, `sudo docker-compose up -d` to apply |
-| `docker-compose.yml` | `git pull` on NAS in the project dir, then `sudo docker-compose up -d` |
+| `docker-compose.yml` | The NAS has no git: `scp -O` the file to `/volume1/docker/mars-universe-beancount-app/deploy/`, then `sudo docker-compose up -d` |
 
 ### NAS-specific gotchas
 
