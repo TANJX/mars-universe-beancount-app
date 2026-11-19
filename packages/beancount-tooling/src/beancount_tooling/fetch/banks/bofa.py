@@ -25,7 +25,7 @@ import calendar
 import re
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -218,14 +218,27 @@ def account_link_pattern(digits: str | None) -> re.Pattern[str]:
 # newest closing date in the combobox, and the pair is refused when the due
 # date does not fall DUE_AFTER_CLOSE_DAYS after that close (the two can
 # disagree for a day or two around a statement close).
+#
+# Once a payment posts against the statement, the panel relabels both lines
+# (confirmed on a paid card) and shows what is left, not the statement:
+#   - text: "Remaining Min Payment Due:" ... - text: "$0.00 due Jun 15 Remaining Statement Balance:"
+# The statement balance is then read from the current period's first row,
+# which BofA dates the day after the close:
+#   - row "Beginning balance as of 05/21/2030 $1,234.56"
 STATEMENT_BALANCE_TEXT = re.compile(
-    r"Statement Balance:.*?(?P<neg>-)?\$(?P<amount>\d[\d,]*\.\d{2})",
+    r"(?P<remaining>Remaining\s+)?Statement Balance:.*?"
+    r"(?P<neg>-)?\$(?P<amount>\d[\d,]*\.\d{2})",
     re.IGNORECASE | re.DOTALL,
 )
 MIN_PAYMENT_TEXT = re.compile(
-    r"Total Min Payment Due:.*?(?P<neg>-)?\$(?P<amount>\d[\d,]*\.\d{2})"
+    r"(?:Total|Remaining) Min Payment Due:.*?(?P<neg>-)?\$(?P<amount>\d[\d,]*\.\d{2})"
     r"(?:\s+due\s+(?P<month>[A-Za-z]{3,9})\.?\s+(?P<day>\d{1,2}))?",
     re.IGNORECASE | re.DOTALL,
+)
+BEGINNING_BALANCE_ROW = re.compile(
+    r'row "Beginning balance as of (?P<month>\d{2})/(?P<day>\d{2})/(?P<year>\d{4}) '
+    r'(?P<neg>-)?\$(?P<amount>\d[\d,]*\.\d{2})"',
+    re.IGNORECASE,
 )
 CLOSING_DATE_OPTION = re.compile(
     r'option "(?P<month>'
@@ -247,7 +260,12 @@ def parse_card_statement(snapshot: str) -> StatementInfo | None:
     date (period combobox), statement balance, and the due date and minimum
     payment when shown. None when the page shows no closed statement or no
     statement balance. ValueError when the due date does not belong to that
-    closing date."""
+    closing date.
+
+    After a payment the panel shows "Remaining" amounts, which are not facts
+    about the statement: the balance then comes from the current period's
+    beginning-balance row (None when that row is missing or belongs to another
+    close), and the minimum is left unread."""
     closings = []
     for m in CLOSING_DATE_OPTION.finditer(snapshot):
         names = [n.lower() for n in calendar.month_name]
@@ -261,6 +279,11 @@ def parse_card_statement(snapshot: str) -> StatementInfo | None:
     if not closings or not balance:
         return None
     closing = max(closings)
+    remaining = bool(balance["remaining"])
+    if remaining:
+        balance = _beginning_balance_after(snapshot, closing)
+        if balance is None:
+            return None
     amount = Decimal(balance["amount"].replace(",", ""))
     info = StatementInfo(closing, -amount if balance["neg"] else amount)
 
@@ -285,8 +308,20 @@ def parse_card_statement(snapshot: str) -> StatementInfo | None:
                 f"due {minimum['month']} {minimum['day']} does not follow the "
                 f"statement closed {closing}"
             )
-    min_amount = Decimal(minimum["amount"].replace(",", ""))
+    min_amount = None if remaining else Decimal(minimum["amount"].replace(",", ""))
     return StatementInfo(closing, info.statement_balance, due, min_amount)
+
+
+def _beginning_balance_after(snapshot: str, closing: date) -> re.Match[str] | None:
+    """The beginning-balance row dated the day after `closing`, or None."""
+    for m in BEGINNING_BALANCE_ROW.finditer(snapshot):
+        try:
+            when = date(int(m["year"]), int(m["month"]), int(m["day"]))
+        except ValueError:
+            continue
+        if when == closing + timedelta(days=1):
+            return m
+    return None
 
 
 def parse_money(text: str) -> Decimal | None:

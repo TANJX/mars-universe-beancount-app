@@ -129,6 +129,24 @@ def test_record_conflict_does_not_write_and_reports_diff(tmp_path):
     assert _file(tmp_path).read_bytes() == before
 
 
+def test_record_read_without_minimum_or_due_matches_the_record(tmp_path):
+    # A paid statement stops showing its minimum and due date on the site.
+    _record(tmp_path)
+    before = _file(tmp_path).read_bytes()
+    paid = StatementInfo(date(2030, 5, 20), Decimal("1234.56"))
+    result = _record(tmp_path, paid)
+    assert (result.status, result.written) == ("unchanged", False)
+    assert _file(tmp_path).read_bytes() == before
+    # A balance that differs is still a conflict.
+    result = _record(tmp_path, StatementInfo(date(2030, 5, 20), Decimal("0.00")))
+    assert result.status == "conflict"
+    assert result.notes == ("statementBalance 1234.56 on file, 0.00 read",)
+    # A typed correction that leaves a fact out still counts it as a change.
+    result = _record(tmp_path, paid, source="manual", allow_correction=True)
+    assert result.status == "corrected"
+    assert "minimumPayment 40.00 on file, none read" in result.notes
+
+
 def test_fetch_read_does_not_reinstate_voided_statement(tmp_path):
     _record(tmp_path, _info())
     billing.void_statement(tmp_path, CARD, "2030-05-20")

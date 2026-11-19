@@ -384,39 +384,44 @@ def _iso(value: date | None) -> str | None:
     return None if value is None else value.isoformat()
 
 
-def _differences(stmt: Statement, info: StatementInfo) -> list[str]:
+def _differences(
+    stmt: Statement, info: StatementInfo, *, unread_ok: bool = False
+) -> list[str]:
     out = []
     pairs = (
         ("statementBalance", stmt.statementBalance, _money(info.statement_balance)),
         ("minimumPayment", stmt.minimumPayment, _money(info.minimum_payment)),
+        ("dueDate", stmt.dueDate, _iso(info.due_date)),
     )
     for name, on_file, read in pairs:
-        same = (
-            on_file is None and read is None
-            if on_file is None or read is None
-            else Decimal(on_file) == Decimal(read)
-        )
+        if read is None and unread_ok:
+            continue  # not shown on the site this time: says nothing about the record
+        if on_file is None or read is None:
+            same = on_file is None and read is None
+        elif name == "dueDate":
+            same = on_file == read
+        else:
+            same = Decimal(on_file) == Decimal(read)
         if not same:
             out.append(f"{name} {on_file or 'none'} on file, {read or 'none'} read")
-    if stmt.dueDate != _iso(info.due_date):
-        out.append(
-            f"dueDate {stmt.dueDate or 'none'} on file, "
-            f"{_iso(info.due_date) or 'none'} read"
-        )
     return out
 
 
-def same_facts(stmt: Statement, info: StatementInfo) -> bool:
+def same_facts(stmt: Statement, info: StatementInfo, *, unread_ok: bool = False) -> bool:
     """Whether `info` restates `stmt`: Decimal equality on the balance and the
     minimum (to the cent), ISO equality on the due date. source and capturedAt
-    are ignored."""
-    return not _differences(stmt, info)
+    are ignored. `unread_ok`: a fact `info` leaves out (None) is not a
+    difference; a site read uses it, since a paid statement stops showing its
+    minimum and due date."""
+    return not _differences(stmt, info, unread_ok=unread_ok)
 
 
-def diff_facts(stmt: Statement, info: StatementInfo) -> list[str]:
+def diff_facts(
+    stmt: Statement, info: StatementInfo, *, unread_ok: bool = False
+) -> list[str]:
     """One line per differing fact, e.g.
     "statementBalance 1200.00 on file, 1234.56 read"."""
-    return _differences(stmt, info)
+    return _differences(stmt, info, unread_ok=unread_ok)
 
 
 @dataclass(frozen=True)
@@ -479,7 +484,8 @@ def record_statement(
     """Record a closed statement, keeping closed statements immutable.
 
     No record for the id: append ("appended"). An identical record: nothing
-    ("unchanged"). A different record: nothing, and the difference is reported
+    ("unchanged"); without `allow_correction`, a fact the read leaves out
+    (None minimum or due date) counts as identical. A different record: nothing, and the difference is reported
     ("conflict"), unless `allow_correction` (the terminal prompt), which
     appends so the last line wins ("corrected"). A guard failure never writes
     ("rejected"). A record the owner voided is not brought back by a plain
@@ -498,10 +504,10 @@ def record_statement(
         if not allow_correction and sid in voided_ids(statements_dir, account):
             return RecordResult("voided", sid, notes=("voided on file, not written",))
         status = "appended"
-    elif same_facts(current, info):
+    elif same_facts(current, info, unread_ok=not allow_correction):
         return RecordResult("unchanged", sid)
     else:
-        notes = diff_facts(current, info) + notes
+        notes = diff_facts(current, info, unread_ok=not allow_correction) + notes
         if not allow_correction:
             return RecordResult("conflict", sid, notes=tuple(notes))
         status = "corrected"

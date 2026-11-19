@@ -412,3 +412,35 @@ def test_parse_card_statement_refuses_a_due_date_from_another_statement():
     page = CARD_PAGE.replace("May 20, 2030", "June 20, 2030")
     with pytest.raises(ValueError, match="does not follow"):
         bofa.parse_card_statement(page)
+
+
+# After a payment the panel shows what is left ("Remaining ..."), and the
+# statement balance is the current period's beginning-balance row.
+PAID_CARD_PAGE = (
+    CARD_PAGE.replace("Total Min Payment Due:", "Remaining Min Payment Due:")
+    .replace("$35.00 due Jun 15 Statement Balance:", "$0.00 due Jun 15 Remaining Statement Balance:")
+    .replace('"Statement Balance: layer"', '"Remaining Statement Balance: layer"')
+    .replace('img "Statement Balance:"', 'img "Remaining Statement Balance:"')
+    .replace("- text: $1,234.56", "- text: $0.00")
+    + """- table "Posted Transactions":
+  - rowgroup:
+    - row "Beginning balance as of 05/21/2030 $1,234.56":
+      - cell "Beginning balance as of 05/21/2030"
+      - cell "$1,234.56"
+"""
+)
+
+
+def test_parse_card_statement_paid_reads_beginning_balance_not_remaining():
+    assert bofa.parse_card_statement(PAID_CARD_PAGE) == StatementInfo(
+        date(2030, 5, 20), Decimal("1234.56"), date(2030, 6, 15), None
+    )
+
+
+def test_parse_card_statement_paid_without_matching_beginning_balance():
+    # No row for the day after the close (empty period, or another statement's
+    # row): the balance is unknown, so nothing is read.
+    other = PAID_CARD_PAGE.replace("05/21/2030", "04/21/2030")
+    assert bofa.parse_card_statement(other) is None
+    empty = PAID_CARD_PAGE.split('- table "Posted Transactions"')[0]
+    assert bofa.parse_card_statement(empty) is None
