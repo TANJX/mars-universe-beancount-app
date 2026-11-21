@@ -11,6 +11,9 @@ const FAVA_LEDGER_SLUG = process.env.FAVA_LEDGER_SLUG ?? "acme-demo"
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  experimental: {
+    agentUpgrade: "security",
+  },
   images: {
     remotePatterns: [
       {
