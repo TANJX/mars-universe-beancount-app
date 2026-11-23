@@ -6,7 +6,6 @@ from datetime import date
 import pytest
 from beancount import loader
 from beancount.parser import printer
-
 from beancount_tooling.fetch.banks.robinhood import COLUMNS, write_rows
 from beancount_tooling.importer.robinhood_investment import RobinhoodInvestmentImporter
 
@@ -277,3 +276,66 @@ def test_check_file_counts_rows_even_before_cutover(tmp_path):
     bad = write(tmp_path, "Roth-IRA", [row(Id="", Date="2020-01-01", Type="interest")])
     with pytest.raises(ValueError):
         importer().check_file(bad)
+
+
+CORE_LEDGER = (
+    LEDGER
+    + """
+2020-01-01 open Assets:Investment:Demo:Core:USD USD
+2020-01-01 open Assets:Investment:Demo:Core:AAA AAA
+2020-01-01 open Equity:FIXME
+"""
+)
+
+
+def test_asset_transfer_moves_lots_fifo_with_cost(tmp_path):
+    entries, errors, _ = loader.load_string(textwrap.dedent(CORE_LEDGER))
+    assert not errors
+    numbers = {**NUMBERS, "333": "Core"}
+    imp = lambda: RobinhoodInvestmentImporter(
+        "Demo", account_numbers=numbers, cutover=date(2026, 9, 1)
+    )
+    out_row = row(
+        Id="at-1:ins-a",
+        Date="2026-11-23",
+        Type="asset_transfer_out",
+        Symbol="AAA",
+        Quantity="2",
+        Counterparty="333",
+    )
+    in_row = row(
+        Id="at-1:ins-a",
+        Account="333",
+        Date="2026-11-23",
+        Type="asset_transfer_in",
+        Symbol="AAA",
+        Quantity="2",
+        Counterparty="111",
+    )
+    assert imp().extract(write(tmp_path, "Brokerage", [out_row]), entries) == []
+    (entry,) = imp().extract(write(tmp_path, "Core", [in_row]), entries)
+    assert entry.flag == "*"
+    moved = [
+        (p.account.rsplit(":", 2)[-2], p.units.number, p.cost.number_per, p.cost.date)
+        for p in entry.postings
+    ]
+    assert moved == [
+        ("Core", 1.5, 100, date(2026, 1, 5)),
+        ("Brokerage", -1.5, 100, None),
+        ("Core", 0.5, 120, date(2026, 2, 5)),
+        ("Brokerage", -0.5, 120, None),
+    ]
+    check_loads(CORE_LEDGER, [entry])
+
+
+def test_asset_transfer_with_untracked_account_is_flagged(tmp_path, ledger):
+    in_row = row(
+        Id="at-9:ins-a",
+        Date="2026-11-23",
+        Type="asset_transfer_in",
+        Symbol="AAA",
+        Quantity="1",
+        Counterparty="999",
+    )
+    (entry,) = importer().extract(write(tmp_path, "Brokerage", [in_row]), ledger)
+    assert entry.flag == "!" and "untracked" in entry.meta["fixme"]

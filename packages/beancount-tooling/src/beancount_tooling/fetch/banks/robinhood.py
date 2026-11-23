@@ -486,6 +486,77 @@ def rows_from_transfers(
     return rows
 
 
+def rows_from_asset_transfers(
+    records: Iterable[dict], account: str, instruments: dict[str, Instrument]
+) -> list[dict[str, str]]:
+    """Internal asset transfers between the customer's own Robinhood accounts.
+
+    One record can move cash and several positions. Cash becomes a
+    transfer_in/transfer_out row (so the importer books it like any internal
+    cash transfer); each position becomes an asset_transfer_in/out row with
+    the share count. Ids are "<record id>:cash" and "<record id>:<instrument
+    id>", so a record re-read later merges onto the same rows.
+    """
+    rows = []
+    for r in records:
+        if r.get("state") != "SUCCEEDED":
+            continue
+        source = r.get("sourceRhsAccountNumber") or r.get("sourceRhfAccountNumber")
+        dest = r.get("destinationRhsAccountNumber") or r.get(
+            "destinationRhfAccountNumber"
+        )
+        if account not in (source, dest):
+            continue
+        incoming = dest == account
+        other = source if incoming else dest
+        day, time = _when(
+            r.get("completedAt") or r.get("initiatedAt"), r.get("recordDate")
+        )
+        detail = _detail(r)
+        cash = _dec(r.get("transferredCashAmount") or r.get("cashAmount"))
+        if cash > 0:
+            rows.append(
+                _row(
+                    Id=f"{r['id']}:cash",
+                    Account=account,
+                    Date=day,
+                    Time=time,
+                    Type="transfer_in" if incoming else "transfer_out",
+                    Amount=_money(cash if incoming else -cash),
+                    Counterparty=other,
+                    Description=f"Asset transfer: cash from {source} to {dest}",
+                    Detail=detail,
+                )
+            )
+        positions = r.get("equityPositionResults") or r.get("equityPositions") or []
+        for p in positions:
+            quantity = _dec(p.get("transferredQuantity") or p.get("quantity"))
+            if quantity <= 0:
+                continue
+            ins = instruments.get(p.get("instrumentId", ""))
+            symbol = ins.symbol if ins else p.get("instrumentId", "")
+            rows.append(
+                _row(
+                    Id=f"{r['id']}:{p.get('instrumentId', '')}",
+                    Account=account,
+                    Date=day,
+                    Time=time,
+                    Type="asset_transfer_in" if incoming else "asset_transfer_out",
+                    Symbol=symbol,
+                    Name=ins.name if ins else "",
+                    Quantity=_num(quantity),
+                    Amount=_money(Decimal(0)),
+                    Counterparty=other,
+                    Description=(
+                        f"Asset transfer: {_num(quantity)} {symbol} "
+                        f"from {source} to {dest}"
+                    ),
+                    Detail=detail,
+                )
+            )
+    return rows
+
+
 def rows_from_other(
     records: Iterable[dict], account: str, kind: str, description: str
 ) -> list[dict[str, str]]:
@@ -792,6 +863,28 @@ class RobinhoodFetcher(Fetcher):
             self._shared[name] = self._paged(page, url, stop=stop)
         return self._shared[name]
 
+    def _asset_transfers(self, page: Page) -> list[dict]:
+        """Internal asset transfers (all accounts), read once per run. The
+        endpoint pages with nextCursor, not `next`."""
+        if "asset_transfers" not in self._shared:
+            records: list[dict] = []
+            cursor = ""
+            seen: set[str] = set()
+            for _ in range(MAX_PAGES):
+                query: dict[str, str | int] = {"pageSize": 50}
+                if cursor:
+                    query["cursor"] = cursor
+                body = self._get(
+                    page, f"{API}/nimbus/v1/asset_transfers?{urlencode(query)}"
+                )
+                records += body.get("assetTransferRecord") or []
+                cursor = body.get("nextCursor") or ""
+                if not cursor or cursor in seen:
+                    break
+                seen.add(cursor)
+            self._shared["asset_transfers"] = records
+        return self._shared["asset_transfers"]
+
     # -- fetch --------------------------------------------------------------
 
     def fetch(
@@ -867,12 +960,20 @@ class RobinhoodFetcher(Fetcher):
                 lambda items: False,
             )
 
+        with step("read asset transfers"):
+            asset_transfers = self._asset_transfers(page)
+
         with step("read instruments"):
             self._resolve_instruments(
                 page,
                 [o.get("instrument_id") or _url_id(o.get("instrument")) for o in orders]
                 + [_url_id(d.get("instrument")) for d in dividends]
-                + [p.get("instrument_id", "") for p in loans],
+                + [p.get("instrument_id", "") for p in loans]
+                + [
+                    p.get("instrumentId", "")
+                    for r in asset_transfers
+                    for p in (r.get("equityPositionResults") or [])
+                ],
             )
 
         mine = [
@@ -916,6 +1017,7 @@ class RobinhoodFetcher(Fetcher):
             + rows_from_margin_interest(margin, number)
             + rows_from_deposit_boosts(boosts, number)
             + rows_from_transfers(mine, number, bank_names, tax_years)
+            + rows_from_asset_transfers(asset_transfers, number, self._instruments)
             + rows_from_other(adr_fees, number, "adr_fee", "ADR fee")
             + rows_from_other(splits, number, "split", "Stock split")
         )

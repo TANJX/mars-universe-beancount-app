@@ -117,6 +117,8 @@ class RobinhoodInvestmentImporter(Importer):
             self._rows(filepath), key=lambda r: (r["Date"], r["Time"], r["Id"])
         )
         entries = []
+        self._existing = existing_entries or []
+        self._other_lots: dict[str, LotBook] = {}
         for index, row in enumerate(rows):
             day = date.fromisoformat(row["Date"])
             if self.cutover is None or day < self.cutover:
@@ -192,6 +194,8 @@ class RobinhoodInvestmentImporter(Importer):
             return ok, text, [_posting(cash, _usd(amt)), _posting(simple[kind])], {}
         if kind in ("transfer_in", "transfer_out"):
             return self._transfer(row, day, leaf, root, rebate)
+        if kind in ("asset_transfer_in", "asset_transfer_out"):
+            return self._asset_transfer(row, root, lots)
         return (
             flags.FLAG_WARNING,
             text or f"Robinhood {kind}",
@@ -228,6 +232,93 @@ class RobinhoodInvestmentImporter(Importer):
             if row["TaxYear"] and row["TaxYear"] != str(day.year):
                 meta["tax-year"] = Decimal(row["TaxYear"])
         return flags.FLAG_OKAY, row["Description"], postings, meta
+
+    def _asset_transfer(self, row, root, lots):
+        """Shares moved in kind between the customer's own accounts.
+
+        Between two tracked accounts it is booked once, on the receiving file:
+        lots leave the source FIFO (Robinhood moves partial positions in FIFO
+        order) and arrive with the same cost and date, so no gain is booked.
+        A transfer to or from an untracked account is left for a human."""
+        symbol, quantity = row["Symbol"], _d(row["Quantity"])
+        other_leaf = self.account_numbers.get(row["Counterparty"])
+        incoming = row["Type"] == "asset_transfer_in"
+        if not incoming and other_leaf:
+            return None  # booked on the receiving account's file
+        own_stock = f"{root}:{symbol}"
+        if not incoming or not other_leaf:
+            # Untracked counterparty: shares leave or arrive with no known lots.
+            book = lots
+            stock = own_stock
+            sign = Decimal(-1) if not incoming else Decimal(1)
+            meta = {"fixme": "asset transfer with an untracked account"}
+            if incoming:
+                postings = [
+                    _posting(
+                        stock,
+                        amount.Amount(quantity, symbol),
+                        CostSpec(Decimal(0), None, USD, None, None, False),
+                    ),
+                    _posting("Equity:FIXME"),
+                ]
+                return flags.FLAG_WARNING, row["Description"], postings, meta
+            relieved, short = book.relieve_fifo(stock, quantity)
+            postings = [
+                _posting(
+                    stock,
+                    amount.Amount(sign * q, symbol),
+                    CostSpec(
+                        cost.number, None, USD, cost.date if show else None, None, False
+                    ),
+                )
+                for q, cost, show in relieved
+            ]
+            postings.append(_posting("Equity:FIXME"))
+            if short > 0:
+                meta["fixme"] += f"; ledger lots short by {short} {symbol}"
+            return flags.FLAG_WARNING, row["Description"], postings, meta
+
+        other_root = self._root(other_leaf)
+        source_book = self._other_lots.get(other_root)
+        if source_book is None:
+            source_book = LotBook(self._existing, other_root)
+            self._other_lots[other_root] = source_book
+        source_stock = f"{other_root}:{symbol}"
+        relieved, short = source_book.relieve_fifo(source_stock, quantity)
+        postings = []
+        for q, cost, show in relieved:
+            postings.append(
+                _posting(
+                    own_stock,
+                    amount.Amount(q, symbol),
+                    CostSpec(cost.number, None, USD, cost.date, None, False),
+                )
+            )
+            postings.append(
+                _posting(
+                    source_stock,
+                    amount.Amount(-q, symbol),
+                    CostSpec(
+                        cost.number, None, USD, cost.date if show else None, None, False
+                    ),
+                )
+            )
+            lots.add_cost(own_stock, q, cost)
+        meta = {}
+        flag = flags.FLAG_OKAY
+        if short > 0:
+            flag = flags.FLAG_WARNING
+            meta["fixme"] = f"source ledger lots short by {short} {symbol}"
+        if not postings:
+            postings = [
+                _posting(
+                    own_stock,
+                    amount.Amount(quantity, symbol),
+                    CostSpec(Decimal(0), None, USD, None, None, False),
+                ),
+                _posting("Equity:FIXME"),
+            ]
+        return flag, row["Description"], postings, meta
 
     def _sell(self, row, day, root, lots):
         symbol, quantity, price = row["Symbol"], _d(row["Quantity"]), _d(row["Price"])
@@ -280,6 +371,12 @@ class LotBook:
 
     def add(self, account: str, quantity: Decimal, price: Decimal, day: date) -> None:
         cost = Cost(price, USD, day, None)
+        self.inventories.setdefault(account, Inventory()).add_position(
+            Position(amount.Amount(quantity, account.rsplit(":", 1)[-1]), cost)
+        )
+
+    def add_cost(self, account: str, quantity: Decimal, cost: Cost) -> None:
+        """A lot that keeps its original cost and date (in-kind transfer)."""
         self.inventories.setdefault(account, Inventory()).add_position(
             Position(amount.Amount(quantity, account.rsplit(":", 1)[-1]), cost)
         )

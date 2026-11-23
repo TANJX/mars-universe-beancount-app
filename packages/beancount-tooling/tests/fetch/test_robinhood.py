@@ -4,7 +4,6 @@ records are synthetic, shaped like the History page's API responses."""
 from datetime import date
 
 import pytest
-
 from beancount_tooling.fetch.banks import robinhood as rh
 from beancount_tooling.fetch.config import parse_config
 
@@ -328,3 +327,52 @@ def test_investment_account_config():
         date(2026, 1, 1),
     )
     assert second.history_start is None
+
+
+def asset_transfer(**over):
+    r = {
+        "id": "at-1",
+        "sourceRhsAccountNumber": ACCT,
+        "destinationRhsAccountNumber": "333",
+        "state": "SUCCEEDED",
+        "transferType": "INDIVIDUAL_TO_INDIVIDUAL",
+        "cashAmount": "500.00",
+        "transferredCashAmount": "500.00",
+        "recordDate": "2026-11-23T00:00:00Z",
+        "initiatedAt": "2026-11-23T14:19:31Z",
+        "completedAt": "2026-11-23T14:19:32Z",
+        "equityPositionResults": [
+            {"instrumentId": "ins-a", "quantity": "9.3", "transferredQuantity": "9.3"},
+            {"instrumentId": "ins-b", "quantity": "4", "transferredQuantity": "4"},
+        ],
+    }
+    r.update(over)
+    return r
+
+
+def test_asset_transfers_rows_on_both_sides():
+    out = rh.rows_from_asset_transfers([asset_transfer()], ACCT, INST)
+    assert [
+        (r["Id"], r["Type"], r["Symbol"], r["Quantity"], r["Amount"]) for r in out
+    ] == [
+        ("at-1:cash", "transfer_out", "", "", "-500.00"),
+        ("at-1:ins-a", "asset_transfer_out", "AAA", "9.3", "0.00"),
+        ("at-1:ins-b", "asset_transfer_out", "BBB", "4", "0.00"),
+    ]
+    assert {r["Counterparty"] for r in out} == {"333"}
+    assert out[0]["Date"] == "2026-11-23" and out[0]["Time"] == "09:19:32"
+    into = rh.rows_from_asset_transfers([asset_transfer()], "333", INST)
+    assert [r["Type"] for r in into] == [
+        "transfer_in",
+        "asset_transfer_in",
+        "asset_transfer_in",
+    ]
+    assert into[0]["Amount"] == "500.00" and into[1]["Counterparty"] == ACCT
+
+
+def test_asset_transfers_skip_failed_others_and_empty_cash():
+    failed = asset_transfer(id="at-2", state="FAILED")
+    other = asset_transfer(id="at-3", sourceRhsAccountNumber="999")
+    no_cash = asset_transfer(id="at-4", cashAmount="0", transferredCashAmount="0")
+    rows = rh.rows_from_asset_transfers([failed, other, no_cash], ACCT, INST)
+    assert [r["Id"] for r in rows] == ["at-4:ins-a", "at-4:ins-b"]
