@@ -212,3 +212,77 @@
     @apply font-sans;
   }
 }
+
+/* ── App shell ────────────────────────────────────────────────────────────
+ * Desktop: the rail sits on a tinted canvas; panel + page share one raised
+ * card. Decided in docs/notes/2026-11-24-navigation-redesign.md. */
+:root {
+  /* sRGB-safe canvas; P3 screens get the full chroma below. */
+  --canvas: oklch(0.92 0.04 22);
+  /* Muted text on the canvas: 5.2:1 (the stock muted-foreground is 3.8:1). */
+  --canvas-muted: oklch(0.48 0.03 22);
+  --shell-inset: 8px;
+  --shell-radius: 12px;
+  --rail-w: 64px;
+  --panel-w: 240px;
+  --hairline: 1px;
+  --nav-hover: color-mix(in oklch, var(--foreground) 5%, transparent);
+  --nav-current: color-mix(in oklch, var(--foreground) 7%, transparent);
+  --flyout-bg: var(--popover);
+  --elev-card:
+    0 0 0 1px rgb(0 0 0 / 0.05), 0 1px 3px rgb(0 0 0 / 0.05),
+    0 4px 12px -4px rgb(0 0 0 / 0.06);
+  --elev-pill: 0 0 0 1px rgb(0 0 0 / 0.05), 0 1px 2px rgb(0 0 0 / 0.06);
+  --elev-flyout:
+    0 0 0 1px rgb(0 0 0 / 0.06), 0 2px 4px rgb(0 0 0 / 0.04),
+    0 12px 32px -8px rgb(0 0 0 / 0.16);
+}
+
+@media (color-gamut: p3) {
+  :root {
+    --canvas: oklch(0.92 0.052 22);
+  }
+}
+
+@media (min-resolution: 2dppx) {
+  :root {
+    --hairline: 0.5px;
+  }
+}
+
+/* Dark: the canvas keeps the brand hue as a deep wine, re-picked for the
+ * dark surface (not mirrored): 0.03 L below the card, in sRGB gamut. Depth
+ * shadows collapse to rings; the flyout follows the cool card surface
+ * (popover is warm in dark). */
+.dark {
+  --canvas: oklch(0.18 0.04 22);
+  /* Rail text on the dark canvas: 8.1:1. */
+  --canvas-muted: oklch(0.74 0.03 22);
+  --flyout-bg: var(--card);
+  --elev-card: 0 0 0 1px rgb(255 255 255 / 0.08);
+  --elev-pill: 0 0 0 1px rgb(255 255 255 / 0.1);
+  --elev-flyout:
+    0 0 0 1px rgb(255 255 255 / 0.1), 0 12px 32px -8px rgb(0 0 0 / 0.5);
+}
+
+/* Sidebar flyout: short ease-out enter from the rail side. The exit is an
+ * instant unmount, quieter than the enter. */
+@keyframes nav-flyout-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+}
+@keyframes nav-flyout-fade {
+  from {
+    opacity: 0;
+  }
+}
+.nav-flyout {
+  animation: nav-flyout-in 160ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-flyout {
+    animation-name: nav-flyout-fade;
+  }
+}

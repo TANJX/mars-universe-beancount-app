@@ -6,8 +6,8 @@
 // contribution meters in a single round trip, because the series needs the
 // server's price map anyway.
 //
-// Mobile is deliberately deferred — the mobile tab bar has no Portfolio entry
-// and this page renders its desktop layout at every width for now.
+// A mobile layout is deliberately deferred: the page is reachable from the
+// mobile switcher but renders its desktop layout at every width for now.
 
 import { AlertCircle } from "lucide-react"
 

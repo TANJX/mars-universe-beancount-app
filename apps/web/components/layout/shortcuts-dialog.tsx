@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { NAV_PAGES } from "@/components/layout/nav"
 import {
   Dialog,
   DialogContent,
@@ -27,17 +28,10 @@ interface ShortcutGroup {
 const SHORTCUTS: ShortcutGroup[] = [
   {
     heading: "Navigation",
-    items: [
-      { keys: ["g", "o"], description: "Go to Overview" },
-      { keys: ["g", "p"], description: "Go to Plan" },
-      { keys: ["g", "b"], description: "Go to Balances" },
-      { keys: ["g", "f"], description: "Go to Portfolio" },
-      { keys: ["g", "r"], description: "Go to FIRE" },
-      { keys: ["g", "u"], description: "Go to Runway" },
-      { keys: ["g", "i"], description: "Go to Income" },
-      { keys: ["g", "e"], description: "Go to Expenses" },
-      { keys: ["g", "j"], description: "Go to Journal" },
-    ],
+    items: NAV_PAGES.map((p) => ({
+      keys: ["g", p.leaderKey],
+      description: `Go to ${p.label}`,
+    })),
   },
   {
     heading: "Period",
@@ -57,7 +51,9 @@ const SHORTCUTS: ShortcutGroup[] = [
   },
   {
     heading: "View",
-    items: [{ keys: ["⌘", "B"], description: "Toggle sidebar" }],
+    items: [
+      { keys: ["⌘", "B"], description: "Show or hide the section panel" },
+    ],
   },
   {
     heading: "Help",

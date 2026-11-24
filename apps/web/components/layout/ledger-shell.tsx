@@ -6,14 +6,14 @@ import { AppSidebar } from "@/components/layout/app-sidebar"
 import { CommandPalette } from "@/components/layout/command-palette"
 import { DensityWrapper } from "@/components/layout/density-wrapper"
 import { GlobalKeys } from "@/components/layout/global-keys"
-import { MobileTabBar } from "@/components/layout/mobile-tab-bar"
+import { MobileNavHeader } from "@/components/layout/mobile-nav"
 import { Topbar } from "@/components/layout/topbar"
 import { ClientOnly } from "@/components/primitives/client-only"
-import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
+import { SidebarProvider } from "@/components/ui/sidebar"
 import { useChangedPoll } from "@/hooks/use-changed-poll"
 import { useIsMobile } from "@/hooks/use-mobile"
 
-// SSR + first paint show NoChromeShell (no sidebar, no tab bar). Once the
+// SSR + first paint show NoChromeShell (no sidebar, no nav header). Once the
 // client mounts we know the viewport class and swap to either MobileShell
 // or DesktopShell. Both share the flex-column wrapper so swapping chrome
 // in doesn't reflow the page body — avoids the desktop-shell flash on
@@ -50,13 +50,19 @@ function NoChromeShell({ children }: { children: React.ReactNode }) {
 }
 
 function MobileShell({ children }: { children: React.ReactNode }) {
+  // CommandPalette here too: the header's search button opens it.
   return (
-    <div className="flex h-svh flex-col overflow-hidden bg-background">
-      <main className="min-h-0 flex-1 overflow-auto">
-        <DensityWrapper>{children}</DensityWrapper>
-      </main>
-      <MobileTabBar />
-    </div>
+    <CommandPalette>
+      <div className="flex h-dvh flex-col overflow-hidden bg-background">
+        <MobileNavHeader />
+        <main
+          className="min-h-0 flex-1 overflow-auto overscroll-contain"
+          style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+        >
+          <DensityWrapper>{children}</DensityWrapper>
+        </main>
+      </div>
+    </CommandPalette>
   )
 }
 
@@ -92,13 +98,17 @@ function DesktopShell({ children }: { children: React.ReactNode }) {
       onOpenChange={onSidebarOpenChange}
     >
       <CommandPalette>
-        <AppSidebar />
-        <SidebarInset className="flex flex-col overflow-hidden">
-          <Topbar />
-          <main className="flex-1 overflow-auto">
-            <DensityWrapper>{children}</DensityWrapper>
-          </main>
-        </SidebarInset>
+        {/* AppSidebar draws the canvas + rail and wraps this page column in
+            the raised card. SidebarProvider is kept for the open state and
+            its ⌘B binding. */}
+        <AppSidebar>
+          <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+            <Topbar />
+            <main className="min-h-0 flex-1 overflow-auto">
+              <DensityWrapper>{children}</DensityWrapper>
+            </main>
+          </div>
+        </AppSidebar>
         <GlobalKeys />
       </CommandPalette>
     </SidebarProvider>

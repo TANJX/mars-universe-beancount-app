@@ -1,20 +1,9 @@
 "use client"
 
-import {
-  BarChart3,
-  BookOpen,
-  CalendarClock,
-  Flame,
-  Hash,
-  LayoutGrid,
-  ListTree,
-  PieChart,
-  Receipt,
-  Search as SearchIcon,
-  Waypoints,
-} from "lucide-react"
+import { Hash, Search as SearchIcon } from "lucide-react"
 import { useRouter } from "next/navigation"
 import * as React from "react"
+import { NAV_SECTIONS } from "@/components/layout/nav"
 import { useShortcutsDialog } from "@/components/layout/shortcuts-dialog"
 import { usePeriodHref } from "@/components/layout/ui-state"
 import { ClientOnly } from "@/components/primitives/client-only"
@@ -28,36 +17,6 @@ import {
   CommandShortcut,
 } from "@/components/ui/command"
 import { useLedgerData } from "@/hooks/use-fava"
-
-interface NavItem {
-  href: string
-  label: string
-  icon: React.ComponentType<{ size?: number }>
-  /** Letter that follows the `g` leader to navigate here. */
-  leaderKey: string
-}
-
-// Keep in sync with components/layout/global-keys.tsx — the `g + <letter>`
-// leader nav. If you change a binding there, update the leaderKey here too.
-const NAV: NavItem[] = [
-  { href: "/overview", label: "Overview", icon: LayoutGrid, leaderKey: "o" },
-  { href: "/plan", label: "Plan", icon: CalendarClock, leaderKey: "p" },
-  { href: "/balances", label: "Balances", icon: ListTree, leaderKey: "b" },
-  {
-    href: "/portfolio",
-    label: "Portfolio",
-    icon: PieChart,
-    // `p` belongs to Plan, so Portfolio takes the next letter in its own name.
-    leaderKey: "f",
-  },
-  // `f` belongs to Portfolio; FIRE takes the next letter in its own name.
-  { href: "/fire", label: "FIRE", icon: Flame, leaderKey: "r" },
-  // `r` belongs to FIRE; Runway takes the next letter in its own name.
-  { href: "/runway", label: "Runway", icon: Waypoints, leaderKey: "u" },
-  { href: "/income", label: "Income", icon: BarChart3, leaderKey: "i" },
-  { href: "/expenses", label: "Expenses", icon: Receipt, leaderKey: "e" },
-  { href: "/journal", label: "Journal", icon: BookOpen, leaderKey: "j" },
-]
 
 interface CommandPaletteContextValue {
   openCommandPalette: () => void
@@ -137,19 +96,21 @@ function CommandPaletteInner({
       <CommandList>
         <CommandEmpty>No matches.</CommandEmpty>
 
-        <CommandGroup heading="Pages">
-          {NAV.map((n) => (
-            <CommandItem
-              key={n.href}
-              value={`page ${n.label}`}
-              onSelect={() => go(n.href)}
-            >
-              <n.icon size={14} />
-              <span>Go to {n.label}</span>
-              <CommandShortcut>g {n.leaderKey}</CommandShortcut>
-            </CommandItem>
-          ))}
-        </CommandGroup>
+        {NAV_SECTIONS.map((s) => (
+          <CommandGroup key={s.id} heading={s.label}>
+            {s.pages.map((n) => (
+              <CommandItem
+                key={n.href}
+                value={`page ${s.label} ${n.label}`}
+                onSelect={() => go(n.href)}
+              >
+                <n.icon size={14} />
+                <span>Go to {n.label}</span>
+                <CommandShortcut>g {n.leaderKey}</CommandShortcut>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        ))}
 
         {accounts.length > 0 && (
           <CommandGroup heading="Accounts">

@@ -4,8 +4,9 @@
 // `/api/ext/runway_data` returns each person's resolved plan (balances from
 // the ledger or their own file); `lib/runway/engine` does the rest.
 //
-// Like /fire and /portfolio there is no mobile tab-bar entry; the layout
-// stacks to one column on narrow screens.
+// Like /fire and /portfolio there is no mobile-specific layout yet (it is
+// reachable from the mobile switcher); the layout stacks to one column on
+// narrow screens.
 
 import { AlertCircle } from "lucide-react"
 

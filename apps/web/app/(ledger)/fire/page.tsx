@@ -4,8 +4,9 @@
 // snapshot, the user's `config/fire.yaml` and saved scenarios; everything else
 // is computed client-side by `lib/fire/engine`.
 //
-// Mobile is deferred like /portfolio: no tab-bar entry, desktop layout at
-// every width (sections stack to one column on narrow screens).
+// Mobile layout is deferred like /portfolio: reachable from the mobile
+// switcher, desktop layout at every width (sections stack to one column on
+// narrow screens).
 
 import { AlertCircle } from "lucide-react"
 

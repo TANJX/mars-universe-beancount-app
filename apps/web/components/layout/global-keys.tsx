@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation"
 import * as React from "react"
 
+import { NAV_PAGES } from "@/components/layout/nav"
 import { usePeriodHref } from "@/components/layout/ui-state"
 
 /**
@@ -10,22 +11,13 @@ import { usePeriodHref } from "@/components/layout/ui-state"
  * route-group layout. Listens at the window level; no-ops when an input,
  * textarea, or contenteditable owns focus, or when modifier keys are held.
  *
- *   g + o   → /overview
- *   g + p   → /plan
- *   g + b   → /balances
- *   g + f   → /portfolio
- *   g + r   → /fire
- *   g + u   → /runway
- *   g + i   → /income
- *   g + e   → /expenses
- *   g + j   → /journal
+ *   g + <key>  → any page; letters are `leaderKey` in nav.ts
  *   /       → focus the page's primary search input (data-search="primary")
  *   ?       → log a placeholder; future shortcuts dialog
  *
  * `[` / `]` (period prev/next) and `m` (open period popover) are owned by
  * PeriodCommand; ⌘P/⌘K are owned by their respective components, and ⌘B
  * (toggle sidebar) by SidebarProvider.
- * Keep the letters in sync with the leaderKey list in command-palette.tsx.
  */
 export function GlobalKeys() {
   const router = useRouter()
@@ -48,43 +40,11 @@ export function GlobalKeys() {
       // Leader: 'g' followed by a target letter within 1.2s.
       if (leaderRef.current !== null && Date.now() - leaderRef.current < 1200) {
         leaderRef.current = null
-        switch (e.key.toLowerCase()) {
-          case "o":
-            e.preventDefault()
-            router.push(periodHref("/overview"))
-            return
-          case "b":
-            e.preventDefault()
-            router.push(periodHref("/balances"))
-            return
-          case "f":
-            e.preventDefault()
-            router.push(periodHref("/portfolio"))
-            return
-          case "r":
-            e.preventDefault()
-            router.push(periodHref("/fire"))
-            return
-          case "u":
-            e.preventDefault()
-            router.push(periodHref("/runway"))
-            return
-          case "i":
-            e.preventDefault()
-            router.push(periodHref("/income"))
-            return
-          case "e":
-            e.preventDefault()
-            router.push(periodHref("/expenses"))
-            return
-          case "j":
-            e.preventDefault()
-            router.push(periodHref("/journal"))
-            return
-          case "p":
-            e.preventDefault()
-            router.push(periodHref("/plan"))
-            return
+        const page = NAV_PAGES.find((p) => p.leaderKey === e.key.toLowerCase())
+        if (page) {
+          e.preventDefault()
+          router.push(periodHref(page.href))
+          return
         }
       }
 
