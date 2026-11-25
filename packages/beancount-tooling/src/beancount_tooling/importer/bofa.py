@@ -30,7 +30,11 @@ class BofAImporter(GeneralImporter):
         return datetime.strptime(row["Posted Date"], "%m/%d/%Y").date()
 
     def get_trans_ref(self, row, line):
-        return row["Reference Number"]
+        # Bank-generated rows (annual fee, interest) come with a blank
+        # Reference Number. A blank ref can't be stored or deduped, so the row
+        # would be emitted again on every extract: hash the row instead.
+        ref = (row["Reference Number"] or "").strip()
+        return ref or super().get_trans_ref(row, line)
 
     def raw_descriptor(self, row):
         return row.get("Payee") or ""
