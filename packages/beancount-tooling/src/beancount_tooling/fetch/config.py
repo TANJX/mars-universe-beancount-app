@@ -11,6 +11,8 @@ the ledger's config, never in this package. Schema:
           credentials:
             source: dashlane       # dashlane | keychain | env
             id: "<vault item id>"  # dashlane only
+            username_field: email  # dashlane only, optional: login | email; read only that
+                                   # field (default: login, falling back to email)
             service: "<name>"      # keychain only
             prefix: "<PREFIX>"     # env only, defaults to the bank key upper-cased
             domain: "<domain>"     # optional, overrides the fetcher's domain for --find-credentials
@@ -41,6 +43,7 @@ from beancount_tooling.paths import get_config_dir
 
 PLACEHOLDER = "TODO"
 CREDENTIAL_SOURCES = ("dashlane", "keychain", "env")
+DASHLANE_USERNAME_FIELDS = ("login", "email")
 ACCOUNT_KINDS = ("checking", "credit", "saving", "investment")
 ARCHIVE_FIELDS = ("MonthName", "YYYY", "MM")
 DEFAULT_LOGIN_TIMEOUT_MINUTES = 5
@@ -57,6 +60,7 @@ class CredentialConfig:
     service: str | None = None
     prefix: str | None = None
     domain: str | None = None
+    username_field: str | None = None
 
     @property
     def is_placeholder(self) -> bool:
@@ -172,19 +176,29 @@ def _parse_credentials(raw: Any, bank: str) -> CredentialConfig:
         raise ConfigError(
             f"{where}.source: {source!r} is not one of {', '.join(CREDENTIAL_SOURCES)}"
         )
-    unknown = set(raw) - {"source", "id", "service", "prefix", "domain"}
+    unknown = set(raw) - {"source", "id", "service", "prefix", "domain", "username_field"}
     if unknown:
         raise ConfigError(f"{where}: unknown key(s) {', '.join(sorted(unknown))}")
     if source == "dashlane" and not raw.get("id"):
         raise ConfigError(f"{where}.id: required for source dashlane")
     if source == "keychain" and not raw.get("service"):
         raise ConfigError(f"{where}.service: required for source keychain")
+    username_field = raw.get("username_field")
+    if username_field is not None:
+        if source != "dashlane":
+            raise ConfigError(f"{where}.username_field: only for source dashlane")
+        if username_field not in DASHLANE_USERNAME_FIELDS:
+            raise ConfigError(
+                f"{where}.username_field: {username_field!r} is not one of "
+                f"{', '.join(DASHLANE_USERNAME_FIELDS)}"
+            )
     return CredentialConfig(
         source=source,
         id=str(raw["id"]) if raw.get("id") is not None else None,
         service=raw.get("service"),
         prefix=raw.get("prefix"),
         domain=raw.get("domain"),
+        username_field=username_field,
     )
 
 

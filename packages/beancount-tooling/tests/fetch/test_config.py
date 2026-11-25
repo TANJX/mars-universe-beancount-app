@@ -114,6 +114,14 @@ def _mutate(raw, fn):
             lambda f: f["banks"]["amex"]["credentials"].pop("service"),
             "service: required",
         ),
+        (
+            lambda f: f["banks"]["bofa"]["credentials"].update(username_field="user"),
+            "username_field",
+        ),
+        (
+            lambda f: f["banks"]["amex"]["credentials"].update(username_field="email"),
+            "only for source dashlane",
+        ),
         (lambda f: f.update(login_timeout_minutes=0), "positive"),
         (lambda f: f.update(profile_dir="relative/dir"), "absolute"),
         (lambda f: f.pop("profile_dir"), "profile_dir"),
@@ -129,6 +137,14 @@ def _mutate(raw, fn):
 def test_validation_errors(raw, extract, mutation, message):
     with pytest.raises(ConfigError, match=message):
         parse_config(_mutate(raw, mutation), extract)
+
+
+def test_dashlane_username_field_parsed(raw, extract):
+    raw = _mutate(
+        raw, lambda f: f["banks"]["bofa"]["credentials"].update(username_field="email")
+    )
+    config = parse_config(raw, extract)
+    assert config.banks["bofa"].credentials.username_field == "email"
 
 
 def test_missing_top_level(extract):

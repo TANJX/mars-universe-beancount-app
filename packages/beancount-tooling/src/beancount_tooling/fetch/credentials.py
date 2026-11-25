@@ -60,7 +60,7 @@ class DashlaneSource(CredentialSource):
     the terminal; only stdout (the requested field) is captured.
     """
 
-    def __init__(self, item_id: str, bank: str = ""):
+    def __init__(self, item_id: str, bank: str = "", username_field: str | None = None):
         if not item_id or item_id == "TODO":
             raise CredentialError(
                 f"{bank or 'bank'}: no Dashlane item id configured; run "
@@ -68,6 +68,7 @@ class DashlaneSource(CredentialSource):
                 "credentials.id in config/fetch.yaml"
             )
         self.item_id = item_id
+        self.username_field = username_field
         self.label = f"dashlane item {item_id}"
 
     def _read(self, field: str) -> str:
@@ -93,6 +94,10 @@ class DashlaneSource(CredentialSource):
         return _single_value(proc.stdout or "", what)
 
     def username(self) -> str:
+        # A configured field is read alone: no failed `-f login` attempt, whose
+        # dcli error ("No login found ...") reads like a real failure.
+        if self.username_field:
+            return self._read(self.username_field)
         # Some items (often older ones) keep the username in the email field
         # and leave login empty; dcli then fails on `-f login`.
         try:
@@ -184,7 +189,7 @@ class EnvSource(CredentialSource):
 
 def make_source(cfg: CredentialConfig, bank: str) -> CredentialSource:
     if cfg.source == "dashlane":
-        return DashlaneSource(cfg.id or "", bank=bank)
+        return DashlaneSource(cfg.id or "", bank=bank, username_field=cfg.username_field)
     if cfg.source == "keychain":
         return KeychainSource(cfg.service or "")
     if cfg.source == "env":

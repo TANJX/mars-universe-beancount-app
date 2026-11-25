@@ -97,6 +97,21 @@ def test_dashlane_username_falls_back_to_email(monkeypatch, have_tools):
     assert [argv[4] for argv, _ in fake.calls] == ["login", "email"]
 
 
+def test_dashlane_username_field_reads_only_that_field(monkeypatch, have_tools):
+    fake = FakeRun((0, LOGIN + "\n"))
+    monkeypatch.setattr(credentials.subprocess, "run", fake)
+    assert DashlaneSource("item-123", username_field="email").username() == LOGIN
+    assert [argv[4] for argv, _ in fake.calls] == ["email"]
+
+
+def test_dashlane_username_field_does_not_fall_back(monkeypatch, have_tools):
+    fake = FakeRun((1, ""), (0, LOGIN + "\n"))
+    monkeypatch.setattr(credentials.subprocess, "run", fake)
+    with pytest.raises(CredentialError, match="email"):
+        DashlaneSource("item-123", username_field="email").username()
+    assert len(fake.calls) == 1
+
+
 def test_dashlane_missing_binary(monkeypatch):
     monkeypatch.setattr(credentials.shutil, "which", lambda name: None)
     with pytest.raises(CredentialError, match="dcli not found"):
