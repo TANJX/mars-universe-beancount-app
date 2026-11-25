@@ -15,6 +15,7 @@ import {
   Home,
   LayoutGrid,
   ListTree,
+  Newspaper,
   PieChart,
   Receipt,
   Wallet,
@@ -45,6 +46,13 @@ export interface NavSection {
   pages: NavPage[]
 }
 
+const today: NavPage = {
+  href: "/today",
+  label: "Today",
+  icon: Newspaper,
+  hint: "Today's issue",
+  leaderKey: "t",
+}
 const overview: NavPage = {
   href: "/overview",
   label: "Overview",
@@ -113,7 +121,7 @@ const fire: NavPage = {
 }
 
 export const NAV_SECTIONS: NavSection[] = [
-  { id: "home", label: "Home", icon: Home, pages: [overview] },
+  { id: "home", label: "Home", icon: Home, pages: [today, overview] },
   {
     id: "accounts",
     label: "Accounts",

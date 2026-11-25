@@ -13,6 +13,9 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
+    "@json-render/core": "0.23.2",
+    "@json-render/directives": "0.23.2",
+    "@json-render/react": "0.23.2",
     "@number-flow/react": "^0.6.2",
     "@tanstack/react-query": "^5.104.5",
     "@tanstack/react-query-devtools": "^5.104.5",

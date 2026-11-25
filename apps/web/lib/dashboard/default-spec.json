@@ -1,0 +1,174 @@
+{
+  "meta": {
+    "catalogVersion": 3,
+    "issueDate": "2026-03-12",
+    "lens": "default",
+    "headline": null,
+    "note": "Bundled fallback issue: the Overview layout, used when no spec or last-known-good spec renders."
+  },
+  "root": "page",
+  "elements": {
+    "page": {
+      "type": "Stack",
+      "props": { "direction": "vertical", "gap": "lg" },
+      "children": ["hero", "brief", "kpis", "main", "freshness"]
+    },
+    "hero": {
+      "type": "NetWorthHero",
+      "props": {
+        "label": "Net worth",
+        "value": { "$state": "/netWorth/value" },
+        "d30": { "$state": "/netWorth/d30" },
+        "ytd": { "$state": "/netWorth/ytd" },
+        "series": { "$state": "/netWorth/series" },
+        "field": "netWorth"
+      },
+      "children": []
+    },
+    "brief": {
+      "type": "Note",
+      "props": {
+        "tone": "info",
+        "text": {
+          "$concat": [
+            "Day-to-day spending is ",
+            {
+              "$format": "currency",
+              "value": { "$state": "/derived/paceDelta" },
+              "signed": true
+            },
+            " against a usual month so far. Projected cash bottoms out at ",
+            {
+              "$format": "currency",
+              "value": { "$state": "/plan/low/balance" }
+            },
+            " on ",
+            { "$format": "date", "value": { "$state": "/plan/low/date" } },
+            "."
+          ]
+        }
+      },
+      "children": []
+    },
+    "kpis": {
+      "type": "Grid",
+      "props": { "columns": 3, "gap": "md" },
+      "children": ["income-tile", "spent-tile", "savings-tile"]
+    },
+    "income-tile": {
+      "type": "StatTile",
+      "props": {
+        "label": "Income this month",
+        "value": { "$state": "/income/mtd" },
+        "format": "money",
+        "spark": { "$state": "/income/byMonth" },
+        "sparkField": "value",
+        "goodWhen": "up"
+      },
+      "children": []
+    },
+    "spent-tile": {
+      "type": "StatTile",
+      "props": {
+        "label": "Spent this month",
+        "value": { "$state": "/spend/mtd" },
+        "format": "money",
+        "spark": { "$state": "/spend/byMonth" },
+        "sparkField": "value",
+        "goodWhen": "down"
+      },
+      "children": []
+    },
+    "savings-tile": {
+      "type": "StatTile",
+      "props": {
+        "label": "Saving rate",
+        "value": { "$state": "/savingsRate3m" },
+        "format": "percent",
+        "caption": "Trailing three months",
+        "goodWhen": "up"
+      },
+      "children": []
+    },
+    "main": {
+      "type": "Grid",
+      "props": { "columns": 2, "ratio": "wide-left", "gap": "md" },
+      "children": ["main-left", "main-right"]
+    },
+    "main-left": {
+      "type": "Stack",
+      "props": { "gap": "md" },
+      "children": ["pace-panel", "events-panel"]
+    },
+    "pace-panel": {
+      "type": "Panel",
+      "props": { "title": "Day-to-day pace", "eyebrow": "This month" },
+      "children": ["pace"]
+    },
+    "pace": {
+      "type": "PaceChart",
+      "props": {
+        "mtdCurve": { "$state": "/spend/flex/mtdCurve" },
+        "usualCurve": { "$state": "/spend/flex/usualCurve" },
+        "usualMonth": { "$state": "/spend/flex/usualMonth" },
+        "delta": { "$state": "/derived/paceDelta" },
+        "height": "md"
+      },
+      "children": []
+    },
+    "events-panel": {
+      "type": "Panel",
+      "props": { "title": "Next two weeks" },
+      "children": ["events"]
+    },
+    "events": {
+      "type": "EventList",
+      "props": {
+        "items": { "$state": "/plan/events" },
+        "limit": 8,
+        "withinDays": 14,
+        "showBalance": true
+      },
+      "children": []
+    },
+    "main-right": {
+      "type": "Stack",
+      "props": { "gap": "md" },
+      "children": ["needs-panel", "low-tile"]
+    },
+    "needs-panel": {
+      "type": "Panel",
+      "props": { "title": "Needs you" },
+      "children": ["needs"]
+    },
+    "needs": {
+      "type": "NeedsYou",
+      "props": {
+        "items": { "$state": "/derived/needsYou" },
+        "limit": 6,
+        "emptyText": "Nothing due in the next three weeks."
+      },
+      "children": []
+    },
+    "low-tile": {
+      "type": "StatTile",
+      "props": {
+        "label": "Projected low",
+        "value": { "$state": "/plan/low/balance" },
+        "format": "money",
+        "caption": "Lowest projected cash in the plan window",
+        "goodWhen": "up"
+      },
+      "children": []
+    },
+    "freshness": {
+      "type": "Freshness",
+      "props": {
+        "freshness": { "$state": "/derived/freshness" },
+        "stale": { "$state": "/derived/stale" },
+        "compact": true
+      },
+      "children": []
+    }
+  }
+}

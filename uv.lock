@@ -410,6 +410,7 @@ name = "ledger-data-api"
 version = "0.1.0"
 source = { editable = "packages/ledger-data-api" }
 dependencies = [
+    { name = "beancount-tooling" },
     { name = "beanquery" },
     { name = "fava" },
     { name = "pyyaml" },
@@ -423,6 +424,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "beancount-tooling", editable = "packages/beancount-tooling" },
     { name = "beanquery", specifier = ">=0.1.dev0" },
     { name = "fava", git = "https://github.com/TANJX/fava.git?rev=2d2d482a1c9b2d22858fa85b97082804cdaa4bc3" },
     { name = "pyyaml", specifier = ">=6.0.3" },

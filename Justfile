@@ -106,7 +106,34 @@ test-api *args:
 # Private prototype parity runs only when RUNWAY_PARITY_FIXTURE points at a JSON
 # fixture, e.g. RUNWAY_PARITY_FIXTURE=$LEDGER_DIR/<private>/runway-parity.json just test-web
 test-web *args:
-    cd apps/web && node --import ./lib/runway/test/resolve-ts.mjs --test 'lib/runway/**/*.test.ts' 'lib/plan/**/*.test.ts' {{args}}
+    cd apps/web && node --import ./lib/runway/test/resolve-ts.mjs --test 'lib/runway/**/*.test.ts' 'lib/plan/**/*.test.ts' 'lib/dashboard/**/*.test.ts' {{args}}
+
+# --- Agent-written dashboard (spec + archive in $LEDGER_DIR/config/dashboard/) ---
+
+# Data comes from Fava's dashboard endpoint, else `uv run mobile-snapshot`.
+# Prints instructions + catalog, the live data path index (with [nullable]
+# marks), the last 3 issues, 30 days of changelog with active pins and
+# rejections, and feedback since the last issue. Flag: --data PATH.
+# Print the daily agent's dashboard prompt
+dashboard-prompt *args:
+    node --import ./apps/web/lib/runway/test/resolve-ts.mjs apps/web/scripts/dashboard-prompt.ts {{args}}
+
+# On pass writes spec.lkg.json + issues/<issueDate>.json; on failure exits 1.
+# Writing needs meta.issueDate == today. Prints lead, hero and top-level order;
+# warns (non-blocking) when they repeat one of the last 3 issues.
+# Flags: --spec PATH (check only, never writes), --data PATH, --no-write.
+# Run the render gate on the dashboard spec against live data
+dashboard-check *args:
+    node --import ./apps/web/lib/runway/test/resolve-ts.mjs apps/web/scripts/dashboard-check.ts {{args}}
+
+# Restore spec.json from the last spec that passed the check.
+dashboard-revert:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir="${LEDGER_DIR:?LEDGER_DIR is not set}/config/dashboard"
+    if [ ! -f "$dir/spec.lkg.json" ]; then echo "No spec.lkg.json in $dir" >&2; exit 1; fi
+    cp "$dir/spec.lkg.json" "$dir/spec.json"
+    echo "Restored $dir/spec.json from spec.lkg.json"
 
 # Lint / format everything (Python + JS/TS)
 lint: lint-py lint-js

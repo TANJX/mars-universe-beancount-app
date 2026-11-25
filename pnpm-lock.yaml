@@ -17,6 +17,15 @@ importers:
       '@base-ui/react':
         specifier: ^1.9.0
         version: 1.9.0(@date-fns/tz@1.5.0)(@types/react@19.3.0)(date-fns@4.4.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@json-render/core':
+        specifier: 0.23.2
+        version: 0.23.2(zod@4.6.7)
+      '@json-render/directives':
+        specifier: 0.23.2
+        version: 0.23.2(zod@4.6.7)
+      '@json-render/react':
+        specifier: 0.23.2
+        version: 0.23.2(react@19.3.1)(zod@4.6.7)
       '@number-flow/react':
         specifier: ^0.6.2
         version: 0.6.2(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -578,6 +587,21 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@json-render/core@0.23.2':
+    resolution: {integrity: sha512-2BRXjS2uWLLmlPnlw9kvtCYJFSmnYqBhUyqf6dx7MheKhedGoz80rf4s0XTdGDVue2MLwnFqpcamcEnHi1HLeQ==}
+    peerDependencies:
+      zod: ^4.0.0
+
+  '@json-render/directives@0.23.2':
+    resolution: {integrity: sha512-46Q0Enhu9lbzgvW52sUD5A1MAgCj6CV36XVPrUdZO2at3W94U5JxAckbCmLPj+IPwNK0KSeTazbFNgURlntJig==}
+    peerDependencies:
+      zod: ^4.0.0
+
+  '@json-render/react@0.23.2':
+    resolution: {integrity: sha512-DzHB+UekHk5acxjFU2+qleFhCncOmYLEZXXQT6D3hlE0PsJ/kKEb2be0WfwqFJ0ypDC0DQmnKp3/pQDlW64oAQ==}
+    peerDependencies:
+      react: ^19.2.3
 
   '@kobalte/core@0.13.14':
     resolution: {integrity: sha512-SBVB1lnvYbYt2x3t7fG0lo5fGLEbHQ6PII3NDPva8vD5e2v53On84ZVQiuIk0XI/55R4GQhden7Yem+R/XR8uQ==}
@@ -3526,6 +3550,22 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
+
+  '@json-render/core@0.23.2(zod@4.6.7)':
+    dependencies:
+      zod: 4.6.7
+
+  '@json-render/directives@0.23.2(zod@4.6.7)':
+    dependencies:
+      '@json-render/core': 0.23.2(zod@4.6.7)
+      zod: 4.6.7
+
+  '@json-render/react@0.23.2(react@19.3.1)(zod@4.6.7)':
+    dependencies:
+      '@json-render/core': 0.23.2(zod@4.6.7)
+      react: 19.3.1
+    transitivePeerDependencies:
+      - zod
 
   '@kobalte/core@0.13.14(solid-js@1.9.17)':
     dependencies:

@@ -1,0 +1,1131 @@
+{
+  "meta": {
+    "schemaVersion": 2,
+    "asOf": "2026-03-12",
+    "generatedAt": "2026-03-12T08:00:00",
+    "ledgerCommit": "abc1234",
+    "ledgerDirty": false
+  },
+  "asOf": "2026-03-12",
+  "netWorth": {
+    "value": 198000.0,
+    "d1": 100,
+    "d30": 4500,
+    "ytd": 9000,
+    "series": [
+      {
+        "date": "2025-12-18",
+        "netWorth": 180000,
+        "invest": 120000,
+        "cash": 30000
+      },
+      {
+        "date": "2025-12-25",
+        "netWorth": 181500,
+        "invest": 121000,
+        "cash": 30300
+      },
+      {
+        "date": "2026-01-01",
+        "netWorth": 183000,
+        "invest": 122000,
+        "cash": 30600
+      },
+      {
+        "date": "2026-01-08",
+        "netWorth": 184500,
+        "invest": 123000,
+        "cash": 30900
+      },
+      {
+        "date": "2026-01-15",
+        "netWorth": 186000,
+        "invest": 124000,
+        "cash": 31200
+      },
+      {
+        "date": "2026-01-22",
+        "netWorth": 187500,
+        "invest": 125000,
+        "cash": 31500
+      },
+      {
+        "date": "2026-01-29",
+        "netWorth": 189000,
+        "invest": 126000,
+        "cash": 31800
+      },
+      {
+        "date": "2026-02-05",
+        "netWorth": 190500,
+        "invest": 127000,
+        "cash": 32100
+      },
+      {
+        "date": "2026-02-12",
+        "netWorth": 192000,
+        "invest": 128000,
+        "cash": 32400
+      },
+      {
+        "date": "2026-02-19",
+        "netWorth": 193500,
+        "invest": 129000,
+        "cash": 32700
+      },
+      {
+        "date": "2026-02-26",
+        "netWorth": 195000,
+        "invest": 130000,
+        "cash": 33000
+      },
+      {
+        "date": "2026-03-05",
+        "netWorth": 196500,
+        "invest": 131000,
+        "cash": 33300
+      },
+      {
+        "date": "2026-03-12",
+        "netWorth": 198000,
+        "invest": 132000,
+        "cash": 33600
+      }
+    ]
+  },
+  "cash": {
+    "total": 32000.0,
+    "accounts": [
+      {
+        "name": "Checking A",
+        "value": 12000.0
+      },
+      {
+        "name": "Savings B",
+        "value": 20000.0
+      }
+    ]
+  },
+  "cards": {
+    "total": 2000.0,
+    "accounts": [
+      {
+        "name": "Card A",
+        "displayName": "Card A",
+        "value": -1200.0,
+        "due": "2026-03-17",
+        "statement": 900.0,
+        "fundedBy": "Checking A"
+      },
+      {
+        "name": "Card B",
+        "displayName": "Card B",
+        "value": -600.0,
+        "due": "2026-03-28",
+        "statement": 450.0,
+        "fundedBy": "Checking A"
+      },
+      {
+        "name": "Card C",
+        "displayName": "Card C",
+        "value": -200.0,
+        "due": "2026-04-15",
+        "statement": 150.0,
+        "fundedBy": null
+      },
+      {
+        "name": "Card D",
+        "displayName": "Card D",
+        "value": 0.0,
+        "due": "2026-04-01",
+        "statement": 0.0,
+        "fundedBy": null
+      }
+    ]
+  },
+  "float": {
+    "afterCards": 30000.0,
+    "reserve": 15000.0,
+    "spendable": 15000.0
+  },
+  "invest": {
+    "total": 132000.0,
+    "d30": 3000,
+    "accounts": [
+      {
+        "name": "Brokerage A",
+        "value": 82000.0
+      },
+      {
+        "name": "Retirement B",
+        "value": 50000.0
+      }
+    ]
+  },
+  "loan": {
+    "name": "Car loan",
+    "balance": 8000.0,
+    "original": 20000.0,
+    "payment": 400.0,
+    "payoff": "2027-11-01"
+  },
+  "receivable": [
+    {
+      "name": "Friend A",
+      "value": 100.0
+    }
+  ],
+  "payable": [],
+  "spend": {
+    "mtd": 1680.0,
+    "usualByToday": 1800,
+    "usualMonth": 4650,
+    "flex": {
+      "mtd": 660,
+      "usualByToday": 720,
+      "usualMonth": 1860,
+      "mtdCurve": [55, 110, 165, 220, 275, 330, 385, 440, 495, 550, 605, 660],
+      "usualCurve": [
+        60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, 720, 780, 840,
+        900, 960, 1020, 1080, 1140, 1200, 1260, 1320, 1380, 1440, 1500, 1560,
+        1620, 1680, 1740, 1800, 1860
+      ]
+    },
+    "mtdCurve": [
+      140, 280, 420, 560, 700, 840, 980, 1120, 1260, 1400, 1540, 1680
+    ],
+    "usualCurve": [
+      150, 300, 450, 600, 750, 900, 1050, 1200, 1350, 1500, 1650, 1800, 1950,
+      2100, 2250, 2400, 2550, 2700, 2850, 3000, 3150, 3300, 3450, 3600, 3750,
+      3900, 4050, 4200, 4350, 4500, 4650
+    ],
+    "categories": [
+      {
+        "name": "Groceries",
+        "value": 400.0,
+        "usual": 450.0
+      },
+      {
+        "name": "Dining",
+        "value": 250.0,
+        "usual": 300.0
+      },
+      {
+        "name": "Transport",
+        "value": 120.0,
+        "usual": 150.0
+      },
+      {
+        "name": "Shopping",
+        "value": 90.0,
+        "usual": 200.0
+      }
+    ],
+    "byMonth": [
+      {
+        "month": "2025-03",
+        "value": 4000
+      },
+      {
+        "month": "2025-04",
+        "value": 4200
+      },
+      {
+        "month": "2025-05",
+        "value": 4400
+      },
+      {
+        "month": "2025-06",
+        "value": 4000
+      },
+      {
+        "month": "2025-07",
+        "value": 4200
+      },
+      {
+        "month": "2025-08",
+        "value": 4400
+      },
+      {
+        "month": "2025-09",
+        "value": 4000
+      },
+      {
+        "month": "2025-10",
+        "value": 4200
+      },
+      {
+        "month": "2025-11",
+        "value": 4400
+      },
+      {
+        "month": "2025-12",
+        "value": 4000
+      },
+      {
+        "month": "2026-01",
+        "value": 4200
+      },
+      {
+        "month": "2026-02",
+        "value": 4400
+      },
+      {
+        "month": "2026-03",
+        "value": 4000
+      }
+    ],
+    "dayToDayExclude": ["Rent"],
+    "today": 25.0,
+    "last7": [40.0, 55.0, 20.0, 80.0, 35.0, 60.0, 25.0]
+  },
+  "income": {
+    "mtd": 4000.0,
+    "byMonth": [
+      {
+        "month": "2025-03",
+        "value": 8000
+      },
+      {
+        "month": "2025-04",
+        "value": 8000
+      },
+      {
+        "month": "2025-05",
+        "value": 8000
+      },
+      {
+        "month": "2025-06",
+        "value": 8000
+      },
+      {
+        "month": "2025-07",
+        "value": 8000
+      },
+      {
+        "month": "2025-08",
+        "value": 8000
+      },
+      {
+        "month": "2025-09",
+        "value": 8000
+      },
+      {
+        "month": "2025-10",
+        "value": 8000
+      },
+      {
+        "month": "2025-11",
+        "value": 8000
+      },
+      {
+        "month": "2025-12",
+        "value": 8000
+      },
+      {
+        "month": "2026-01",
+        "value": 8000
+      },
+      {
+        "month": "2026-02",
+        "value": 8000
+      },
+      {
+        "month": "2026-03",
+        "value": 8000
+      }
+    ]
+  },
+  "savingsRate3m": 0.25,
+  "recent": [
+    {
+      "date": "2026-03-12",
+      "payee": "Grocer",
+      "note": "",
+      "amount": 60.0,
+      "category": "Groceries",
+      "account": "Card A",
+      "logoDomain": null
+    },
+    {
+      "date": "2026-03-11",
+      "payee": "Coffee Shop",
+      "note": "",
+      "amount": 5.0,
+      "category": "Dining",
+      "account": "Card A",
+      "logoDomain": null
+    },
+    {
+      "date": "2026-03-10",
+      "payee": "Transit",
+      "note": "",
+      "amount": 20.0,
+      "category": "Transport",
+      "account": "Card A",
+      "logoDomain": null
+    },
+    {
+      "date": "2026-03-09",
+      "payee": "Bookstore",
+      "note": "",
+      "amount": 30.0,
+      "category": "Shopping",
+      "account": "Card A",
+      "logoDomain": null
+    },
+    {
+      "date": "2026-03-08",
+      "payee": "Hardware Store",
+      "note": "Return",
+      "amount": -25.0,
+      "category": "Shopping",
+      "account": "Card B",
+      "logoDomain": null
+    }
+  ],
+  "upcoming": [
+    {
+      "date": "2026-03-15",
+      "label": "Paycheck",
+      "note": "Employer A",
+      "amount": 4000.0,
+      "kind": "pay",
+      "account": "Checking A",
+      "accountPath": "Assets:Checking:A"
+    },
+    {
+      "date": "2026-03-17",
+      "label": "Card A",
+      "note": "Card payment from Checking A",
+      "amount": -900.0,
+      "kind": "card",
+      "account": "Checking A",
+      "accountPath": "Assets:Checking:A"
+    },
+    {
+      "date": "2026-03-20",
+      "label": "Rent",
+      "note": "Monthly rent",
+      "amount": -2500.0,
+      "kind": "bill",
+      "account": "Checking A",
+      "accountPath": "Assets:Checking:A"
+    },
+    {
+      "date": "2026-03-22",
+      "label": "Utilities",
+      "note": "",
+      "amount": -150.0,
+      "kind": "bill",
+      "account": "Checking A",
+      "accountPath": "Assets:Checking:A"
+    }
+  ],
+  "goals": [
+    {
+      "id": "ef",
+      "name": "Emergency fund",
+      "value": 20000.0,
+      "target": 30000.0,
+      "note": "Six months of costs",
+      "progress": 0.6667,
+      "remaining": 10000.0
+    },
+    {
+      "id": "trip",
+      "name": "Trip fund",
+      "value": 1500.0,
+      "target": 4000.0,
+      "note": "Summer trip",
+      "progress": 0.375,
+      "remaining": 2500.0
+    }
+  ],
+  "keyDates": [
+    {
+      "date": "2026-03-21",
+      "label": "Tax filing",
+      "note": "Gather forms"
+    },
+    {
+      "date": "2026-04-03",
+      "label": "Lease renewal",
+      "note": "Decide by this date"
+    },
+    {
+      "date": "2026-05-11",
+      "label": "Insurance renewal",
+      "note": "Compare quotes"
+    }
+  ],
+  "accounts": {
+    "groups": [
+      {
+        "id": "cash",
+        "name": "Cash",
+        "kind": "asset",
+        "total": 32000.0,
+        "d30": 600.0,
+        "accounts": [
+          {
+            "account": "Assets:Checking:A",
+            "name": "Checking A",
+            "displayName": "",
+            "value": 12000.0,
+            "d30": 400.0,
+            "holdings": [],
+            "type": "checking"
+          },
+          {
+            "account": "Assets:Savings:B",
+            "name": "Savings B",
+            "displayName": "",
+            "value": 20000.0,
+            "d30": 200.0,
+            "holdings": [],
+            "type": "savings"
+          }
+        ]
+      },
+      {
+        "id": "cards",
+        "name": "Credit cards",
+        "kind": "liability",
+        "total": -2000.0,
+        "d30": -100.0,
+        "accounts": [
+          {
+            "account": "Liabilities:Card:A",
+            "name": "Card A",
+            "displayName": "Card A",
+            "value": -1200.0,
+            "d30": 0.0,
+            "holdings": [],
+            "type": "card"
+          },
+          {
+            "account": "Liabilities:Card:B",
+            "name": "Card B",
+            "displayName": "Card B",
+            "value": -600.0,
+            "d30": 0.0,
+            "holdings": [],
+            "type": "card"
+          },
+          {
+            "account": "Liabilities:Card:C",
+            "name": "Card C",
+            "displayName": "Card C",
+            "value": -200.0,
+            "d30": 0.0,
+            "holdings": [],
+            "type": "card"
+          },
+          {
+            "account": "Liabilities:Card:D",
+            "name": "Card D",
+            "displayName": "Card D",
+            "value": 0.0,
+            "d30": 0.0,
+            "holdings": [],
+            "type": "card"
+          }
+        ]
+      }
+    ]
+  },
+  "activity": {
+    "from": "2025-03-01",
+    "to": "2026-03-12",
+    "transactions": [
+      {
+        "id": "2026-03-12-000",
+        "date": "2026-03-12",
+        "payee": "Grocer",
+        "narration": "",
+        "amount": -60.0,
+        "kind": "expense",
+        "category": "Groceries",
+        "subcategory": "",
+        "account": "A",
+        "accountName": "Card A",
+        "accountPath": "Liabilities:Card:A"
+      },
+      {
+        "id": "2026-03-11-000",
+        "date": "2026-03-11",
+        "payee": "Coffee Shop",
+        "narration": "",
+        "amount": -5.0,
+        "kind": "expense",
+        "category": "Dining",
+        "subcategory": "",
+        "account": "A",
+        "accountName": "Card A",
+        "accountPath": "Liabilities:Card:A"
+      },
+      {
+        "id": "2026-03-10-000",
+        "date": "2026-03-10",
+        "payee": "Transit",
+        "narration": "",
+        "amount": -20.0,
+        "kind": "expense",
+        "category": "Transport",
+        "subcategory": "",
+        "account": "A",
+        "accountName": "Card A",
+        "accountPath": "Liabilities:Card:A"
+      },
+      {
+        "id": "2026-03-09-000",
+        "date": "2026-03-09",
+        "payee": "Bookstore",
+        "narration": "",
+        "amount": -30.0,
+        "kind": "expense",
+        "category": "Shopping",
+        "subcategory": "",
+        "account": "A",
+        "accountName": "Card A",
+        "accountPath": "Liabilities:Card:A"
+      }
+    ],
+    "spendByMonth": [
+      {
+        "month": "2026-03",
+        "total": 1800.0,
+        "fixed": 1200.0,
+        "dayToDay": 600.0,
+        "throughDay": {
+          "day": 12,
+          "total": 1800.0,
+          "fixed": 1200.0,
+          "dayToDay": 600.0
+        },
+        "categories": [
+          {
+            "name": "Groceries",
+            "value": 400.0
+          }
+        ]
+      }
+    ]
+  },
+  "plan": {
+    "horizon": "2026-04-11",
+    "startCash": 32000.0,
+    "events": [
+      {
+        "id": "2026-03-15-000",
+        "date": "2026-03-15",
+        "label": "Paycheck",
+        "note": "Employer A",
+        "amount": 4000.0,
+        "kind": "pay",
+        "balance": 36000.0,
+        "paycheck": {
+          "net": 4000.0,
+          "contributions": [
+            {
+              "name": "Retirement B",
+              "amount": 500.0,
+              "account": "Retirement B",
+              "date": "2026-03-15"
+            }
+          ],
+          "contributionsTotal": 500.0,
+          "total": 4500.0
+        }
+      },
+      {
+        "id": "2026-03-17-001",
+        "date": "2026-03-17",
+        "label": "Card A",
+        "note": "Card payment from Checking A",
+        "amount": -900.0,
+        "kind": "card",
+        "balance": 35100.0,
+        "fundedByName": "Checking A"
+      },
+      {
+        "id": "2026-03-20-002",
+        "date": "2026-03-20",
+        "label": "Rent",
+        "note": "Monthly rent",
+        "amount": -2500.0,
+        "kind": "bill",
+        "balance": 32600.0
+      },
+      {
+        "id": "2026-03-22-003",
+        "date": "2026-03-22",
+        "label": "Utilities",
+        "note": "",
+        "amount": -150.0,
+        "kind": "bill",
+        "balance": 32450.0
+      },
+      {
+        "id": "2026-03-28-004",
+        "date": "2026-03-28",
+        "label": "Card B",
+        "note": "Card payment from Checking A",
+        "amount": -450.0,
+        "kind": "card",
+        "balance": 32000.0,
+        "fundedByName": "Checking A"
+      },
+      {
+        "id": "2026-03-29-005",
+        "date": "2026-03-29",
+        "label": "Paycheck",
+        "note": "Employer A",
+        "amount": 4000.0,
+        "kind": "pay",
+        "balance": 36000.0,
+        "paycheck": {
+          "net": 4000.0,
+          "contributions": [
+            {
+              "name": "Retirement B",
+              "amount": 500.0,
+              "account": "Retirement B",
+              "date": "2026-03-29"
+            }
+          ],
+          "contributionsTotal": 500.0,
+          "total": 4500.0
+        }
+      },
+      {
+        "id": "2026-04-03-006",
+        "date": "2026-04-03",
+        "label": "Lease renewal",
+        "note": "Decide by this date",
+        "amount": 0.0,
+        "kind": "info",
+        "balance": 36000.0
+      },
+      {
+        "id": "2026-04-08-007",
+        "date": "2026-04-08",
+        "label": "Car loan",
+        "note": "Monthly payment",
+        "amount": -400.0,
+        "kind": "bill",
+        "balance": 35600.0
+      }
+    ],
+    "low": {
+      "date": "2026-03-28",
+      "balance": 32000.0
+    },
+    "nextPay": {
+      "id": "2026-03-15-000",
+      "date": "2026-03-15",
+      "label": "Paycheck",
+      "note": "Employer A",
+      "amount": 4000.0,
+      "kind": "pay",
+      "balance": 36000.0,
+      "paycheck": {
+        "net": 4000.0,
+        "contributions": [
+          {
+            "name": "Retirement B",
+            "amount": 500.0,
+            "account": "Retirement B",
+            "date": "2026-03-15"
+          }
+        ],
+        "contributionsTotal": 500.0,
+        "total": 4500.0
+      }
+    },
+    "goals": [
+      {
+        "id": "ef",
+        "name": "Emergency fund",
+        "value": 20000.0,
+        "target": 30000.0,
+        "note": "Six months of costs",
+        "progress": 0.6667,
+        "remaining": 10000.0
+      },
+      {
+        "id": "trip",
+        "name": "Trip fund",
+        "value": 1500.0,
+        "target": 4000.0,
+        "note": "Summer trip",
+        "progress": 0.375,
+        "remaining": 2500.0
+      }
+    ],
+    "keyDates": [
+      {
+        "date": "2026-03-21",
+        "label": "Tax filing",
+        "note": "Gather forms"
+      },
+      {
+        "date": "2026-04-03",
+        "label": "Lease renewal",
+        "note": "Decide by this date"
+      },
+      {
+        "date": "2026-05-11",
+        "label": "Insurance renewal",
+        "note": "Compare quotes"
+      }
+    ]
+  },
+  "equity": null,
+  "logos": null,
+  "derived": {
+    "paceDelta": -60.0,
+    "needsYou": [
+      {
+        "date": "2026-03-17",
+        "title": "Card A statement",
+        "detail": "$900.00 from Checking A",
+        "kind": "card"
+      },
+      {
+        "date": "2026-03-21",
+        "title": "Tax filing",
+        "detail": "Gather forms",
+        "kind": "date"
+      },
+      {
+        "date": "2026-03-28",
+        "title": "Card B statement",
+        "detail": "$450.00 from Checking A",
+        "kind": "card"
+      },
+      {
+        "date": "2026-04-03",
+        "title": "Lease renewal",
+        "detail": "Decide by this date",
+        "kind": "date"
+      }
+    ],
+    "cardsDue": [
+      {
+        "name": "Card A",
+        "due": "2026-03-17",
+        "statement": 900.0,
+        "fundedBy": "Checking A"
+      },
+      {
+        "name": "Card B",
+        "due": "2026-03-28",
+        "statement": 450.0,
+        "fundedBy": "Checking A"
+      },
+      {
+        "name": "Card C",
+        "due": "2026-04-15",
+        "statement": 150.0,
+        "fundedBy": null
+      }
+    ],
+    "cashProjection": [
+      {
+        "date": "2026-03-12",
+        "balance": 32000.0
+      },
+      {
+        "date": "2026-03-13",
+        "balance": 32000.0
+      },
+      {
+        "date": "2026-03-14",
+        "balance": 32000.0
+      },
+      {
+        "date": "2026-03-15",
+        "balance": 36000.0
+      },
+      {
+        "date": "2026-03-16",
+        "balance": 36000.0
+      },
+      {
+        "date": "2026-03-17",
+        "balance": 35100.0
+      },
+      {
+        "date": "2026-03-18",
+        "balance": 35100.0
+      },
+      {
+        "date": "2026-03-19",
+        "balance": 35100.0
+      },
+      {
+        "date": "2026-03-20",
+        "balance": 32600.0
+      },
+      {
+        "date": "2026-03-21",
+        "balance": 32600.0
+      },
+      {
+        "date": "2026-03-22",
+        "balance": 32450.0
+      },
+      {
+        "date": "2026-03-23",
+        "balance": 32450.0
+      },
+      {
+        "date": "2026-03-24",
+        "balance": 32450.0
+      },
+      {
+        "date": "2026-03-25",
+        "balance": 32450.0
+      },
+      {
+        "date": "2026-03-26",
+        "balance": 32450.0
+      },
+      {
+        "date": "2026-03-27",
+        "balance": 32450.0
+      },
+      {
+        "date": "2026-03-28",
+        "balance": 32000.0
+      },
+      {
+        "date": "2026-03-29",
+        "balance": 36000.0
+      },
+      {
+        "date": "2026-03-30",
+        "balance": 36000.0
+      },
+      {
+        "date": "2026-03-31",
+        "balance": 36000.0
+      },
+      {
+        "date": "2026-04-01",
+        "balance": 36000.0
+      },
+      {
+        "date": "2026-04-02",
+        "balance": 36000.0
+      },
+      {
+        "date": "2026-04-03",
+        "balance": 36000.0
+      },
+      {
+        "date": "2026-04-04",
+        "balance": 36000.0
+      },
+      {
+        "date": "2026-04-05",
+        "balance": 36000.0
+      },
+      {
+        "date": "2026-04-06",
+        "balance": 36000.0
+      },
+      {
+        "date": "2026-04-07",
+        "balance": 36000.0
+      },
+      {
+        "date": "2026-04-08",
+        "balance": 35600.0
+      },
+      {
+        "date": "2026-04-09",
+        "balance": 35600.0
+      },
+      {
+        "date": "2026-04-10",
+        "balance": 35600.0
+      },
+      {
+        "date": "2026-04-11",
+        "balance": 35600.0
+      }
+    ],
+    "stale": [
+      {
+        "account": "Card C",
+        "reason": "login needed"
+      }
+    ],
+    "freshness": {
+      "asOf": "2026-03-12",
+      "generatedAt": "2026-03-12T08:00:00",
+      "ledgerCommit": "abc1234",
+      "ledgerDirty": false
+    },
+    "findings": [
+      {
+        "id": "drift-rent",
+        "kind": "drift",
+        "title": "Rent came in above forecast",
+        "amount": null,
+        "from": 2500.0,
+        "to": 2550.0,
+        "account": "Checking A",
+        "date": "2026-03-10"
+      },
+      {
+        "id": "settled-card-a",
+        "kind": "settled",
+        "title": "Card A payment cleared",
+        "amount": -900.0,
+        "from": null,
+        "to": null,
+        "account": "Card A",
+        "date": "2026-03-11"
+      },
+      {
+        "id": "skip-card-c",
+        "kind": "skip",
+        "title": "Card C statement not fetched",
+        "amount": null,
+        "from": null,
+        "to": null,
+        "account": "Card C",
+        "date": null
+      }
+    ],
+    "context": {
+      "generatedAt": "2026-03-12T07:30:00",
+      "market": {
+        "asOf": "2026-03-11T16:00:00",
+        "indices": [
+          {
+            "symbol": "IDXA",
+            "name": "Index A",
+            "price": 5000.0,
+            "change": 25.0,
+            "changePct": 0.005
+          },
+          {
+            "symbol": "IDXB",
+            "name": "Index B",
+            "price": 18000.0,
+            "change": -90.0,
+            "changePct": -0.005
+          },
+          {
+            "symbol": "IDXC",
+            "name": "Index C",
+            "price": null,
+            "change": null,
+            "changePct": null
+          }
+        ],
+        "holdings": [
+          {
+            "symbol": "FUNDA",
+            "name": "Fund A",
+            "changePct": 0.004,
+            "weight": 0.6
+          },
+          {
+            "symbol": "FUNDB",
+            "name": "Fund B",
+            "changePct": -0.01,
+            "weight": 0.3
+          },
+          {
+            "symbol": "STKC",
+            "name": "Stock C",
+            "changePct": null,
+            "weight": null
+          }
+        ],
+        "note": "Example note about a quiet session"
+      },
+      "news": [
+        {
+          "id": "news-rates",
+          "title": "Example headline about rates",
+          "source": "Example News",
+          "url": "https://example.com/news/rates",
+          "publishedAt": "2026-03-11",
+          "relevance": "Rates move the cash yield in the plan.",
+          "tags": ["rates"]
+        },
+        {
+          "id": "news-index",
+          "title": "Example headline about an index",
+          "source": "Example Wire",
+          "url": "https://example.com/news/index",
+          "publishedAt": null,
+          "relevance": "Index A is the largest holding.",
+          "tags": ["markets", "Index A"]
+        }
+      ],
+      "plan": [
+        {
+          "id": "plan-tax",
+          "date": "2026-03-21",
+          "title": "File taxes",
+          "detail": "Gather forms and file.",
+          "source": "docs/plan.md#taxes",
+          "status": "upcoming"
+        },
+        {
+          "id": "plan-fund",
+          "date": "2026-04-01",
+          "title": "Top up the emergency fund",
+          "detail": "Move 500 to Savings A.",
+          "source": "docs/plan.md#cash",
+          "status": "upcoming"
+        },
+        {
+          "id": "plan-review",
+          "date": null,
+          "title": "Review insurance",
+          "detail": "Compare two quotes.",
+          "source": "docs/plan.md",
+          "status": "open"
+        }
+      ],
+      "insights": [
+        {
+          "id": "ins-cash",
+          "kind": "plan",
+          "title": "Cash target is in reach",
+          "body": "Savings A is 500 short of the target in the plan.",
+          "date": "2026-04-01",
+          "source": "docs/plan.md#cash",
+          "amount": 500.0
+        },
+        {
+          "id": "ins-lease",
+          "kind": "decision",
+          "title": "Lease renewal decision",
+          "body": "Decide whether to renew before the notice date.",
+          "date": "2026-04-03",
+          "source": "docs/plan.md#housing",
+          "amount": null
+        },
+        {
+          "id": "ins-conc",
+          "kind": "risk",
+          "title": "One fund is most of the portfolio",
+          "body": "Fund A is about 60 percent of investments.",
+          "date": null,
+          "source": "docs/invest.md",
+          "amount": null
+        }
+      ]
+    }
+  }
+}

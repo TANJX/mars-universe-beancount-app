@@ -11,7 +11,7 @@ from fava.ext import FavaExtensionBase, extension_endpoint
 from fava.helpers import FavaAPIError
 from flask import request
 
-from . import cc_statements, fire, portfolio, runway, runway_history, runway_write, store
+from . import cc_statements, dashboard, fire, portfolio, runway, runway_history, runway_write, store
 from .cc_statements import ApiError
 from .merge import (
     _credit_balance_on,
@@ -469,3 +469,45 @@ class LedgerDataApi(FavaExtensionBase):
         data = request.json or {}
         fire.delete_scenario(self._ledger_path(), str(data.get("id", "")))
         return json.dumps({})
+
+    # ---------- agent-written dashboard ----------
+
+    def _ledger_dir(self):
+        return dashboard.ledger_dir_of(self._ledger_path())
+
+    @extension_endpoint
+    def dashboard(self):
+        """The Home dashboard: {spec, lkg, data, version, issues, dataError}.
+
+        `data` is the mobile snapshot plus `derived`, built from the loaded
+        ledger with `<ledger>/config` (the directory `just mobile-snapshot`
+        reads) and cached until Fava reloads, a side input changes or a git
+        commit lands. Missing spec files read as null. When the data cannot
+        be built, `data` is null and `dataError` says why (still HTTP 200)."""
+        payload = dashboard.dashboard_payload(
+            self._ledger_dir(),
+            g.ledger.all_entries,
+            datetime.date.today(),
+            load_mark=g.ledger.mtime,
+        )
+        return json.dumps(payload, default=str)
+
+    @extension_endpoint
+    def dashboard_issue(self):
+        """One archived issue. Query: `date` (YYYY-MM-DD). {spec: obj|null}."""
+        try:
+            spec = dashboard.read_issue(self._ledger_dir(), request.args.get("date"))
+        except dashboard.DashboardError as ex:
+            return _bad_request(ex.message)
+        return json.dumps({"spec": spec})
+
+    @extension_endpoint(methods=["POST"])
+    def dashboard_feedback(self):
+        """Append a comment on a spec element. Body: {issue, element, text}."""
+        try:
+            dashboard.append_feedback(
+                self._ledger_dir(), request.get_json(silent=True)
+            )
+        except dashboard.DashboardError as ex:
+            return _bad_request(ex.message)
+        return json.dumps({"status": "ok"})
