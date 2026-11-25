@@ -126,6 +126,11 @@ dashboard-prompt *args:
 dashboard-check *args:
     node --import ./apps/web/lib/runway/test/resolve-ts.mjs apps/web/scripts/dashboard-check.ts {{args}}
 
+# Capture the live Today issue (wide, wide-dark, mid, phone) and measure it.
+# PNGs + report.json go to $LEDGER_DIR/build/dashboard-look/<today>.
+dashboard-look *args:
+    node --import ./apps/web/lib/runway/test/resolve-ts.mjs apps/web/scripts/dashboard-look.ts {{args}}
+
 # Restore spec.json from the last spec that passed the check.
 dashboard-revert:
     #!/usr/bin/env bash

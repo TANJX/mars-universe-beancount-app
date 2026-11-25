@@ -234,7 +234,10 @@ export function RecentActivityList({
                 )}
               </span>
               {sub.length > 0 && (
-                <span className="truncate text-xs text-muted-foreground">
+                <span
+                  data-trim-ok
+                  className="truncate text-xs text-muted-foreground"
+                >
                   {sub.join(" · ")}
                 </span>
               )}
@@ -313,7 +316,10 @@ export function MarketMovesList({
               key={m.symbol}
               className="flex min-w-0 flex-col gap-0.5 px-3 py-2 first:pl-0"
             >
-              <span className="truncate text-xs text-muted-foreground">
+              <span
+                data-trim-ok
+                className="truncate text-xs text-muted-foreground"
+              >
                 {m.name || m.symbol}
               </span>
               <span className="flex flex-wrap items-baseline gap-x-2">
@@ -340,7 +346,10 @@ export function MarketMovesList({
               <Num className="w-12 shrink-0 text-xs font-medium">
                 {h.symbol}
               </Num>
-              <span className="min-w-0 flex-1 truncate text-muted-foreground">
+              <span
+                data-trim-ok
+                className="min-w-0 flex-1 truncate text-muted-foreground"
+              >
                 {h.name}
               </span>
               {isNum(h.weight) && (

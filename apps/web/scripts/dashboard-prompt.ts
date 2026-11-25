@@ -17,7 +17,7 @@
 //   (g) the standards doc path.
 //
 // changelog.jsonl holds two kinds of line (see CHANGELOG SHAPE below):
-//   issue:    {"date","lens","lead":{"key","type"},"order":[...],"summary","why"}
+//   issue:    {"date","lens","lead":{"key","type"},"order":[...],"summary","why","look"}
 //   decision: {"date","decision":"pin"|"reject","element"|"role","why"}
 //
 //   node --import ./apps/web/lib/runway/test/resolve-ts.mjs apps/web/scripts/dashboard-prompt.ts [--data PATH]
@@ -110,10 +110,13 @@ HARD RULES (\`just dashboard-check\` rejects a spec that breaks one):
 
 BEFORE: write config/dashboard/context.json (see # Context sources) and
 config/dashboard/findings.json; both are data, merged into /derived.
-THEN: run \`just dashboard-check\`. On failure, fix and re-run (2 tries),
-then \`just dashboard-revert\` and report the revert (no changelog line).
-Only on pass, append one issue line to config/dashboard/changelog.jsonl,
-copying lead and order from the check's output. A signal no component fits
+THEN: run \`just dashboard-check --no-write\`. On failure, fix and re-run
+(2 tries), then \`just dashboard-revert\` and report the revert (no
+changelog line). On pass, LOOK: \`just dashboard-look\`, open every PNG it
+lists, critique against standards section 10, revise spec.json once, then
+\`just dashboard-check\` to ship. Only on that pass, append one issue line
+to config/dashboard/changelog.jsonl, copying lead and order from the
+check's output and adding "look". A signal no component fits
 goes to config/dashboard/catalog-requests.jsonl; never improvise a
 component.
 
@@ -122,7 +125,9 @@ object per line):
   issue line, one per issue that passed:
     {"date": "${today}", "lens": "...", "lead": {"key": "...", "type": "..."},
      "order": ["<top-level order labels, as the check prints them>"],
-     "summary": "what this issue shows", "why": "why this lead and order today"}
+     "summary": "what this issue shows", "why": "why this lead and order today",
+     "look": {"flags": 0, "revised": false, "critique": "what the eyes found
+              and changed", "appIssues": []}}
   decision line, when feedback pins or rejects something:
     {"date": "${today}", "decision": "pin" | "reject",
      "element": "<element key>" or "role": "<what it does, e.g. hero>",

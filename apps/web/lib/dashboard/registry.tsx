@@ -123,6 +123,7 @@ function GridView({
   const ratio = cols === 2 ? (p.ratio ?? "equal") : "equal"
   return (
     <div
+      data-dash="Grid"
       className={cn(
         "grid grid-cols-1 *:min-w-0",
         (p.align ?? "stretch") === "start" ? "items-start" : "items-stretch",
@@ -149,6 +150,9 @@ function PanelView({
   const subtitle = p.subtitle ?? p.eyebrow
   return (
     <Card
+      data-dash="Panel"
+      data-title={p.title}
+      data-lead={p.lead ? "" : undefined}
       className={cn(
         "@container/panel h-full gap-0 overflow-hidden p-0",
         p.lead && "shadow-(--elev-card) ring-foreground/15"
@@ -293,7 +297,11 @@ function StatTileView({ p }: { p: P<"StatTile"> }) {
       : undefined)
   const spark = sparkValues(p.spark, field)
   return (
-    <section className="flex h-full min-h-[120px] flex-col gap-1.5 rounded-xl bg-card px-4 py-3.5 ring-1 ring-foreground/10">
+    <section
+      data-dash="StatTile"
+      data-title={p.label}
+      className="flex h-full min-h-[120px] flex-col gap-1.5 rounded-xl bg-card px-4 py-3.5 ring-1 ring-foreground/10"
+    >
       <header className="flex items-center gap-1.5">
         {(tone === "warn" || tone === "crit") && (
           <span
@@ -405,7 +413,7 @@ function EventRow({
       <span className="flex min-w-0 flex-1 flex-col leading-tight">
         <span className="truncate">{e.label}</span>
         {e.note && (
-          <span className="truncate text-xs text-muted-foreground">
+          <span data-trim-ok className="truncate text-xs text-muted-foreground">
             {e.note}
           </span>
         )}

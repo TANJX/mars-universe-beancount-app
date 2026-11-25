@@ -177,9 +177,14 @@ export function DashboardView({
     [spec, lkg]
   )
 
+  // data-dash-root / data-dash-tier: read by `just dashboard-look`.
   if (!data)
     return (
-      <div className="flex flex-col gap-1 py-10 text-sm">
+      <div
+        data-dash-root
+        data-dash-tier="none"
+        className="flex flex-col gap-1 py-10 text-sm"
+      >
         <p className="font-medium">No dashboard data to show.</p>
         <p className="text-muted-foreground">
           {dataError
@@ -192,7 +197,11 @@ export function DashboardView({
   const { chosen, rejected } = choice
   if (!chosen)
     return (
-      <div className="flex flex-col gap-1 py-10 text-sm">
+      <div
+        data-dash-root
+        data-dash-tier="none"
+        className="flex flex-col gap-1 py-10 text-sm"
+      >
         <p className="font-medium">The dashboard could not render.</p>
         {rejected.map((r) => (
           <p key={r.tier} className="text-muted-foreground">
@@ -207,7 +216,11 @@ export function DashboardView({
   const lag = isDefault ? 0 : issueLag(meta?.issueDate, dataAsOf(data))
   const firstRejection = rejected[0]
   return (
-    <div className={cn("flex flex-col gap-4", className)}>
+    <div
+      data-dash-root
+      data-dash-tier={chosen.tier}
+      className={cn("flex flex-col gap-4", className)}
+    >
       {chosen.tier !== "spec" && firstRejection && (
         <TierBanner tier={chosen.tier} rejection={firstRejection} />
       )}
