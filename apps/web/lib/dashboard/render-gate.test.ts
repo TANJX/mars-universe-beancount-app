@@ -377,8 +377,8 @@ const V3_ELEMENTS: Record<string, AnySpec> = {
   },
 }
 
-test("catalog v3 components pass bound to their sources", () => {
-  assert.equal(CATALOG_VERSION, 3)
+test("catalog v3+ components pass bound to their sources", () => {
+  assert.equal(CATALOG_VERSION, 4)
   for (const [key, el] of Object.entries(V3_ELEMENTS)) {
     const r = renderGate(withElement(key, el), fixture)
     assert.deepEqual(r.issues, [], `${key}: ${JSON.stringify(r.issues)}`)

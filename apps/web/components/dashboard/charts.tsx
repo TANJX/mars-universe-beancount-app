@@ -40,7 +40,7 @@ export function PaceLines({
       <ResponsiveContainer>
         <LineChart
           data={data}
-          margin={{ top: 6, right: 4, bottom: 0, left: 4 }}
+          margin={{ top: 6, right: 4, bottom: 2, left: 4 }}
         >
           <XAxis dataKey="day" hide />
           <YAxis hide domain={[0, "dataMax"]} />
@@ -85,7 +85,10 @@ export function Sparkline({
       <ResponsiveContainer>
         <AreaChart
           data={data}
-          margin={{ top: 4, right: 0, bottom: 0, left: 0 }}
+          // At least half the stroke width on every side: the domain is
+          // dataMin..dataMax, so the line touches the plot edges and a zero
+          // margin clips half of it (a flat low ran along the bottom edge).
+          margin={{ top: 4, right: 2, bottom: 2, left: 2 }}
         >
           <defs>
             <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
@@ -98,6 +101,8 @@ export function Sparkline({
             dataKey="v"
             stroke={color}
             strokeWidth={1.75}
+            strokeLinecap="round"
+            strokeLinejoin="round"
             fill={`url(#${id})`}
             isAnimationActive={false}
           />

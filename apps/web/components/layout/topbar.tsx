@@ -8,6 +8,8 @@ import { ClientOnly } from "@/components/primitives/client-only"
 export function Topbar() {
   const pathname = usePathname()
   if (pathname === "/plan" || pathname?.startsWith("/plan/")) return null
+  // Today's issue has no period: the picker would do nothing there.
+  if (pathname === "/today") return null
   return (
     <div className="flex shrink-0 items-center gap-3 px-4 py-3">
       <ClientOnly

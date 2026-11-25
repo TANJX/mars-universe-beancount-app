@@ -5,7 +5,7 @@
 // shapes itself, because the lkg and default tiers may predate today's data,
 // and drops a malformed row instead of crashing.
 import { ArrowUpRight } from "lucide-react"
-import type * as React from "react"
+import * as React from "react"
 
 import { daysBetween, relDate, shortDate } from "@/components/dashboard/dates"
 import { Empty, isNum, Num, usd } from "@/components/dashboard/parts"
@@ -54,10 +54,6 @@ function level(n: number, digits = 2): string {
   return `${n < 0 ? MINUS : ""}${body}`
 }
 
-function signedLevel(n: number): string {
-  return `${n > 0 ? "+" : ""}${level(n)}`
-}
-
 function moveClass(n: number | null): string {
   if (!isNum(n) || n === 0) return "text-muted-foreground"
   return n > 0
@@ -92,7 +88,11 @@ export function sourceLabel(source: unknown): string | null {
     .replace(SLUG_WORDS, " ")
     .replace(/\b(short|mid|long) term\b/gi, "$1-term")
     .trim()
-  const sec = section?.replace(SLUG_WORDS, " ").trim()
+  // "2. What to hold" reads "What to hold"; a bare "4" says nothing.
+  const sec = section
+    ?.replace(SLUG_WORDS, " ")
+    .replace(/^\d+(\.\d+)*\.?\s*/, "")
+    .trim()
   return [name, sec].filter(Boolean).join(" · ")
 }
 
@@ -111,7 +111,10 @@ function SmallTag({
         tone === "warn" && "bg-runway-warn/12 text-runway-warn",
         tone === "pos" &&
           "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-        tone === "accent" && "bg-primary/10 text-primary"
+        // --primary is a dark crimson; mixing toward --foreground lifts it
+        // on dark surfaces and keeps it deep on light (as MerchantAvatar).
+        tone === "accent" &&
+          "bg-primary/12 text-[color-mix(in_oklab,var(--primary)_65%,var(--foreground))]"
       )}
     >
       {children}
@@ -124,7 +127,51 @@ function More({ n }: { n: number }) {
   return <div className="px-4 pt-1 text-xs text-muted-foreground">{n} more</div>
 }
 
+/** Rows past `at` hide behind a "Show N more" button. */
+function useFold<T>(rows: T[], at: number) {
+  const [open, setOpen] = React.useState(false)
+  const hidden = open ? 0 : Math.max(0, rows.length - at)
+  const button =
+    rows.length > at ? (
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="relative mx-4 mt-1 self-start rounded text-xs text-muted-foreground transition-colors duration-150 ease-out before:absolute before:-inset-x-2 before:-inset-y-3 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      >
+        {open ? "Show fewer" : `Show ${rows.length - at} more`}
+      </button>
+    ) : null
+  return { visible: hidden ? rows.slice(0, at) : rows, button }
+}
+
 // ── RecentActivity ─────────────────────────────────────────────────────
+
+interface RecentGroup extends RecentItem {
+  count: number
+}
+
+/** Same day, payee and amount fold into one row with a count. */
+function groupRepeats(rows: RecentItem[]): RecentGroup[] {
+  const out: RecentGroup[] = []
+  for (const r of rows) {
+    const last = out[out.length - 1]
+    if (
+      last &&
+      last.date === r.date &&
+      last.payee === r.payee &&
+      last.amount === r.amount
+    )
+      last.count += 1
+    else out.push({ ...r, count: 1 })
+  }
+  return out
+}
+
+/** "Amex-Gold" reads "Amex Gold". */
+function accountLabel(a: string): string {
+  return a.replace(/[-_]+/g, " ")
+}
 
 export function RecentActivityList({
   items,
@@ -139,16 +186,18 @@ export function RecentActivityList({
   showAccount?: boolean
   asOf?: string
 }) {
-  const all = list<RecentItem>(
-    items,
-    (r) => isoDate(r.date) && str(r.payee) && isNum(r.amount)
+  const all = groupRepeats(
+    list<RecentItem>(
+      items,
+      (r) => isoDate(r.date) && str(r.payee) && isNum(r.amount)
+    )
+      .filter((r) => {
+        if (!withinDays || !asOf) return true
+        const d = daysBetween(r.date, asOf)
+        return Number.isNaN(d) || d <= withinDays
+      })
+      .sort((a, b) => b.date.localeCompare(a.date))
   )
-    .filter((r) => {
-      if (!withinDays || !asOf) return true
-      const d = daysBetween(r.date, asOf)
-      return Number.isNaN(d) || d <= withinDays
-    })
-    .sort((a, b) => b.date.localeCompare(a.date))
   const shown = all.slice(0, limit)
   if (shown.length === 0)
     return (
@@ -161,22 +210,29 @@ export function RecentActivityList({
   return (
     <ul className="flex flex-col">
       {shown.map((r, i) => {
-        const refund = r.amount < 0
+        // Positive is money spent: an outflow, signed like Overview.
+        const total = r.amount * r.count
+        const refund = total < 0
         const sub = [
           str(r.category) ? r.category : null,
-          showAccount && str(r.account) ? r.account : null,
+          showAccount && str(r.account) ? accountLabel(r.account) : null,
         ].filter(Boolean)
         return (
           <li
             key={`${r.date}-${r.payee}-${i}`}
-            className="grid h-11 grid-cols-[3.25rem_1.75rem_1fr_auto] items-center gap-2.5 px-4"
+            className="grid h-11 grid-cols-[4.25rem_1.75rem_1fr_auto] items-center gap-2.5 px-4"
           >
-            <Num className="text-xs text-muted-foreground">
+            <span className="text-xs text-muted-foreground tabular-nums">
               {relDate(r.date, asOf)}
-            </Num>
+            </span>
             <MerchantAvatar payee={r.payee} size="md" />
             <span className="flex min-w-0 flex-col gap-0.5 leading-tight">
-              <span className="truncate text-sm">{r.payee || "Unknown"}</span>
+              <span className="truncate text-sm">
+                {r.payee || "Unknown"}
+                {r.count > 1 && (
+                  <span className="text-muted-foreground"> ×{r.count}</span>
+                )}
+              </span>
               {sub.length > 0 && (
                 <span className="truncate text-xs text-muted-foreground">
                   {sub.join(" · ")}
@@ -185,11 +241,11 @@ export function RecentActivityList({
             </span>
             <Num
               className={cn(
-                "text-sm font-medium",
+                "text-sm",
                 refund && "text-emerald-600 dark:text-emerald-400"
               )}
             >
-              {refund ? `+${usd(-r.amount, 2)}` : usd(r.amount, 2)}
+              {refund ? `+${usd(-total, 2)}` : usd(-total, 2)}
             </Num>
           </li>
         )
@@ -214,15 +270,23 @@ function asOfCaption(asOf: unknown): string | null {
   return `As of ${date}${time ? `, ${time}` : ""}`
 }
 
+/** "30%", or "<1%" for a sliver, never "0% held". */
+function weightLabel(w: number): string {
+  if (w > 0 && w < 0.005) return "<1%"
+  return `${Math.round(w * 100)}%`
+}
+
 export function MarketMovesList({
   indices,
   holdings,
   asOf,
+  note,
   limit = 6,
 }: {
   indices: unknown
   holdings?: unknown
   asOf?: unknown
+  note?: unknown
   limit?: number
 }) {
   const idx = list<MarketIndex>(indices, (r) => str(r.symbol)).slice(0, limit)
@@ -233,17 +297,21 @@ export function MarketMovesList({
         Math.abs(isNum(a.changePct) ? a.changePct : 0)
     )
     .slice(0, limit)
-  const caption = asOfCaption(asOf)
+  const caption = [asOfCaption(asOf), str(note) && note.trim() ? note : null]
+    .filter(Boolean)
+    .join(". ")
   if (idx.length === 0 && hold.length === 0)
     return <Empty>No market data today.</Empty>
   return (
-    <div className="flex flex-col gap-2 py-1">
+    <div className="flex flex-col gap-2">
       {idx.length > 0 && (
-        <ul className="grid grid-cols-2 gap-2 px-4 sm:grid-cols-3">
+        // Indices sit in the panel itself, split by hairlines: no third
+        // surface inside the card.
+        <ul className="mx-4 grid grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))] divide-x divide-border border-y border-border">
           {idx.map((m) => (
             <li
               key={m.symbol}
-              className="flex min-w-0 flex-col gap-0.5 rounded-lg bg-muted/50 px-3 py-2"
+              className="flex min-w-0 flex-col gap-0.5 px-3 py-2 first:pl-0"
             >
               <span className="truncate text-xs text-muted-foreground">
                 {m.name || m.symbol}
@@ -252,15 +320,12 @@ export function MarketMovesList({
                 {isNum(m.price) && (
                   <Num className="text-sm font-medium">{level(m.price)}</Num>
                 )}
-                <Num className={cn("text-xs", moveClass(m.changePct))}>
-                  {isNum(m.changePct) ? signedPct(m.changePct) : "n/a"}
-                </Num>
+                {isNum(m.changePct) && (
+                  <Num className={cn("text-xs", moveClass(m.changePct))}>
+                    {signedPct(m.changePct)}
+                  </Num>
+                )}
               </span>
-              {isNum(m.change) && (
-                <Num className="text-[11px] text-muted-foreground">
-                  {signedLevel(m.change)}
-                </Num>
-              )}
             </li>
           ))}
         </ul>
@@ -270,17 +335,17 @@ export function MarketMovesList({
           {hold.map((h) => (
             <li
               key={h.symbol}
-              className="flex items-center gap-3 px-4 py-1.5 text-sm"
+              className="flex h-8 items-center gap-3 px-4 text-sm"
             >
-              <Num className="w-14 shrink-0 text-xs font-medium">
+              <Num className="w-12 shrink-0 text-xs font-medium">
                 {h.symbol}
               </Num>
               <span className="min-w-0 flex-1 truncate text-muted-foreground">
                 {h.name}
               </span>
               {isNum(h.weight) && (
-                <Num className="shrink-0 text-xs text-muted-foreground">
-                  {Math.round(h.weight * 100)}% held
+                <Num className="w-16 shrink-0 text-right text-xs text-muted-foreground">
+                  {weightLabel(h.weight)} held
                 </Num>
               )}
               <Num
@@ -289,14 +354,16 @@ export function MarketMovesList({
                   moveClass(h.changePct)
                 )}
               >
-                {isNum(h.changePct) ? signedPct(h.changePct) : "n/a"}
+                {isNum(h.changePct) ? signedPct(h.changePct) : ""}
               </Num>
             </li>
           ))}
         </ul>
       )}
       {caption && (
-        <p className="px-4 text-[11px] text-muted-foreground">{caption}</p>
+        <p className="max-w-[68ch] px-4 text-[11px] leading-snug text-pretty text-muted-foreground">
+          {caption}
+        </p>
       )}
     </div>
   )
@@ -322,22 +389,19 @@ export function NewsListView({
     <ul className="flex flex-col">
       {shown.map((n, i) => {
         const href = safeHref(n.url)
-        const tags = Array.isArray(n.tags)
-          ? n.tags.filter((t): t is string => str(t) && t.length > 0)
-          : []
+        // Tags stay data (for filtering); as words they read as noise.
         const meta = [
           n.source,
           isoDate(n.publishedAt) ? shortDate(n.publishedAt, asOf) : null,
-          ...tags.slice(0, 3),
         ].filter(Boolean)
         return (
-          <li key={n.id ?? i} className="flex flex-col gap-0.5 px-4 py-2">
+          <li key={n.id ?? i} className="flex flex-col gap-0.5 px-4 py-2.5">
             {href ? (
               <a
                 href={href}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="group inline-flex items-start gap-1 text-sm font-medium text-foreground hover:underline focus-visible:underline focus-visible:outline-none"
+                className="group relative inline-flex items-start gap-1 text-sm font-medium text-foreground hover:underline focus-visible:underline focus-visible:outline-none"
               >
                 <span className="min-w-0 text-pretty">{n.title}</span>
                 <ArrowUpRight
@@ -354,7 +418,7 @@ export function NewsListView({
               {meta.join(" · ")}
             </span>
             {str(n.relevance) && n.relevance && (
-              <p className="max-w-[68ch] text-[13px] leading-snug text-pretty text-foreground/80">
+              <p className="mt-0.5 max-w-[68ch] text-[13px] leading-snug text-pretty text-foreground/80">
                 {n.relevance}
               </p>
             )}
@@ -375,6 +439,13 @@ const PLAN_STATUS: Record<
   upcoming: { label: "Upcoming", tone: "muted" },
   open: { label: "Open", tone: "accent" },
   done: { label: "Done", tone: "pos" },
+}
+
+/** Rows shown before "Show N more" in the timeline. */
+const PLAN_FOLD = 5
+
+function yearOf(iso: string): string {
+  return iso.slice(0, 4)
 }
 
 export function PlanTimelineView({
@@ -400,8 +471,10 @@ export function PlanTimelineView({
       const db = isoDate(b.date) ? b.date : "9999"
       return da.localeCompare(db)
     })
-  const shown = all.slice(0, limit)
+  const capped = all.slice(0, limit)
+  const { visible: shown, button } = useFold(capped, PLAN_FOLD)
   if (shown.length === 0) return emptyText ? <Empty>{emptyText}</Empty> : null
+  const thisYear = asOf ? yearOf(asOf) : null
   return (
     <div className="flex flex-col">
       <ol className="relative flex flex-col px-4">
@@ -410,13 +483,30 @@ export function PlanTimelineView({
           const done = r.status === "done"
           const src = sourceLabel(r.source)
           const last = i === shown.length - 1
+          const dated = isoDate(r.date)
+          // A new year gets one divider; the dates under it drop the year.
+          const year = dated ? yearOf(r.date as string) : null
+          const prev = shown[i - 1]
+          const prevYear =
+            prev && isoDate(prev.date) ? yearOf(prev.date) : thisYear
+          const newYear = !!year && year !== prevYear
+          const when = dated
+            ? year === thisYear
+              ? relDate(r.date as string, asOf)
+              : shortDate(r.date as string, r.date as string)
+            : "Undated"
           return (
             <li
               key={r.id ?? i}
-              className="grid grid-cols-[4.25rem_0.75rem_1fr] gap-x-2.5"
+              className="grid grid-cols-[3.75rem_0.75rem_1fr] gap-x-2.5"
             >
+              {newYear && (
+                <span className="col-span-3 pt-2 pb-0.5 text-[11px] font-medium text-muted-foreground tabular-nums">
+                  {year}
+                </span>
+              )}
               <span className="pt-2 text-xs text-muted-foreground tabular-nums">
-                {isoDate(r.date) ? relDate(r.date, asOf) : "Undated"}
+                {when}
               </span>
               <span aria-hidden="true" className="relative flex justify-center">
                 {shown.length > 1 && (
@@ -452,7 +542,10 @@ export function PlanTimelineView({
                   >
                     {r.title}
                   </span>
-                  <SmallTag tone={status.tone}>{status.label}</SmallTag>
+                  {/* Upcoming is the default: only the exceptions get a tag. */}
+                  {r.status !== "upcoming" && (
+                    <SmallTag tone={status.tone}>{status.label}</SmallTag>
+                  )}
                 </div>
                 {str(r.detail) && r.detail && (
                   <p className="mt-0.5 max-w-[68ch] text-[13px] leading-snug text-pretty text-foreground/80">
@@ -469,7 +562,8 @@ export function PlanTimelineView({
           )
         })}
       </ol>
-      <More n={all.length - shown.length} />
+      {button}
+      <More n={all.length - capped.length} />
     </div>
   )
 }
@@ -490,13 +584,20 @@ const INSIGHT_TAG: Record<
 function InsightBody({ x, asOf }: { x: Insight; asOf?: string }) {
   const tag = INSIGHT_TAG[x.kind] ?? INSIGHT_TAG.plan
   const src = sourceLabel(x.source)
-  const foot = [isoDate(x.date) ? relDate(x.date, asOf) : null, src].filter(
-    Boolean
-  )
+  const when = isoDate(x.date) ? relDate(x.date, asOf) : null
+  // The tag sits on its own line with the date, so a wrapped title never
+  // hangs off the tag's right edge.
   return (
     <>
-      <div className="flex items-start gap-2">
+      <div className="flex items-center gap-2">
         <SmallTag tone={tag.tone}>{tag.label}</SmallTag>
+        {when && (
+          <span className="text-[11px] text-muted-foreground tabular-nums">
+            {when}
+          </span>
+        )}
+      </div>
+      <div className="flex items-start gap-2">
         <span className="min-w-0 flex-1 text-sm font-medium text-pretty">
           {x.title}
         </span>
@@ -509,9 +610,7 @@ function InsightBody({ x, asOf }: { x: Insight; asOf?: string }) {
           {x.body}
         </p>
       )}
-      {foot.length > 0 && (
-        <p className="text-[11px] text-muted-foreground">{foot.join(" · ")}</p>
-      )}
+      {src && <p className="text-[11px] text-muted-foreground">{src}</p>}
     </>
   )
 }
@@ -536,12 +635,14 @@ export function InsightsView({
   const shown = all.slice(0, limit)
   if (shown.length === 0) return null
   if (layout === "cards")
+    // Tinted tiles inside the panel, not cards in a card: no second ring,
+    // and a radius stepped down from the panel's 12px (6px, 8px in).
     return (
-      <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 *:min-w-0">
+      <ul className="grid grid-cols-1 gap-2 px-2 @lg/panel:grid-cols-2 *:min-w-0">
         {shown.map((x, i) => (
           <li
             key={x.id ?? i}
-            className="flex flex-col gap-1.5 rounded-xl bg-card px-4 py-3 ring-1 ring-foreground/10"
+            className="flex flex-col gap-1.5 rounded-md bg-muted/60 px-3.5 py-3"
           >
             <InsightBody x={x} asOf={asOf} />
           </li>

@@ -81,7 +81,7 @@ const YEAR = /^(19|20)\d\d$/
  * - no currency figures ("$5", "40 USD", "40 dollars");
  * - no scaled or percent figures ("1.2k", "3m", "2bn", "85%", "40 percent");
  * - no numbers of three or more digits, except a bare year when
- *   `allowYears` is set (Panel title and eyebrow only).
+ *   `allowYears` is set (Panel title, subtitle and eyebrow only).
  * Small counts like "30d" pass; the prompt still says never to type a count.
  */
 export function literalTextIssues(
@@ -111,7 +111,7 @@ export function literalTextIssues(
   })
   if (big.length > 0)
     issues.push(
-      `contains a literal number (${big.join(", ")}); numbers must be bound to data${opts.allowYears ? "" : " (a year is allowed only in a Panel title or eyebrow)"}`
+      `contains a literal number (${big.join(", ")}); numbers must be bound to data${opts.allowYears ? "" : " (a year is allowed only in a Panel title or subtitle)"}`
     )
   return issues
 }

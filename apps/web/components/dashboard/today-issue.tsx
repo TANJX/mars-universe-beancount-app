@@ -8,7 +8,7 @@ import { useDashboard } from "@/hooks/use-dashboard"
 export function TodayIssue() {
   const q = useDashboard()
   return (
-    <div className="flex max-w-[1100px] flex-col gap-4 px-5 pt-3 pb-24 md:px-7 md:pt-2 md:pb-10">
+    <div className="@container/issue flex max-w-[1180px] flex-col gap-4 px-5 pt-3 pb-24 md:px-7 md:pt-7 md:pb-10">
       {q.isPending ? (
         <p className="py-10 text-sm text-muted-foreground">
           Loading today&apos;s issue…

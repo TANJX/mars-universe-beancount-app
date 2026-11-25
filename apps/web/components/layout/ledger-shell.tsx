@@ -42,7 +42,7 @@ function ResolvedShell({ children }: { children: React.ReactNode }) {
 function NoChromeShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-svh flex-col overflow-hidden bg-background">
-      <main className="min-h-0 flex-1 overflow-auto">
+      <main className="relative min-h-0 flex-1 overflow-auto">
         <DensityWrapper>{children}</DensityWrapper>
       </main>
     </div>
@@ -56,7 +56,7 @@ function MobileShell({ children }: { children: React.ReactNode }) {
       <div className="flex h-dvh flex-col overflow-hidden bg-background">
         <MobileNavHeader />
         <main
-          className="min-h-0 flex-1 overflow-auto overscroll-contain"
+          className="relative min-h-0 flex-1 overflow-auto overscroll-contain"
           style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
         >
           <DensityWrapper>{children}</DensityWrapper>
@@ -104,7 +104,10 @@ function DesktopShell({ children }: { children: React.ReactNode }) {
         <AppSidebar>
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
             <Topbar />
-            <main className="min-h-0 flex-1 overflow-auto">
+            {/* `relative` on every shell <main>: it makes the scroller the
+                containing block for absolute descendants (sr-only spans),
+                which otherwise escape it and stretch the window. */}
+            <main className="relative min-h-0 flex-1 overflow-auto">
               <DensityWrapper>{children}</DensityWrapper>
             </main>
           </div>

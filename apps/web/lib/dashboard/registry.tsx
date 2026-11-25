@@ -80,13 +80,15 @@ function StackView({
   p: P<"Stack">
   children?: React.ReactNode
 }) {
+  // A vertical Stack grows its last child, so a Stack inside a stretched
+  // Grid cell ends level with its neighbours instead of leaving a hole.
   return (
     <div
       className={cn(
         "flex min-w-0",
         p.direction === "horizontal"
           ? "flex-row flex-wrap items-start"
-          : "flex-col",
+          : "flex-col [&>:last-child]:flex-1",
         GAP[p.gap ?? "md"]
       )}
     >
@@ -95,15 +97,19 @@ function StackView({
   )
 }
 
+// Columns follow the width the issue actually has (the `issue` container in
+// today-issue.tsx), not the viewport: with the sidebar panel open, a 900px
+// window leaves the page about 520px. Two columns from 768px of content,
+// three from 672px.
 const GRID_COLS = {
-  1: "md:grid-cols-1",
-  2: "md:grid-cols-2",
-  3: "md:grid-cols-3",
+  1: "",
+  2: "@3xl/issue:grid-cols-2",
+  3: "@2xl/issue:grid-cols-3",
 } as const
 const GRID_RATIO = {
   equal: "",
-  "wide-left": "md:grid-cols-[3fr_2fr]",
-  "wide-right": "md:grid-cols-[2fr_3fr]",
+  "wide-left": "@3xl/issue:grid-cols-[3fr_2fr]",
+  "wide-right": "@3xl/issue:grid-cols-[2fr_3fr]",
 } as const
 
 function GridView({
@@ -118,7 +124,8 @@ function GridView({
   return (
     <div
       className={cn(
-        "grid grid-cols-1 items-start *:min-w-0",
+        "grid grid-cols-1 *:min-w-0",
+        (p.align ?? "stretch") === "start" ? "items-start" : "items-stretch",
         ratio === "equal" ? GRID_COLS[cols] : GRID_RATIO[ratio],
         GAP[p.gap ?? "md"]
       )}
@@ -137,23 +144,42 @@ function PanelView({
   children?: React.ReactNode
   action?: React.ReactNode
 }) {
-  // Same frame as components/overview/panel.tsx, plus the optional eyebrow.
+  // Title first, then one muted line: the heading is what the eye finds.
+  // `eyebrow` is the v3 name of the subtitle; older issues still render.
+  const subtitle = p.subtitle ?? p.eyebrow
   return (
-    <Card className="gap-0 overflow-hidden p-0">
-      <div className="flex items-start justify-between gap-3 px-4 pt-3 pb-2">
-        <div className="min-w-0">
-          {p.eyebrow && (
-            <div className="text-[11px] tracking-wide text-muted-foreground/80 uppercase">
-              {p.eyebrow}
-            </div>
-          )}
-          <div className="text-xs font-medium tracking-wide text-muted-foreground">
+    <Card
+      className={cn(
+        "@container/panel h-full gap-0 overflow-hidden p-0",
+        p.lead && "shadow-(--elev-card) ring-foreground/15"
+      )}
+    >
+      <div
+        className={cn(
+          "flex items-start justify-between gap-3 px-4",
+          p.lead ? "pt-4 pb-3" : "pt-3.5 pb-2"
+        )}
+      >
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <h2
+            className={cn(
+              "text-pretty text-foreground",
+              p.lead
+                ? "text-[17px] leading-snug font-medium tracking-tight"
+                : "text-sm leading-5 font-medium"
+            )}
+          >
             {p.title}
-          </div>
+          </h2>
+          {subtitle && (
+            <p className="text-xs text-pretty text-muted-foreground">
+              {subtitle}
+            </p>
+          )}
         </div>
         {action && <div className="shrink-0">{action}</div>}
       </div>
-      <div className="flex flex-col pb-2">{children}</div>
+      <div className="flex flex-col pb-3">{children}</div>
     </Card>
   )
 }
@@ -267,7 +293,7 @@ function StatTileView({ p }: { p: P<"StatTile"> }) {
       : undefined)
   const spark = sparkValues(p.spark, field)
   return (
-    <section className="flex h-full min-h-[132px] flex-col gap-1.5 rounded-xl bg-card px-4 py-3.5 ring-1 ring-foreground/10">
+    <section className="flex h-full min-h-[120px] flex-col gap-1.5 rounded-xl bg-card px-4 py-3.5 ring-1 ring-foreground/10">
       <header className="flex items-center gap-1.5">
         {(tone === "warn" || tone === "crit") && (
           <span
@@ -282,14 +308,9 @@ function StatTileView({ p }: { p: P<"StatTile"> }) {
       </header>
       <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
         {isNum(p.value) ? (
-          <Num
-            className={cn(
-              "text-2xl leading-tight font-medium",
-              tone === "pos" && "text-emerald-600 dark:text-emerald-400",
-              tone === "warn" && "text-runway-warn",
-              tone === "crit" && "text-runway-crit"
-            )}
-          >
+          // Tone marks the tile (dot, spark), never the value: a green
+          // spend total reads as income.
+          <Num className="text-2xl leading-tight font-medium">
             {formatValue(p.value, format)}
           </Num>
         ) : (
@@ -373,33 +394,41 @@ function EventRow({
   showBalance: boolean
 }) {
   const amount = isNum(e.amount) ? e.amount : null
+  // The note goes under the label, so the label never truncates for it.
+  // In a narrow panel the balance stacks under the amount.
   return (
     <div className="flex items-center gap-3 px-4 py-1.5 text-sm">
       <span className="w-16 shrink-0 text-xs text-muted-foreground">
         {relDate(e.date, asOf)}
       </span>
       <KindIcon kind={e.kind} className="shrink-0 text-muted-foreground" />
-      <span className="min-w-0 flex-1 truncate">
-        {e.label}
-        {e.note && <span className="text-muted-foreground"> · {e.note}</span>}
+      <span className="flex min-w-0 flex-1 flex-col leading-tight">
+        <span className="truncate">{e.label}</span>
+        {e.note && (
+          <span className="truncate text-xs text-muted-foreground">
+            {e.note}
+          </span>
+        )}
       </span>
-      {e.kind === "info" || amount === null ? (
-        <span className="text-xs text-muted-foreground">No cash</span>
-      ) : (
-        <Num
-          className={cn(
-            "text-sm",
-            amount > 0 && "text-emerald-600 dark:text-emerald-400"
-          )}
-        >
-          {signedUsd(amount, 2)}
-        </Num>
-      )}
-      {showBalance && (
-        <Num className="w-20 shrink-0 text-right text-xs text-muted-foreground">
-          {isNum(e.balance) ? usd(e.balance) : ""}
-        </Num>
-      )}
+      <span className="flex shrink-0 flex-col items-end @md/panel:flex-row @md/panel:items-baseline @md/panel:gap-3">
+        {e.kind === "info" || amount === null ? (
+          <span className="text-xs text-muted-foreground">No cash</span>
+        ) : (
+          <Num
+            className={cn(
+              "text-sm",
+              amount > 0 && "text-emerald-600 dark:text-emerald-400"
+            )}
+          >
+            {signedUsd(amount, 2)}
+          </Num>
+        )}
+        {showBalance && (
+          <Num className="text-right text-xs text-muted-foreground @md/panel:w-20">
+            {isNum(e.balance) ? usd(e.balance) : ""}
+          </Num>
+        )}
+      </span>
     </div>
   )
 }
@@ -430,7 +459,7 @@ function EventListView({ p }: { p: P<"EventList"> }) {
   return (
     <div className="flex flex-col">
       {showBalance && (
-        <div className="flex justify-end px-4 pb-0.5 text-[11px] text-muted-foreground">
+        <div className="hidden justify-end px-4 pb-0.5 text-[11px] text-muted-foreground @md/panel:flex">
           Cash after
         </div>
       )}
@@ -661,6 +690,7 @@ function MarketMovesView({ p }: { p: P<"MarketMoves"> }) {
       indices={p.indices}
       holdings={p.holdings}
       asOf={p.asOf}
+      note={p.note}
       limit={p.limit ?? 6}
     />
   )

@@ -696,6 +696,21 @@ export function renderGate(
         message: "element is not reachable from root",
       })
 
+  // One lead per issue: two leads is no lead.
+  const leads = Object.entries(elements).filter(
+    ([, el]) =>
+      isObject(el) &&
+      el.type === "Panel" &&
+      isObject(el.props) &&
+      el.props.lead === true
+  )
+  if (leads.length > 1)
+    error({
+      code: "many_leads",
+      element: leads[1][0],
+      message: `${leads.length} Panels have lead: true; mark at most one`,
+    })
+
   return done()
 }
 

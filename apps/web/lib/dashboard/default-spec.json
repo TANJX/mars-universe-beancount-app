@@ -1,6 +1,6 @@
 {
   "meta": {
-    "catalogVersion": 3,
+    "catalogVersion": 4,
     "issueDate": "2026-03-12",
     "lens": "default",
     "headline": null,
@@ -102,7 +102,7 @@
     },
     "pace-panel": {
       "type": "Panel",
-      "props": { "title": "Day-to-day pace", "eyebrow": "This month" },
+      "props": { "title": "Day-to-day pace", "subtitle": "This month" },
       "children": ["pace"]
     },
     "pace": {

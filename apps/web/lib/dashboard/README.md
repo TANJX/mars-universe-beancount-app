@@ -90,7 +90,7 @@ positive for money spent.
   `meta.note`) may not contain currency amounts ("$5", "40 USD", "40 dollars"),
   scaled or percent figures ("1.2k", "3m", "85%", "40 percent") or numbers of
   three or more digits. A bare four-digit year (1900 to 2099) is allowed only
-  in a Panel `title` or `eyebrow`. See `literalTextIssues`.
+  in a Panel `title` or `subtitle` (or the deprecated `eyebrow`). See `literalTextIssues`.
 - The gate also checks the items behind a list or series binding: NeedsYou
   items need `date`, `title`, `kind`; EventList items `date`, `label`,
   `amount`, `kind`; Findings items `id`, `kind`, `title`; RecentActivity

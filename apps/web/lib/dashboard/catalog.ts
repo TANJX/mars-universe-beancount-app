@@ -21,7 +21,7 @@ import { z } from "zod"
 import { formatMoney } from "../format"
 import { bound, FormatExpr, literalText, type Resolve, richText } from "./bound"
 
-export const CATALOG_VERSION = 3
+export const CATALOG_VERSION = 4
 
 // ── Data shapes behind the bindings (snapshot schema 2 + /derived) ─────
 
@@ -185,20 +185,37 @@ const components = {
         .enum(["equal", "wide-left", "wide-right"])
         .default("equal")
         .describe("2 columns only: wide-left is about 3:2, wide-right 2:3"),
+      align: z
+        .enum(["stretch", "start"])
+        .default("stretch")
+        .describe(
+          "stretch = cells in a row share one height (panels end level); start = each cell keeps its own height"
+        ),
       gap: Gap,
     }),
     slots: ["default"],
     description:
-      "Layout: puts children side by side in 1 to 3 columns; collapses to one column on narrow screens. Each child is one cell, so wrap several items for one column in a vertical Stack.",
+      "Layout: puts children side by side in 1 to 3 columns, by the width the page actually has; collapses to one column when narrow. Each child is one cell, so wrap several items for one column in a vertical Stack; a cell's Stack grows its last child to the row height.",
   },
   Panel: {
     props: z.strictObject({
       title: literalText(40, { allowYears: true }),
-      eyebrow: literalText(40, { allowYears: true }).optional(),
+      subtitle: literalText(60, { allowYears: true })
+        .optional()
+        .describe("one muted line under the title"),
+      eyebrow: literalText(40, { allowYears: true })
+        .optional()
+        .describe("deprecated: shown as the subtitle; write subtitle"),
+      lead: z
+        .boolean()
+        .default(false)
+        .describe(
+          "the issue's lead panel: a larger title and a stronger frame"
+        ),
     }),
     slots: ["default", "action"],
     description:
-      "A titled card that groups related content (a list, a chart, a set of tiles). The optional eyebrow is a small caption above the title; title and eyebrow are the only text that may hold a year. The 'action' slot holds one short element in the header. Do not nest Panels.",
+      "A titled card that groups related content (a list, a chart, a set of tiles). The title is the heading; the optional subtitle is one muted line under it. Title and subtitle are the only text that may hold a year. lead marks at most one panel per issue. The 'action' slot holds one short element in the header. Do not nest Panels.",
   },
   Note: {
     props: z.strictObject({
@@ -348,11 +365,14 @@ const components = {
       asOf: bound<string | null>()
         .optional()
         .describe("/derived/context/market/asOf"),
+      note: bound<string | null>()
+        .optional()
+        .describe("/derived/context/market/note"),
       limit: z.number().int().min(1).max(15).default(6),
     }),
     slots: [],
     description:
-      "Market indices with level and daily change, and optionally the portfolio's holdings with their daily change and weight, colored by direction. limit caps each list. With asOf bound, shows when the quotes were taken. Handles empty lists and missing quotes itself.",
+      "Market indices with level and daily change, and optionally the portfolio's holdings with their daily change and weight, colored by direction. limit caps each list. With asOf bound, shows when the quotes were taken; with note bound, the run's note on the quotes. Handles empty lists and missing quotes itself.",
   },
   NewsList: {
     props: z.strictObject({
